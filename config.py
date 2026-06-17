@@ -7,6 +7,6 @@ class Config:
     SECRET_KEY = os.getenv('SECRET_KEY', 'skillsync-secret-key')
     SQLALCHEMY_DATABASE_URI = os.getenv(
         'DATABASE_URL',
-        'postgresql://postgres:yourpassword@localhost/skillsync'
+        'sqlite:///skillsync.db'
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
