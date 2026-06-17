@@ -1,0 +1,126 @@
+from flask import Blueprint, request, jsonify
+from database import db, Worker, Task, ScoreLog
+from scoring import award_points, admin_correction, get_leaderboard, get_worker_history
+from datetime import datetime
+
+api_bp = Blueprint('api', __name__)
+
+
+# --- Workers ---
+
+@api_bp.route('/workers', methods=['GET'])
+def get_workers():
+    workers = Worker.query.all()
+    return jsonify([{
+        'id': w.id, 'name': w.name, 'email': w.email,
+        'score': w.score, 'role': w.role, 'discord_id': w.discord_id
+    } for w in workers])
+
+
+@api_bp.route('/workers', methods=['POST'])
+def add_worker():
+    data = request.json
+    worker = Worker(
+        name=data['name'],
+        email=data['email'],
+        discord_id=data.get('discord_id'),
+        role=data.get('role', 'worker')
+    )
+    db.session.add(worker)
+    db.session.commit()
+    return jsonify({'message': 'Worker added', 'id': worker.id}), 201
+
+
+# --- Tasks ---
+
+@api_bp.route('/tasks', methods=['POST'])
+def assign_task():
+    data = request.json
+    task = Task(
+        worker_id=data['worker_id'],
+        title=data['title'],
+        description=data.get('description', ''),
+        due_at=datetime.fromisoformat(data['due_at']) if data.get('due_at') else None
+    )
+    db.session.add(task)
+    db.session.commit()
+    return jsonify({'message': 'Task assigned', 'task_id': task.id}), 201
+
+
+@api_bp.route('/tasks/<int:task_id>/complete', methods=['POST'])
+def complete_task(task_id):
+    data = request.json
+    task = Task.query.get_or_404(task_id)
+    task.completed_at = datetime.utcnow()
+    task.extra_contribution = data.get('extra_contribution', False)
+    task.extra_notes = data.get('extra_notes', '')
+
+    # Determine if on time or late
+    if task.due_at and task.completed_at > task.due_at:
+        task.status = 'completed'
+        result = award_points(task.worker_id, 'task_completed_late', note=f'Task completed late: {task.title}')
+    else:
+        task.status = 'completed'
+        result = award_points(task.worker_id, 'task_completed_on_time', note=f'Task completed on time: {task.title}')
+
+    # Bonus for extra contribution
+    if task.extra_contribution:
+        bonus = award_points(task.worker_id, 'extra_contribution', note=f'Extra contribution: {task.extra_notes}')
+        result['bonus'] = bonus
+
+    task.points_awarded = result['change']
+    db.session.commit()
+    return jsonify(result)
+
+
+@api_bp.route('/tasks/<int:task_id>/miss', methods=['POST'])
+def miss_task(task_id):
+    task = Task.query.get_or_404(task_id)
+    task.status = 'missed'
+    result = award_points(task.worker_id, 'task_missed', note=f'Task missed: {task.title}')
+    task.points_awarded = result['change']
+    db.session.commit()
+    return jsonify(result)
+
+
+@api_bp.route('/tasks/<int:task_id>/anomaly', methods=['POST'])
+def flag_anomaly(task_id):
+    data = request.json
+    task = Task.query.get_or_404(task_id)
+    task.status = 'anomaly'
+    result = award_points(task.worker_id, 'anomaly_detected', note=data.get('reason', 'Anomaly detected'))
+    task.points_awarded = result['change']
+    db.session.commit()
+    return jsonify(result)
+
+
+# --- Admin Correction ---
+
+@api_bp.route('/admin/correct', methods=['POST'])
+def correct_score():
+    data = request.json
+    result = admin_correction(
+        worker_id=data['worker_id'],
+        original_change=data['original_change'],
+        corrected_change=data['corrected_change'],
+        reason=data['reason'],
+        admin_name=data['admin_name']
+    )
+    return jsonify(result)
+
+
+# --- Leaderboard & History ---
+
+@api_bp.route('/leaderboard', methods=['GET'])
+def leaderboard():
+    workers = get_leaderboard()
+    return jsonify([{'name': w.name, 'score': w.score, 'id': w.id} for w in workers])
+
+
+@api_bp.route('/workers/<int:worker_id>/history', methods=['GET'])
+def history(worker_id):
+    logs = get_worker_history(worker_id)
+    return jsonify([{
+        'change': l.change, 'reason': l.reason,
+        'source': l.source, 'date': l.created_at.isoformat()
+    } for l in logs])
