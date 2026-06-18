@@ -30,6 +30,10 @@ pending_bans = {}
 # Tracks recent timeouts: { (guild_id, user_id): { 'mod_id': ..., 'until': ..., 'timestamp': ... } }
 pending_timeouts = {}
 
+# Tracks who invoked mod bot commands: { (guild_id, target_user_id, action_type): { 'invoker_id': ..., 'invoker_name': ..., 'timestamp': ... } }
+# Auto-clears after 5 minutes
+mod_bot_invocations = {}
+
 # Known moderation bot names to read logs from
 MOD_BOT_NAMES = ['mee6', 'dyno', 'carl-bot', 'wick', 'arcane', 'combot', 'gaius']
 
@@ -93,7 +97,62 @@ def extract_warn_from_embed(embed):
 
 
 # ─────────────────────────────────────────────
-# STARTUP
+# MESSAGE TRACKING - Detect mod bot invocations
+# ─────────────────────────────────────────────
+
+@bot.event
+async def on_message(message):
+    """
+    Tracks when users invoke moderation bot commands (like !c ban @user).
+    Stores the invoker so we can attribute the action to them later.
+    """
+    if message.author.bot:
+        return
+    
+    guild = message.guild
+    if not guild:
+        return
+    
+    content_lower = message.content.lower()
+    
+    # Log every message for debugging
+    print(f'[Observer] Message: {message.author.name} -> {content_lower[:60]}')
+    
+    # Check if message contains mod bot command patterns
+    for mod_bot_name in MOD_BOT_NAMES:
+        # Check multiple patterns: !c, !carl, !mee6, etc.
+        patterns = [
+            f'!{mod_bot_name[:1]} ',  # !c, !m, !d etc
+            f'!{mod_bot_name} ',      # !carl, !mee6, !dyno etc
+        ]
+        
+        if any(pattern in content_lower for pattern in patterns):
+            # User is invoking a mod bot command
+            parts = message.content.split()
+            if len(parts) >= 2:
+                action = parts[1].lower()  # e.g., "ban", "kick", "timeout"
+                
+                # Store this invocation with multiple possible keys
+                # (since we don't know the target yet)
+                invocation_data = {
+                    'invoker_id': message.author.id,
+                    'invoker_name': message.author.name,
+                    'mod_bot': mod_bot_name,
+                    'action': action,
+                    'timestamp': datetime.now(timezone.utc)
+                }
+                
+                # Store under bot's ID for this guild/action
+                bot_member = guild.get_member_named(mod_bot_name.split('-')[0])
+                if bot_member:
+                    invocation_key = (guild.id, bot_member.id, action)
+                    mod_bot_invocations[invocation_key] = invocation_data
+                    print(f'[Observer] ✅ TRACKED: {message.author.name} invoked {mod_bot_name} {action}')
+                else:
+                    print(f'[Observer] ⚠️  Could not find bot member for {mod_bot_name}')
+            break
+
+
 # ─────────────────────────────────────────────
 
 @bot.event
@@ -113,6 +172,7 @@ async def on_member_ban(guild, user):
     Fires when any member is banned.
     Reads audit log to identify which staff member issued it.
     Stores in pending_bans to watch for reversal.
+    SKIPS tracking if the banner is a known mod bot (since we can't identify the actual moderator).
     """
     await asyncio.sleep(1)
 
@@ -129,6 +189,27 @@ async def on_member_ban(guild, user):
                 break
     except Exception as e:
         print(f'[Observer] Could not read audit log for ban: {e}')
+
+    # Check if the banner is a known mod bot
+    if is_mod_bot(guild.get_member(banner_id)):
+        # Look for who invoked this mod bot - check for any recent invocation
+        best_invocation = None
+        for key in list(mod_bot_invocations.keys()):
+            guild_id, _, action = key
+            if guild_id == guild.id and action == 'ban':
+                invocation = mod_bot_invocations[key]
+                if (datetime.now(timezone.utc) - invocation['timestamp']).total_seconds() < 60:
+                    best_invocation = key
+                    break
+        
+        if best_invocation:
+            invocation = mod_bot_invocations.pop(best_invocation)
+            banner_id = invocation['invoker_id']
+            banner_name = invocation['invoker_name']
+            print(f'[Observer] Ban by mod bot {guild.get_member(banner_id).name if guild.get_member(banner_id) else "Unknown"} — attributed to invoker: {banner_name}')
+        else:
+            print(f'[Observer] Ban by mod bot {banner_name} — skipping (invoker not found)')
+            return
 
     print(f'[Observer] Ban: {user.name} by {banner_name} in {guild.name}')
 
@@ -225,6 +306,27 @@ async def on_member_update(before, after):
         except:
             pass
 
+        # Check if the moderator is a known mod bot
+        if is_mod_bot(guild.get_member(mod_id)):
+            # Look for who invoked this mod bot - check for any recent invocation
+            best_invocation = None
+            for key in list(mod_bot_invocations.keys()):
+                guild_id, _, action = key
+                if guild_id == guild.id and action == 'timeout':
+                    invocation = mod_bot_invocations[key]
+                    if (datetime.now(timezone.utc) - invocation['timestamp']).total_seconds() < 60:
+                        best_invocation = key
+                        break
+            
+            if best_invocation:
+                invocation = mod_bot_invocations.pop(best_invocation)
+                mod_id = invocation['invoker_id']
+                mod_name = invocation['invoker_name']
+                print(f'[Observer] Timeout by mod bot — attributed to invoker: {mod_name}')
+            else:
+                print(f'[Observer] Timeout by mod bot {mod_name} — skipping (invoker not found)')
+                return
+
         key = (guild.id, after.id)
         pending_timeouts[key] = {
             'mod_id': str(mod_id),
@@ -284,10 +386,35 @@ async def on_member_remove(member):
     try:
         async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.kick):
             if entry.target.id == member.id:
-                print(f'[Observer] Kick: {member.name} by {entry.user.name}')
+                kicker_id = entry.user.id
+                kicker_name = entry.user.name
+                
+                # Check if the kicker is a known mod bot
+                if is_mod_bot(entry.user):
+                    # Look for who invoked this mod bot - check for any recent invocation
+                    best_invocation = None
+                    for key in list(mod_bot_invocations.keys()):
+                        guild_id, _, action = key
+                        if guild_id == guild.id and action == 'kick':
+                            invocation = mod_bot_invocations[key]
+                            if (datetime.now(timezone.utc) - invocation['timestamp']).total_seconds() < 60:
+                                best_invocation = key
+                                break
+                    
+                    if best_invocation:
+                        invocation = mod_bot_invocations.pop(best_invocation)
+                        kicker_id = invocation['invoker_id']
+                        kicker_name = invocation['invoker_name']
+                        print(f'[Observer] Kick by mod bot — attributed to invoker: {kicker_name}')
+                    else:
+                        print(f'[Observer] Kick by mod bot {entry.user.name} — skipping (invoker not found)')
+                        return
+                else:
+                    print(f'[Observer] Kick: {member.name} by {kicker_name}')
+                
                 api_post('/observer/action', {
-                    'discord_id': str(entry.user.id),
-                    'staff_name': entry.user.name,
+                    'discord_id': str(kicker_id),
+                    'staff_name': kicker_name,
                     'action_type': 'kick_issued',
                     'target': member.name,
                     'guild': guild.name,

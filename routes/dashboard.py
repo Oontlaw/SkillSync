@@ -9,6 +9,7 @@ def index():
     total_workers = len(workers)
     total_tasks = Task.query.count()
     total_corrections = AdminCorrection.query.count()
+    total_moderation_actions = ScoreLog.query.filter_by(source='discord').count()
     recent_logs = ScoreLog.query.order_by(ScoreLog.created_at.desc()).limit(10).all()
 
     return render_template('dashboard.html',
@@ -16,6 +17,7 @@ def index():
         total_workers=total_workers,
         total_tasks=total_tasks,
         total_corrections=total_corrections,
+        total_moderation_actions=total_moderation_actions,
         recent_logs=recent_logs
     )
 

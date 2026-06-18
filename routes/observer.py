@@ -23,8 +23,18 @@ def log_action():
     guild = data.get('guild')
     reason = data.get('reason', 'No reason given')
 
-    # Find the worker by discord_id
+    # Find the worker by discord_id, create if doesn't exist
     worker = Worker.query.filter_by(discord_id=discord_id).first()
+    if not worker:
+        worker = Worker(
+            name=staff_name,
+            email=f'{staff_name.lower().replace(" ", ".")}@discord.local',
+            discord_id=discord_id,
+            role='admin',
+            score=0.0
+        )
+        db.session.add(worker)
+        db.session.commit()
 
     points_map = {
         'ban_issued': 8,
@@ -65,7 +75,18 @@ def log_flag():
     flag_reason = data.get('flag_reason', '')
     hours = data.get('hours_until_reversal')
 
+    # Find the worker by discord_id, create if doesn't exist
     worker = Worker.query.filter_by(discord_id=discord_id).first()
+    if not worker:
+        worker = Worker(
+            name=staff_name,
+            email=f'{staff_name.lower().replace(" ", ".")}@discord.local',
+            discord_id=discord_id,
+            role='admin',
+            score=0.0
+        )
+        db.session.add(worker)
+        db.session.commit()
 
     if flagged and worker:
         # Deduct points for reversed/wrongful actions
