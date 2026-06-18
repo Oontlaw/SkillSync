@@ -100,62 +100,6 @@ def extract_warn_from_embed(embed):
 # MESSAGE TRACKING - Detect mod bot invocations
 # ─────────────────────────────────────────────
 
-@bot.event
-async def on_message(message):
-    """
-    Tracks when users invoke moderation bot commands (like !c ban @user).
-    Stores the invoker so we can attribute the action to them later.
-    """
-    if message.author.bot:
-        return
-    
-    guild = message.guild
-    if not guild:
-        return
-    
-    content_lower = message.content.lower()
-    
-    # Log every message for debugging
-    print(f'[Observer] Message: {message.author.name} -> {content_lower[:60]}')
-    
-    # Check if message contains mod bot command patterns
-    for mod_bot_name in MOD_BOT_NAMES:
-        # Check multiple patterns: !c, !carl, !mee6, etc.
-        patterns = [
-            f'!{mod_bot_name[:1]} ',  # !c, !m, !d etc
-            f'!{mod_bot_name} ',      # !carl, !mee6, !dyno etc
-        ]
-        
-        if any(pattern in content_lower for pattern in patterns):
-            # User is invoking a mod bot command
-            parts = message.content.split()
-            if len(parts) >= 2:
-                action = parts[1].lower()  # e.g., "ban", "kick", "timeout"
-                
-                # Store this invocation with multiple possible keys
-                # (since we don't know the target yet)
-                invocation_data = {
-                    'invoker_id': message.author.id,
-                    'invoker_name': message.author.name,
-                    'mod_bot': mod_bot_name,
-                    'action': action,
-                    'timestamp': datetime.now(timezone.utc)
-                }
-                
-                # Store under bot's ID for this guild/action
-                bot_member = guild.get_member_named(mod_bot_name.split('-')[0])
-                if bot_member:
-                    invocation_key = (guild.id, bot_member.id, action)
-                    mod_bot_invocations[invocation_key] = invocation_data
-                    print(f'[Observer] ✅ TRACKED: {message.author.name} invoked {mod_bot_name} {action}')
-                else:
-                    print(f'[Observer] ⚠️  Could not find bot member for {mod_bot_name}')
-            break
-
-
-# ─────────────────────────────────────────────
-
-@bot.event
 async def on_ready():
     print(f'👁️  SkillSync Observer is online as {bot.user}')
     print(f'   Watching {len(bot.guilds)} server(s)')
