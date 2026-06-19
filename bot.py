@@ -44,6 +44,10 @@ intents.presences = True
 # '!ss ' is always included as the default.
 prefix_cache = {}
 
+# ── Trusted guilds: { guild_id: True/False } ──
+# Only trusted guilds get message content stored (for compliance).
+content_trust = {}
+
 def get_prefix(bot_, message):
     """Dynamic prefix per guild + bot mention. Falls back to ['!ss ']."""
     prefixes = ['!ss ']
@@ -91,7 +95,8 @@ def is_channel_public(channel, guild):
     try:
         overwrites = channel.overwrites_for(guild.default_role)
         return overwrites.read_messages is not False
-    except:
+    except Exception as e:
+        print(f'[SkillSync] is_channel_public error: {e}')
         return True
 
 def extract_warn_from_embed(embed):
@@ -265,17 +270,23 @@ async def on_message(message):
                 'timestamp': now.isoformat()
             })
 
-    # ── Job 3: Buffer EVERY human message for behavioral analysis ──
-    message_buffer.append({
+    # ── Job 3: Buffer human messages for behavioral analysis ──
+    # Metadata always stored. Content stored only for trusted guilds in public channels.
+    trusted = content_trust.get(str(guild.id), False)
+    is_public = is_channel_public(message.channel, guild)
+    entry = {
         'discord_id': str(author.id),
         'name': author.name,
         'guild_id': str(guild.id),
         'channel': message.channel.name,
         'length': len(message.content),
-        'content': message.content,
+        'is_public': is_public,
         'hour': now.hour,
         'day': now.weekday(),
-    })
+    }
+    if trusted and is_public:
+        entry['content'] = message.content
+    message_buffer.append(entry)
     if len(message_buffer) >= MESSAGE_BUFFER_LIMIT:
         flush_message_buffer()
 
@@ -373,7 +384,27 @@ def scan_guild(guild):
         if member.status != discord.Status.offline:
             online_count += 1
 
-    # ── 4. Post to API ──
+    # ── 4. Channels ──
+    channels_data = []
+    for channel in guild.channels:
+        if isinstance(channel, discord.CategoryChannel):
+            continue
+        is_public = True
+        default_overwrites = channel.overwrites_for(guild.default_role) if hasattr(channel, 'overwrites_for') else None
+        if default_overwrites and default_overwrites.read_messages is False:
+            is_public = False
+        ch_type = str(channel.type) if hasattr(channel, 'type') else 'text'
+        channels_data.append({
+            'channel_id': str(channel.id),
+            'name': channel.name,
+            'topic': channel.topic if hasattr(channel, 'topic') else None,
+            'channel_type': ch_type,
+            'category': channel.category.name if channel.category else None,
+            'position': channel.position,
+            'is_public': is_public,
+        })
+
+    # ── 5. Post to API ──
     import json
     payload = {
         'guild_id': str(guild.id),
@@ -388,6 +419,7 @@ def scan_guild(guild):
         'role_count': len(roles_data),
         'roles': roles_data,
         'members': members_data,
+        'channels': channels_data,
     }
 
     api_post('/observer/guild-scan', payload)
@@ -412,12 +444,13 @@ async def on_ready():
     print(f'[SkillSync] Watching {len(bot.guilds)} server(s)')
     check_reversed_actions.start()
     flush_message_loop.start()
-    # Fetch prefixes from API
+    # Fetch prefixes + content trust from API
     try:
         resp = requests.get(f'{SKILLSYNC_API}/observer/guilds', headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
         if resp.ok:
             for g in resp.json():
                 prefix_cache[g['guild_id']] = g.get('prefixes', ['!ss '])
+                content_trust[g['guild_id']] = g.get('store_content', False)
     except Exception as e:
         print(f'[SkillSync] Could not fetch prefixes: {e}')
     # Set bot presence with prefix info
@@ -577,8 +610,9 @@ async def on_member_unban(guild, user):
                 if entry.target.id == user.id:
                     unbanner_name = entry.user.name
                     break
-        except:
-            pass
+        except Exception as e:
+            log(f'UNBAN AUDIT LOG ERROR in {guild.name}: {e}')
+            print(f'[Observer] Could not read audit log for unban in {guild.name}: {e}')
 
         if ban_data:
             elapsed = datetime.now(timezone.utc) - ban_data['timestamp']
@@ -631,8 +665,9 @@ async def on_member_update(before, after):
                         mod_name = entry.user.name
                         reason = entry.reason or 'No reason given'
                         break
-            except:
-                pass
+            except Exception as e:
+                log(f'TIMEOUT AUDIT LOG ERROR in {guild.name}: {e}')
+                print(f'[Observer] Could not read audit log for timeout in {guild.name}: {e}')
 
             if mod_id is None:
                 print(f'[Observer] Timeout detected but could not identify moderator (missing audit log permission?)')
@@ -745,8 +780,9 @@ async def on_member_remove(member):
                         'timestamp': datetime.now(timezone.utc).isoformat()
                     })
                     return
-        except:
-            pass
+        except Exception as e:
+            log(f'KICK AUDIT LOG ERROR in {guild.name}: {e}')
+            print(f'[Observer] Could not read audit log for kick in {guild.name}: {e}')
     except Exception as e:
         print(f'[Observer] Error in on_member_remove: {e}')
     # If no audit log match — member left voluntarily, do nothing

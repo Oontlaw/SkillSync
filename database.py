@@ -118,6 +118,7 @@ class GuildInfo(db.Model):
     bot_count = db.Column(db.Integer, default=0)
     role_count = db.Column(db.Integer, default=0)
     prefix = db.Column(db.Text, default='["!ss "]')
+    store_content = db.Column(db.Boolean, default=False)
     scanned_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -171,6 +172,22 @@ class GuildMember(db.Model):
     role_ids = db.Column(db.Text, nullable=True)
     top_role_position = db.Column(db.Integer, default=0)
     total_messages = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class GuildChannel(db.Model):
+    """Stores channel information per guild."""
+    __tablename__ = 'guild_channels'
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False)
+    channel_id = db.Column(db.String(50), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    topic = db.Column(db.Text, nullable=True)
+    channel_type = db.Column(db.String(20), nullable=False, default='text')  # text, voice, announcement, forum
+    category = db.Column(db.String(100), nullable=True)
+    position = db.Column(db.Integer, default=0)
+    is_public = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 

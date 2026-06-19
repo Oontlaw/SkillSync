@@ -5,7 +5,7 @@ import math
 from collections import defaultdict
 from functools import wraps
 from flask import Blueprint, request, jsonify
-from database import db, Worker, ScoreLog, MessageRecord, GuildInfo, GuildRole, GuildMember, BehavioralAnomaly
+from database import db, Worker, ScoreLog, MessageRecord, GuildInfo, GuildRole, GuildMember, GuildChannel, BehavioralAnomaly
 from datetime import datetime, timedelta
 from sqlalchemy import func
 
@@ -61,6 +61,7 @@ def log_action():
         'ban_issued': 8,
         'kick_issued': 5,
         'timeout_issued': 4,
+        'warn_issued': 3,
     }
     points = points_map.get(action_type, 0)
 
@@ -268,6 +269,7 @@ def log_messages():
             guild_id=msg.get('guild_id', ''),
             channel_name=msg.get('channel', 'unknown'),
             message_length=msg.get('length', 0),
+            is_public_channel=msg.get('is_public', True),
             message_content=msg.get('content'),
             hour_of_day=msg.get('hour'),
             day_of_week=msg.get('day'),
@@ -366,6 +368,9 @@ def receive_guild_scan():
     guild.role_count = data.get('role_count', 0)
     guild.prefix = data.get('prefix', '["!ss "]')
     guild.scanned_at = datetime.utcnow()
+    # Preserve content trust on re-scan
+    if not guild.store_content:
+        guild.store_content = data.get('store_content', False)
     db.session.add(guild)
     db.session.flush()
 
@@ -406,9 +411,24 @@ def receive_guild_scan():
         )
         db.session.add(member)
 
+    # Upsert channels
+    GuildChannel.query.filter_by(guild_id=guild_id).delete()
+    for ch in data.get('channels', []):
+        channel = GuildChannel(
+            guild_id=guild_id,
+            channel_id=ch['channel_id'],
+            name=ch['name'],
+            topic=ch.get('topic'),
+            channel_type=ch.get('channel_type', 'text'),
+            category=ch.get('category'),
+            position=ch.get('position', 0),
+            is_public=ch.get('is_public', True),
+        )
+        db.session.add(channel)
+
     db.session.commit()
 
-    print(f'[Observer API] Guild scan stored: {guild.name} — {guild.staff_count} staff, {guild.member_count} members')
+    print(f'[Observer API] Guild scan stored: {guild.name} — {guild.staff_count} staff, {guild.member_count} members, {len(data.get("channels", []))} channels')
     return jsonify({'message': 'Guild scan stored', 'guild': guild.name, 'staff': guild.staff_count}), 201
 
 
@@ -428,6 +448,7 @@ def list_guilds():
         'bot_count': g.bot_count,
         'role_count': g.role_count,
         'scanned_at': g.scanned_at.isoformat() if g.scanned_at else None,
+        'store_content': g.store_content,
     } for g in guilds])
 
 
@@ -484,6 +505,24 @@ def list_guild_roles(guild_id):
         'is_mod': r.is_mod,
         'member_count': r.member_count,
     } for r in roles])
+
+
+@observer_bp.route('/observer/guilds/<guild_id>/trust', methods=['GET', 'POST'])
+@require_api_key
+def guild_trust(guild_id):
+    """Get or toggle content storage trust for a guild."""
+    guild = GuildInfo.query.filter_by(guild_id=guild_id).first_or_404()
+
+    if request.method == 'POST':
+        data = request.json or {}
+        enabled = data.get('store_content', not guild.store_content)
+        guild.store_content = bool(enabled)
+        db.session.commit()
+        status = 'enabled' if guild.store_content else 'disabled'
+        print(f'[Observer API] Content storage {status} for {guild.name}')
+        return jsonify({'guild_id': guild_id, 'store_content': guild.store_content})
+
+    return jsonify({'guild_id': guild_id, 'store_content': guild.store_content, 'name': guild.name})
 
 
 @observer_bp.route('/observer/guilds/<guild_id>/prefix', methods=['GET', 'PATCH'])

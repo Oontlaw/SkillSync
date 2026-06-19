@@ -3,7 +3,7 @@ from discord.ext import commands
 import requests
 import os
 import typing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 SKILLSYNC_API = os.getenv('SKILLSYNC_API', 'http://localhost:5000/api')
 API_KEY = os.getenv('API_KEY')
@@ -192,7 +192,7 @@ class Moderation(commands.Cog):
         if minutes < 1 or minutes > 40320:
             await ctx.send('Timeout must be between 1 minute and 28 days (40320 min).')
             return
-        until = discord.utils.utcnow() + discord.timedelta(minutes=minutes)
+        until = discord.utils.utcnow() + timedelta(minutes=minutes)
         await target.timeout(until, reason=f'{ctx.author.name}: {reason}')
         api_post('/observer/action', {
             'discord_id': str(ctx.author.id),
@@ -221,14 +221,15 @@ class Moderation(commands.Cog):
         if not ok:
             await ctx.send(err)
             return
-        api_post('/observer/warn', {
-            'source_bot': ctx.bot.user.name,
-            'mod_name': ctx.author.name,
-            'target_name': target.name,
-            'reason': reason,
-            'channel': ctx.channel.name,
+        api_post('/observer/action', {
+            'discord_id': str(ctx.author.id),
+            'staff_name': ctx.author.name,
+            'action_type': 'warn_issued',
+            'target': target.name,
             'guild': ctx.guild.name,
-            'raw_embed': f'Warn issued by {ctx.author.name}',
+            'reason': reason,
+            'flagged': False,
+            'flag_reason': None,
             'timestamp': datetime.now(timezone.utc).isoformat()
         })
         await ctx.send(f'Warned {target.name}. Reason: {reason}')
