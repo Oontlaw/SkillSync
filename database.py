@@ -172,3 +172,20 @@ class GuildMember(db.Model):
     top_role_position = db.Column(db.Integer, default=0)
     total_messages = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class BehavioralAnomaly(db.Model):
+    __tablename__ = 'behavioral_anomalies'
+
+    id = db.Column(db.Integer, primary_key=True)
+    discord_id = db.Column(db.String(50), nullable=False, index=True)
+    name = db.Column(db.String(100), nullable=True)
+    guild_id = db.Column(db.String(50), nullable=True)
+    anomaly_type = db.Column(db.String(50), nullable=False)
+    severity = db.Column(db.Float, default=0.0)
+    details = db.Column(db.Text, nullable=True)
+    detected_at = db.Column(db.DateTime, default=datetime.utcnow)
+    cleared_at = db.Column(db.DateTime, nullable=True)
+
+    def __repr__(self):
+        return f'<BehavioralAnomaly {self.anomaly_type} | {self.discord_id} | sev={self.severity}>'

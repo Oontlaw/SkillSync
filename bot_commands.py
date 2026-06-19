@@ -6,10 +6,12 @@ import typing
 from datetime import datetime, timezone
 
 SKILLSYNC_API = os.getenv('SKILLSYNC_API', 'http://localhost:5000/api')
+API_KEY = os.getenv('API_KEY')
 
 def api_post(endpoint, payload):
     try:
-        requests.post(f'{SKILLSYNC_API}{endpoint}', json=payload, timeout=5)
+        requests.post(f'{SKILLSYNC_API}{endpoint}', json=payload,
+                     headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
     except:
         pass
 
@@ -66,7 +68,7 @@ class Moderation(commands.Cog):
                 return
             prefixes.append(value)
             self.bot.prefix_cache[str(ctx.guild.id)] = prefixes
-            requests.patch(f'{SKILLSYNC_API}/observer/guilds/{ctx.guild.id}/prefix', json={'prefixes': prefixes}, timeout=5)
+            requests.patch(f'{SKILLSYNC_API}/observer/guilds/{ctx.guild.id}/prefix', json={'prefixes': prefixes}, headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
             await ctx.send(f'Added prefix `{value}`. Active: `{"`, `".join(prefixes)}`')
             return
 
@@ -80,7 +82,7 @@ class Moderation(commands.Cog):
                 return
             prefixes.remove(value)
             self.bot.prefix_cache[str(ctx.guild.id)] = prefixes
-            requests.patch(f'{SKILLSYNC_API}/observer/guilds/{ctx.guild.id}/prefix', json={'prefixes': prefixes}, timeout=5)
+            requests.patch(f'{SKILLSYNC_API}/observer/guilds/{ctx.guild.id}/prefix', json={'prefixes': prefixes}, headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
             await ctx.send(f'Removed prefix `{value}`. Active: `{"`, `".join(prefixes)}`')
             return
 
@@ -88,7 +90,7 @@ class Moderation(commands.Cog):
         if action == 'reset':
             prefixes = ['!ss ']
             self.bot.prefix_cache[str(ctx.guild.id)] = prefixes
-            requests.patch(f'{SKILLSYNC_API}/observer/guilds/{ctx.guild.id}/prefix', json={'prefixes': prefixes}, timeout=5)
+            requests.patch(f'{SKILLSYNC_API}/observer/guilds/{ctx.guild.id}/prefix', json={'prefixes': prefixes}, headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
             await ctx.send('Reset to default prefix: `!ss `')
             return
 
@@ -102,7 +104,7 @@ class Moderation(commands.Cog):
                 return
             prefixes.append(action)
             self.bot.prefix_cache[str(ctx.guild.id)] = prefixes
-            requests.patch(f'{SKILLSYNC_API}/observer/guilds/{ctx.guild.id}/prefix', json={'prefixes': prefixes}, timeout=5)
+            requests.patch(f'{SKILLSYNC_API}/observer/guilds/{ctx.guild.id}/prefix', json={'prefixes': prefixes}, headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
             await ctx.send(f'Added prefix `{action}`. Active: `{"`, `".join(prefixes)}`')
             return
 
@@ -215,6 +217,10 @@ class Moderation(commands.Cog):
     @commands.command(name='warn', help='Warn a user. Usage: warn @user [reason]')
     @commands.has_permissions(moderate_members=True)
     async def warn(self, ctx, target: discord.Member, *, reason='No reason given'):
+        ok, err = self.can_moderate(ctx, target)
+        if not ok:
+            await ctx.send(err)
+            return
         api_post('/observer/warn', {
             'source_bot': ctx.bot.user.name,
             'mod_name': ctx.author.name,

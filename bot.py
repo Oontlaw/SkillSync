@@ -19,7 +19,15 @@ def log(msg):
 load_dotenv()
 
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
+if not DISCORD_TOKEN:
+    log('CRITICAL: DISCORD_TOKEN not set')
+    raise RuntimeError('DISCORD_TOKEN environment variable is required')
+
 SKILLSYNC_API = os.getenv('SKILLSYNC_API', 'http://localhost:5000/api')
+API_KEY = os.getenv('API_KEY')
+if not API_KEY:
+    log('CRITICAL: API_KEY not set')
+    raise RuntimeError('API_KEY environment variable is required')
 
 # How long to watch a ban before deciding it's "confirmed" (in hours)
 BAN_WATCH_HOURS = 48
@@ -66,7 +74,8 @@ MOD_BOT_NAMES = ['mee6', 'dyno', 'carl-bot', 'wick', 'arcane', 'combot', 'gaius'
 def api_post(endpoint, payload):
     """Send data to SkillSync backend silently."""
     try:
-        requests.post(f'{SKILLSYNC_API}{endpoint}', json=payload, timeout=5)
+        requests.post(f'{SKILLSYNC_API}{endpoint}', json=payload,
+                     headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
     except Exception as e:
         print(f'[SkillSync Observer] API error on {endpoint}: {e}')
 
@@ -176,7 +185,7 @@ async def on_message(message):
     if not guild:
         return
 
-    log(f'MSG: {message.author.name} in #{message.channel.name}: {message.content[:80]}')
+    log(f'MSG: {message.author.name} in #{message.channel.name} (len={len(message.content)})')
 
     # ── Job 1: Read mod bot embeds (warns, infractions) ──
     if is_mod_bot(message.author) and message.embeds:
@@ -257,15 +266,13 @@ async def on_message(message):
             })
 
     # ── Job 3: Buffer EVERY human message for behavioral analysis ──
-    channel_is_public = is_channel_public(message.channel, guild)
     message_buffer.append({
         'discord_id': str(author.id),
         'name': author.name,
         'guild_id': str(guild.id),
         'channel': message.channel.name,
-        'channel_is_public': channel_is_public,
         'length': len(message.content),
-        'content': message.content if channel_is_public else None,
+        'content': message.content,
         'hour': now.hour,
         'day': now.weekday(),
     })
@@ -398,13 +405,16 @@ async def on_ready():
         if me:
             perms = dict(me.guild_permissions)
             log(f'    Perms: ban_members={perms["ban_members"]}, kick_members={perms["kick_members"]}, view_audit_log={perms["view_audit_log"]}, manage_messages={perms["manage_messages"]}')
+            if not perms.get('view_audit_log'):
+                log(f'    ⚠️  Bot LACKS view_audit_log permission in {guild.name}! Ban/kick/timeout detection will NOT work.')
+                print(f'[SkillSync] WARNING: Bot lacks view_audit_log permission in {guild.name}')
     print(f'[SkillSync] Bot online as {bot.user}')
     print(f'[SkillSync] Watching {len(bot.guilds)} server(s)')
     check_reversed_actions.start()
     flush_message_loop.start()
     # Fetch prefixes from API
     try:
-        resp = requests.get(f'{SKILLSYNC_API}/observer/guilds', timeout=5)
+        resp = requests.get(f'{SKILLSYNC_API}/observer/guilds', headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
         if resp.ok:
             for g in resp.json():
                 prefix_cache[g['guild_id']] = g.get('prefixes', ['!ss '])
@@ -776,6 +786,10 @@ async def check_reversed_actions():
             'note': 'Ban stood for 48+ hours — confirmed as valid moderation action',
             'timestamp': now.isoformat()
         })
+
+    # Also scan for behavioral anomalies
+    print(f'[Observer] Scanning behavioral anomalies...')
+    api_post('/observer/anomalies/scan', {'trigger': 'hourly'})
 
 
 if __name__ == '__main__':

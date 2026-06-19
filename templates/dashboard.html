@@ -3,121 +3,246 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>SkillSync – Admin Dashboard</title>
+  <title>SkillSync – {% if logged_out %}Workforce Intelligence Bot{% else %}Admin Dashboard{% endif %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    body { font-family: 'Inter', sans-serif; background: #0b0d11; }
+    .gradient-text { background: linear-gradient(135deg, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .card-hover { transition: all 0.2s ease; }
+    .card-hover:hover { border-color: #3b82f6; transform: translateY(-2px); }
+    .glow { box-shadow: 0 0 30px rgba(59,130,246,0.08); }
+    .table-hover tr:hover { background: rgba(59,130,246,0.04); }
+  </style>
 </head>
-<body class="bg-gray-950 text-gray-100 min-h-screen font-sans">
+<body class="text-gray-100 min-h-screen">
 
-  <!-- Navbar -->
-  <nav class="bg-gray-900 border-b border-gray-800 px-8 py-4 flex items-center justify-between">
-    <div class="flex items-center gap-3">
-      <span class="text-blue-400 text-2xl font-bold">⚡ SkillSync</span>
-      <span class="text-gray-500 text-sm">Smart Workforce Intelligence</span>
+  <nav class="border-b border-gray-800/60 px-6 py-4 flex items-center justify-between max-w-7xl mx-auto">
+    <a href="/" class="flex items-center gap-2">
+      <span class="text-blue-400 text-2xl font-bold">⚡</span>
+      <span class="text-white font-bold text-lg">SkillSync</span>
+    </a>
+    <div class="flex items-center gap-4">
+      {% if user %}
+      <span class="text-gray-400 text-sm">{{ user.name }}</span>
+      <a href="/auth/logout" class="text-gray-500 hover:text-red-400 text-sm transition">Logout</a>
+      {% else %}
+      <a href="/auth/login" class="border border-gray-700 hover:border-gray-500 px-5 py-2 rounded-lg text-sm font-medium transition">Login</a>
+      <a href="{{ invite_url }}" target="_blank" class="bg-blue-600 hover:bg-blue-500 px-5 py-2 rounded-lg text-sm font-medium transition shadow-lg shadow-blue-600/20">Invite Bot</a>
+      {% endif %}
     </div>
-    <span class="text-gray-400 text-sm">Admin Panel</span>
   </nav>
 
-  <div class="max-w-7xl mx-auto px-6 py-8">
+  {% if logged_out %}
 
-    <!-- Stats -->
-    <div class="grid grid-cols-4 gap-6 mb-6">
-      <div class="bg-gray-900 rounded-xl p-6 border border-gray-800">
-        <p class="text-gray-400 text-sm mb-1">Total Workers</p>
-        <p class="text-3xl font-bold text-white">{{ total_workers }}</p>
+  <!-- Landing Hero -->
+  <section class="max-w-5xl mx-auto px-6 pt-24 pb-20 text-center">
+    <h1 class="text-5xl md:text-6xl font-extrabold text-white leading-tight mb-4">
+      One bot.<br/>
+      <span class="gradient-text">Your whole workforce.</span>
+    </h1>
+    <p class="text-gray-400 text-lg max-w-2xl mx-auto mb-10 leading-relaxed">
+      Staff scoring, behavioral analytics, guild management — three engines in one dashboard.
+      Track who moderates, how they do it, and keep your team accountable.
+    </p>
+    <div class="flex gap-4 justify-center">
+      <a href="{{ invite_url }}" target="_blank" class="bg-blue-600 hover:bg-blue-500 px-8 py-3 rounded-lg text-base font-semibold transition shadow-lg shadow-blue-600/20">Invite Bot</a>
+      <a href="/auth/login" class="border border-gray-700 hover:border-gray-500 px-8 py-3 rounded-lg text-base font-semibold transition">View Dashboard</a>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="max-w-6xl mx-auto px-6 pb-24">
+    <div class="text-center mb-14">
+      <h2 class="text-3xl font-bold text-white mb-3">Everything you need to run your staff team</h2>
+      <p class="text-gray-500">Modular by design. Enable what you need, ignore the rest.</p>
+    </div>
+    <div class="grid grid-cols-3 gap-5">
+      <div class="bg-[#111318] rounded-xl border border-gray-800/60 p-6 card-hover">
+        <div class="w-10 h-10 bg-blue-600/10 rounded-lg flex items-center justify-center mb-4"><span class="text-blue-400 text-lg">🕵️</span></div>
+        <h3 class="text-white font-semibold mb-2">Passive Observer</h3>
+        <p class="text-gray-500 text-sm leading-relaxed">Watches audit logs and attributes moderation actions to the right staff — even through other bots.</p>
       </div>
-      <div class="bg-gray-900 rounded-xl p-6 border border-gray-800">
-        <p class="text-gray-400 text-sm mb-1">Total Tasks</p>
-        <p class="text-3xl font-bold text-white">{{ total_tasks }}</p>
+      <div class="bg-[#111318] rounded-xl border border-gray-800/60 p-6 card-hover">
+        <div class="w-10 h-10 bg-purple-600/10 rounded-lg flex items-center justify-center mb-4"><span class="text-purple-400 text-lg">📊</span></div>
+        <h3 class="text-white font-semibold mb-2">Staff Scoring</h3>
+        <p class="text-gray-500 text-sm leading-relaxed">Auto-score bans, kicks, timeouts, and warns. Flag reversals and track team performance.</p>
       </div>
-      <div class="bg-gray-900 rounded-xl p-6 border border-gray-800">
-        <p class="text-gray-400 text-sm mb-1">Messages Tracked</p>
-        <p class="text-3xl font-bold text-white">{{ total_messages_logged }}</p>
+      <div class="bg-[#111318] rounded-xl border border-gray-800/60 p-6 card-hover">
+        <div class="w-10 h-10 bg-green-600/10 rounded-lg flex items-center justify-center mb-4"><span class="text-green-400 text-lg">🧠</span></div>
+        <h3 class="text-white font-semibold mb-2">Behavioral Analytics</h3>
+        <p class="text-gray-500 text-sm leading-relaxed">Track message patterns, detect anomalies, and understand community activity at a glance.</p>
       </div>
-      <div class="bg-gray-900 rounded-xl p-6 border border-gray-800">
-        <p class="text-gray-400 text-sm mb-1">Moderation Actions</p>
-        <p class="text-3xl font-bold text-white">{{ total_moderation_actions }}</p>
+      <div class="bg-[#111318] rounded-xl border border-gray-800/60 p-6 card-hover">
+        <div class="w-10 h-10 bg-yellow-600/10 rounded-lg flex items-center justify-center mb-4"><span class="text-yellow-400 text-lg">🛡️</span></div>
+        <h3 class="text-white font-semibold mb-2">Auto Staff Detection</h3>
+        <p class="text-gray-500 text-sm leading-relaxed">Scans roles and permissions to identify your mod team automatically. Zero config required.</p>
+      </div>
+      <div class="bg-[#111318] rounded-xl border border-gray-800/60 p-6 card-hover">
+        <div class="w-10 h-10 bg-red-600/10 rounded-lg flex items-center justify-center mb-4"><span class="text-red-400 text-lg">🔧</span></div>
+        <h3 class="text-white font-semibold mb-2">Moderation Suite</h3>
+        <p class="text-gray-500 text-sm leading-relaxed">Built-in ban, kick, timeout, warn, and purge. All actions scored and logged automatically.</p>
+      </div>
+      <div class="bg-[#111318] rounded-xl border border-gray-800/60 p-6 card-hover">
+        <div class="w-10 h-10 bg-indigo-600/10 rounded-lg flex items-center justify-center mb-4"><span class="text-indigo-400 text-lg">📋</span></div>
+        <h3 class="text-white font-semibold mb-2">Guild Overview</h3>
+        <p class="text-gray-500 text-sm leading-relaxed">Full server view with roles, permissions, staff list, and community breakdown.</p>
       </div>
     </div>
+  </section>
 
-    <!-- Guild Scan Overview -->
-    {% if guilds %}
-    <div class="bg-gray-900 rounded-xl border border-gray-800 p-6 mb-8">
-      <h2 class="text-lg font-semibold text-white mb-4">🛡️ Server Overview</h2>
-      <div class="grid grid-cols-4 gap-4 mb-4">
+  {% else %}
+
+  <!-- Stats Row -->
+  <div class="max-w-7xl mx-auto px-6 pt-8 pb-6">
+    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 glow">
+      <div class="grid grid-cols-4 gap-6">
         <div>
-          <p class="text-gray-400 text-xs">Servers Tracked</p>
-          <p class="text-xl font-bold text-white">{{ total_guilds }}</p>
+          <p class="text-gray-500 text-xs font-medium uppercase tracking-wider">Workers</p>
+          <p class="text-3xl font-bold text-white mt-1">{{ total_workers }}</p>
         </div>
         <div>
-          <p class="text-gray-400 text-xs">Total Members</p>
-          <p class="text-xl font-bold text-white">{{ total_members_tracked }}</p>
+          <p class="text-gray-500 text-xs font-medium uppercase tracking-wider">Tasks</p>
+          <p class="text-3xl font-bold text-white mt-1">{{ total_tasks }}</p>
         </div>
         <div>
-          <p class="text-gray-400 text-xs">Staff Identified</p>
-          <p class="text-xl font-bold text-blue-400">{{ total_staff_tracked }}</p>
+          <p class="text-gray-500 text-xs font-medium uppercase tracking-wider">Messages Tracked</p>
+          <p class="text-3xl font-bold text-white mt-1">{{ total_messages_logged }}</p>
         </div>
         <div>
-          <p class="text-gray-400 text-xs">Online Ratio</p>
-          <p class="text-xl font-bold text-green-400">{{ "%.0f"|format(total_online_members / total_members_tracked * 100 if total_members_tracked else 0) }}%</p>
+          <p class="text-gray-500 text-xs font-medium uppercase tracking-wider">Mod Actions</p>
+          <p class="text-3xl font-bold text-white mt-1">{{ total_moderation_actions }}</p>
         </div>
       </div>
-      {% for guild in guilds %}
-      <div class="border border-gray-800 rounded-lg p-4 mb-3">
-        <div class="flex justify-between items-center">
+    </div>
+  </div>
+
+  <!-- Anomalies -->
+  {% if anomalies %}
+  <div class="max-w-7xl mx-auto px-6 mb-6">
+    <div class="bg-[#111318] rounded-2xl border border-red-900/40 p-6">
+      <h2 class="text-sm font-semibold text-red-400 uppercase tracking-wider mb-4">🚨 Behavioral Anomalies</h2>
+      <div class="space-y-2">
+        {% for a in anomalies %}
+        <div class="flex justify-between items-center py-2 border-b border-gray-800/40 last:border-0">
           <div>
-            <a href="/guild/{{ guild.guild_id }}" class="text-white font-medium hover:text-blue-400">{{ guild.name }}</a>
-            <span class="text-gray-500 text-xs ml-2">ID: {{ guild.guild_id }}</span>
+            <span class="text-red-400 text-sm font-medium">{{ a.anomaly_type | replace('_', ' ') | title }}</span>
+            <span class="text-gray-400 text-sm ml-2">— {{ a.name or a.discord_id }}</span>
+            <p class="text-gray-600 text-xs mt-0.5">{{ a.details }}</p>
           </div>
-          {% if guild.owner_name %}
-          <span class="text-gray-400 text-sm">Owner: {{ guild.owner_name }}</span>
-          {% endif %}
+          <span class="text-red-400 text-xs font-bold px-2 py-1 bg-red-900/30 rounded">{{ "%.0f"|format(a.severity) }}%</span>
         </div>
-        <div class="flex gap-6 mt-2 text-sm">
-          <span class="text-gray-400">{{ guild.member_count }} members</span>
-          <span class="text-green-400">{{ guild.online_count }} online</span>
-          <span class="text-blue-400">{{ guild.staff_count }} staff</span>
-          <span class="text-gray-500">{{ guild.bot_count }} bots</span>
-          <span class="text-gray-500">{{ guild.role_count }} roles</span>
-        </div>
+        {% endfor %}
       </div>
-      {% endfor %}
     </div>
-    {% endif %}
+  </div>
+  {% endif %}
 
-    <div class="grid grid-cols-3 gap-8">
+  <!-- Guilds + Content -->
+  <div class="max-w-7xl mx-auto px-6 pb-8">
+    <div class="grid grid-cols-3 gap-6 mb-8">
+      {% if guilds %}
+      <div class="col-span-2 bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🛡️ Server Overview</h2>
+        <div class="grid grid-cols-4 gap-4 mb-5 pb-5 border-b border-gray-800/40">
+          <div>
+            <p class="text-gray-500 text-xs">Tracked</p>
+            <p class="text-xl font-bold text-white">{{ total_guilds }}</p>
+          </div>
+          <div>
+            <p class="text-gray-500 text-xs">Members</p>
+            <p class="text-xl font-bold text-white">{{ total_members_tracked }}</p>
+          </div>
+          <div>
+            <p class="text-gray-500 text-xs">Staff</p>
+            <p class="text-xl font-bold text-blue-400">{{ total_staff_tracked }}</p>
+          </div>
+          <div>
+            <p class="text-gray-500 text-xs">Online</p>
+            <p class="text-xl font-bold text-green-400">{{ "%.0f"|format(total_online_members / total_members_tracked * 100 if total_members_tracked else 0) }}%</p>
+          </div>
+        </div>
+        {% for guild in guilds %}
+        <a href="/guild/{{ guild.guild_id }}" class="flex justify-between items-center py-3 px-4 rounded-lg card-hover border border-transparent hover:border-gray-700/50 {% if not loop.last %}mb-1{% endif %}">
+          <div>
+            <span class="text-white font-medium">{{ guild.name }}</span>
+            <span class="text-gray-600 text-xs ml-2">ID: {{ guild.guild_id }}</span>
+          </div>
+          <div class="flex gap-5 text-xs">
+            <span class="text-gray-400">{{ guild.member_count }} members</span>
+            <span class="text-green-400">{{ guild.online_count }} online</span>
+            <span class="text-blue-400">{{ guild.staff_count }} staff</span>
+          </div>
+        </a>
+        {% endfor %}
+      </div>
+      {% endif %}
 
-      <!-- Leaderboard -->
-      <div class="col-span-2 bg-gray-900 rounded-xl border border-gray-800 p-6">
-        <h2 class="text-lg font-semibold text-white mb-4">🏆 Worker Leaderboard</h2>
-        <table class="w-full text-sm">
+      <!-- Activity -->
+      <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🕐 Recent Activity</h2>
+        <div class="space-y-3">
+          {% for log in recent_logs %}
+          <div class="border-b border-gray-800/40 pb-3 last:border-0 last:pb-0">
+            <p class="text-sm text-white">{{ log.worker.name }}</p>
+            <p class="text-xs text-gray-500">{{ log.reason[:60] }}{% if log.reason|length > 60 %}...{% endif %}</p>
+            <div class="flex justify-between items-center mt-1">
+              <span class="text-xs text-gray-600">{{ log.source }}</span>
+              <span class="text-xs font-bold {% if log.change >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
+                {% if log.change >= 0 %}+{% endif %}{{ log.change }} pts
+              </span>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+
+        {% if most_active %}
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mt-6 mb-4">📊 Most Active</h2>
+        <div class="space-y-2">
+          {% for active in most_active %}
+          <div class="flex justify-between items-center">
+            <span class="text-gray-300 text-sm">{{ active.name }}</span>
+            <span class="text-blue-400 text-xs font-bold">{{ active.count }}</span>
+          </div>
+          {% endfor %}
+          <p class="text-xs text-gray-600 mt-2">{{ unique_users_tracked }} unique users</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Leaderboard -->
+    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🏆 Worker Leaderboard</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm table-hover">
           <thead>
-            <tr class="text-gray-400 border-b border-gray-800">
-              <th class="text-left pb-3">#</th>
-              <th class="text-left pb-3">Name</th>
-              <th class="text-left pb-3">Email</th>
-              <th class="text-left pb-3">Role</th>
-              <th class="text-right pb-3">Score</th>
-              <th class="text-right pb-3">Actions</th>
+            <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
+              <th class="text-left py-3 font-medium">#</th>
+              <th class="text-left py-3 font-medium">Name</th>
+              <th class="text-left py-3 font-medium">Email</th>
+              <th class="text-left py-3 font-medium">Role</th>
+              <th class="text-right py-3 font-medium">Score</th>
+              <th class="text-right py-3 font-medium"></th>
             </tr>
           </thead>
           <tbody>
             {% for worker in workers %}
-            <tr class="border-b border-gray-800 hover:bg-gray-800 transition">
+            <tr class="border-b border-gray-800/40">
               <td class="py-3 text-gray-500">{{ loop.index }}</td>
               <td class="py-3 font-medium text-white">
-                <a href="/worker/{{ worker.id }}" class="hover:text-blue-400">{{ worker.name }}</a>
+                <a href="/worker/{{ worker.id }}" class="hover:text-blue-400 transition">{{ worker.name }}</a>
               </td>
-              <td class="py-3 text-gray-400">{{ worker.email }}</td>
+              <td class="py-3 text-gray-500">{{ worker.email }}</td>
               <td class="py-3">
-                <span class="px-2 py-1 rounded text-xs
-                  {% if worker.role == 'admin' %}bg-purple-900 text-purple-300
-                  {% elif worker.role == 'hr' %}bg-blue-900 text-blue-300
-                  {% else %}bg-gray-800 text-gray-300{% endif %}">
+                <span class="px-2 py-0.5 rounded text-xs font-medium
+                  {% if worker.role == 'admin' %}bg-purple-900/40 text-purple-300
+                  {% elif worker.role == 'hr' %}bg-blue-900/40 text-blue-300
+                  {% else %}bg-gray-800/40 text-gray-300{% endif %}">
                   {{ worker.role }}
                 </span>
               </td>
-              <td class="py-3 text-right font-bold
-                {% if worker.score >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
+              <td class="py-3 text-right font-bold {% if worker.score >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
                 {{ worker.score }} pts
               </td>
               <td class="py-3 text-right">
@@ -128,42 +253,14 @@
           </tbody>
         </table>
       </div>
-
-      <!-- Recent Activity & Analytics -->
-      <div class="bg-gray-900 rounded-xl border border-gray-800 p-6">
-        <h2 class="text-lg font-semibold text-white mb-4">🕐 Recent Activity</h2>
-        <div class="space-y-3">
-          {% for log in recent_logs %}
-          <div class="border-b border-gray-800 pb-3">
-            <p class="text-sm text-white">{{ log.worker.name }}</p>
-            <p class="text-xs text-gray-400">{{ log.reason }}</p>
-            <div class="flex justify-between items-center mt-1">
-              <span class="text-xs text-gray-500">{{ log.source }}</span>
-              <span class="text-sm font-bold
-                {% if log.change >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
-                {% if log.change >= 0 %}+{% endif %}{{ log.change }} pts
-              </span>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-
-        {% if most_active %}
-        <h2 class="text-lg font-semibold text-white mt-6 mb-4">📊 Most Active Users</h2>
-        <div class="space-y-2">
-          {% for user in most_active %}
-          <div class="flex justify-between items-center text-sm">
-            <span class="text-gray-300">{{ user.name }}</span>
-            <span class="text-blue-400 font-bold">{{ user.count }} msgs</span>
-          </div>
-          {% endfor %}
-          <p class="text-xs text-gray-500 mt-2">{{ unique_users_tracked }} unique users tracked</p>
-        </div>
-        {% endif %}
-      </div>
-
     </div>
   </div>
+
+  {% endif %}
+
+  <footer class="border-t border-gray-800/40 py-6 text-center text-gray-600 text-xs mt-8">
+    SkillSync — Workforce Intelligence for Discord
+  </footer>
 
 </body>
 </html>

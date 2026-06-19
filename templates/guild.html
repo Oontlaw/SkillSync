@@ -5,21 +5,37 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>{{ guild.name }} – SkillSync</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    body { font-family: 'Inter', sans-serif; background: #0b0d11; }
+    .card-hover { transition: all 0.2s ease; }
+    .card-hover:hover { border-color: #3b82f6; transform: translateY(-2px); }
+    .glow { box-shadow: 0 0 30px rgba(59,130,246,0.08); }
+    .table-hover tr:hover { background: rgba(59,130,246,0.04); }
+  </style>
 </head>
-<body class="bg-gray-950 text-gray-100 min-h-screen font-sans">
+<body class="text-gray-100 min-h-screen">
 
-  <nav class="bg-gray-900 border-b border-gray-800 px-8 py-4 flex items-center justify-between">
-    <div class="flex items-center gap-3">
-      <a href="/" class="text-blue-400 text-2xl font-bold">⚡ SkillSync</a>
+  <nav class="border-b border-gray-800/60 px-6 py-4 flex items-center justify-between max-w-7xl mx-auto">
+    <a href="/" class="flex items-center gap-2">
+      <span class="text-blue-400 text-2xl font-bold">⚡</span>
+      <span class="text-white font-bold text-lg">SkillSync</span>
+    </a>
+    <div class="flex items-center gap-4">
       <span class="text-gray-500 text-sm">Guild Profile</span>
+      {% if user %}
+      <span class="text-gray-400 text-sm">{{ user.name }}</span>
+      <a href="/auth/logout" class="text-gray-500 hover:text-red-400 text-sm transition">Logout</a>
+      {% else %}
+      <a href="/auth/login" class="border border-gray-700 hover:border-gray-500 px-5 py-2 rounded-lg text-sm font-medium transition">Login</a>
+      {% endif %}
     </div>
-    <span class="text-gray-400 text-sm">{{ guild.name }}</span>
   </nav>
 
   <div class="max-w-7xl mx-auto px-6 py-8">
 
     <!-- Header -->
-    <div class="bg-gray-900 rounded-xl border border-gray-800 p-6 mb-8">
+    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 mb-8 glow">
       <div class="flex justify-between items-start">
         <div>
           <h1 class="text-2xl font-bold text-white">{{ guild.name }}</h1>
@@ -27,64 +43,64 @@
         </div>
         <div class="text-right">
           {% if guild.owner_name %}
-          <p class="text-gray-400">Owner: <span class="text-white">{{ guild.owner_name }}</span></p>
+          <p class="text-gray-400 text-sm">Owner: <span class="text-white font-medium">{{ guild.owner_name }}</span></p>
           {% endif %}
-          <p class="text-gray-500 text-xs mt-1">Scanned: {{ guild.scanned_at.strftime('%Y-%m-%d %H:%M') if guild.scanned_at else 'Not yet' }}</p>
+          <p class="text-gray-600 text-xs mt-1">Scanned: {{ guild.scanned_at.strftime('%Y-%m-%d %H:%M') if guild.scanned_at else 'Not yet' }}</p>
         </div>
       </div>
-      <div class="grid grid-cols-2 sm:grid-cols-5 gap-4 mt-6">
-        <div class="bg-gray-800 rounded-lg p-4 text-center">
-          <p class="text-gray-400 text-xs">Members</p>
-          <p class="text-2xl font-bold text-white">{{ guild.member_count }}</p>
+      <div class="grid grid-cols-5 gap-4 mt-6">
+        <div class="bg-[#0b0d11] rounded-xl border border-gray-800/40 p-4 text-center">
+          <p class="text-gray-500 text-xs uppercase tracking-wider">Members</p>
+          <p class="text-2xl font-bold text-white mt-1">{{ guild.member_count }}</p>
         </div>
-        <div class="bg-gray-800 rounded-lg p-4 text-center">
-          <p class="text-gray-400 text-xs">Online Now</p>
-          <p class="text-2xl font-bold text-green-400">{{ guild.online_count }}</p>
+        <div class="bg-[#0b0d11] rounded-xl border border-gray-800/40 p-4 text-center">
+          <p class="text-gray-500 text-xs uppercase tracking-wider">Online Now</p>
+          <p class="text-2xl font-bold text-green-400 mt-1">{{ guild.online_count }}</p>
         </div>
-        <div class="bg-gray-800 rounded-lg p-4 text-center">
-          <p class="text-gray-400 text-xs">Staff</p>
-          <p class="text-2xl font-bold text-blue-400">{{ guild.staff_count }}</p>
+        <div class="bg-[#0b0d11] rounded-xl border border-gray-800/40 p-4 text-center">
+          <p class="text-gray-500 text-xs uppercase tracking-wider">Staff</p>
+          <p class="text-2xl font-bold text-blue-400 mt-1">{{ guild.staff_count }}</p>
         </div>
-        <div class="bg-gray-800 rounded-lg p-4 text-center">
-          <p class="text-gray-400 text-xs">Bots</p>
-          <p class="text-2xl font-bold text-gray-400">{{ guild.bot_count }}</p>
+        <div class="bg-[#0b0d11] rounded-xl border border-gray-800/40 p-4 text-center">
+          <p class="text-gray-500 text-xs uppercase tracking-wider">Bots</p>
+          <p class="text-2xl font-bold text-gray-400 mt-1">{{ guild.bot_count }}</p>
         </div>
-        <div class="bg-gray-800 rounded-lg p-4 text-center">
-          <p class="text-gray-400 text-xs">Roles</p>
-          <p class="text-2xl font-bold text-white">{{ guild.role_count }}</p>
+        <div class="bg-[#0b0d11] rounded-xl border border-gray-800/40 p-4 text-center">
+          <p class="text-gray-500 text-xs uppercase tracking-wider">Roles</p>
+          <p class="text-2xl font-bold text-white mt-1">{{ guild.role_count }}</p>
         </div>
       </div>
     </div>
 
     <!-- Roles & Permissions -->
-    <div class="bg-gray-900 rounded-xl border border-gray-800 p-6 mb-8">
-      <h2 class="text-lg font-semibold text-white mb-4">🔑 Roles & Permissions</h2>
+    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 mb-8">
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-5">🔑 Roles & Permissions</h2>
       <div class="overflow-x-auto">
-        <table class="w-full text-sm">
+        <table class="w-full text-sm table-hover">
           <thead>
-            <tr class="text-gray-400 border-b border-gray-800">
-              <th class="text-left pb-3">Role</th>
-              <th class="text-center pb-3">Admin</th>
-              <th class="text-center pb-3">Ban</th>
-              <th class="text-center pb-3">Kick</th>
-              <th class="text-center pb-3">Manage Guild</th>
-              <th class="text-center pb-3">Manage Roles</th>
-              <th class="text-center pb-3">Mod</th>
-              <th class="text-right pb-3">Members</th>
+            <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
+              <th class="text-left py-3 font-medium">Role</th>
+              <th class="text-center py-3 font-medium">Admin</th>
+              <th class="text-center py-3 font-medium">Ban</th>
+              <th class="text-center py-3 font-medium">Kick</th>
+              <th class="text-center py-3 font-medium">Manage Guild</th>
+              <th class="text-center py-3 font-medium">Manage Roles</th>
+              <th class="text-center py-3 font-medium">Mod</th>
+              <th class="text-right py-3 font-medium">Members</th>
             </tr>
           </thead>
           <tbody>
             {% for role in roles %}
-            <tr class="border-b border-gray-800 hover:bg-gray-800 transition">
+            <tr class="border-b border-gray-800/40">
               <td class="py-3 font-medium" style="color: {{ role.color if role.color and role.color != '#000000' else '#fff' }}">{{ role.name }}</td>
-              <td class="py-3 text-center">{% if role.is_admin %}✅{% else %}—{% endif %}</td>
-              <td class="py-3 text-center">{% if role.can_ban %}✅{% else %}—{% endif %}</td>
-              <td class="py-3 text-center">{% if role.can_kick %}✅{% else %}—{% endif %}</td>
-              <td class="py-3 text-center">{% if role.can_manage_guild %}✅{% else %}—{% endif %}</td>
-              <td class="py-3 text-center">{% if role.can_manage_roles %}✅{% else %}—{% endif %}</td>
+              <td class="py-3 text-center">{% if role.is_admin %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
+              <td class="py-3 text-center">{% if role.can_ban %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
+              <td class="py-3 text-center">{% if role.can_kick %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
+              <td class="py-3 text-center">{% if role.can_manage_guild %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
+              <td class="py-3 text-center">{% if role.can_manage_roles %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
               <td class="py-3 text-center">
                 {% if role.is_mod %}
-                <span class="text-xs bg-blue-900 text-blue-300 px-2 py-1 rounded">MOD</span>
+                <span class="text-xs font-medium bg-blue-900/40 text-blue-300 px-2 py-1 rounded">MOD</span>
                 {% else %}
                 <span class="text-xs text-gray-600">—</span>
                 {% endif %}
@@ -97,44 +113,48 @@
       </div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+    <div class="grid grid-cols-2 gap-8">
 
-      <!-- Staff Members -->
-      <div class="bg-gray-900 rounded-xl border border-blue-800 p-6">
-        <h2 class="text-lg font-semibold text-blue-400 mb-4">👤 Staff ({{ staff|length }})</h2>
+      <!-- Staff -->
+      <div class="bg-[#111318] rounded-2xl border border-blue-800/40 p-6 card-hover">
+        <h2 class="text-sm font-semibold text-blue-400 uppercase tracking-wider mb-5">👤 Staff ({{ staff|length }})</h2>
         <div class="space-y-2">
           {% for m in staff %}
-          <div class="flex justify-between items-center border-b border-gray-800 py-2">
+          <div class="flex justify-between items-center border-b border-gray-800/40 py-2.5 last:border-0">
             <div>
               <span class="text-white">{{ m.name }}</span>
               {% if m.is_owner %}
-              <span class="text-xs bg-yellow-900 text-yellow-300 px-1.5 py-0.5 rounded ml-2">Owner</span>
+              <span class="text-xs font-medium bg-yellow-900/40 text-yellow-300 px-1.5 py-0.5 rounded ml-2">Owner</span>
               {% endif %}
             </div>
-            <span class="text-gray-500 text-xs">{{ m.member_id }}</span>
+            <span class="text-gray-600 text-xs">{{ m.member_id }}</span>
           </div>
           {% endfor %}
         </div>
       </div>
 
-      <!-- Non-Staff Members (top 50) -->
-      <div class="bg-gray-900 rounded-xl border border-gray-800 p-6">
-        <h2 class="text-lg font-semibold text-white mb-4">👥 Community ({{ members|length }})</h2>
+      <!-- Community -->
+      <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 card-hover">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-5">👥 Community ({{ members|length }})</h2>
         <div class="space-y-1 max-h-96 overflow-y-auto">
           {% for m in members[:50] %}
-          <div class="flex justify-between items-center border-b border-gray-800 py-1.5">
+          <div class="flex justify-between items-center border-b border-gray-800/40 py-1.5">
             <span class="text-gray-300 text-sm">{{ m.name }}</span>
             <span class="text-gray-600 text-xs">{{ m.member_id }}</span>
           </div>
           {% endfor %}
           {% if members|length > 50 %}
-          <p class="text-gray-500 text-xs text-center mt-2">...and {{ members|length - 50 }} more</p>
+          <p class="text-gray-600 text-xs text-center mt-3">...and {{ members|length - 50 }} more</p>
           {% endif %}
         </div>
       </div>
 
     </div>
   </div>
+
+  <footer class="border-t border-gray-800/40 py-6 text-center text-gray-600 text-xs mt-4">
+    SkillSync — Workforce Intelligence for Discord
+  </footer>
 
 </body>
 </html>

@@ -1,10 +1,28 @@
 import json
+import os
+import uuid
+import math
+from collections import defaultdict
+from functools import wraps
 from flask import Blueprint, request, jsonify
-from database import db, Worker, ScoreLog, MessageRecord, GuildInfo, GuildRole, GuildMember
-from datetime import datetime
+from database import db, Worker, ScoreLog, MessageRecord, GuildInfo, GuildRole, GuildMember, BehavioralAnomaly
+from datetime import datetime, timedelta
 from sqlalchemy import func
 
 observer_bp = Blueprint('observer', __name__)
+
+# ── API Key Authentication ──
+API_KEY = os.getenv('API_KEY')
+
+def require_api_key(f):
+    """Requires Bearer token matching API_KEY env var."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.headers.get('Authorization', '')
+        if not auth.startswith('Bearer ') or auth.split(' ', 1)[1] != API_KEY:
+            return jsonify({'error': 'Unauthorized'}), 401
+        return f(*args, **kwargs)
+    return decorated
 
 # ── In-memory store for staff activity (aggregated per session) ──
 # { discord_id: { 'message_count': int, 'channels': set, 'last_seen': datetime } }
@@ -12,6 +30,7 @@ staff_activity = {}
 
 
 @observer_bp.route('/observer/action', methods=['POST'])
+@require_api_key
 def log_action():
     """
     Receives a staff moderation action (ban, kick, timeout).
@@ -30,7 +49,7 @@ def log_action():
     if not worker:
         worker = Worker(
             name=staff_name,
-            email=f'{staff_name.lower().replace(" ", ".")}@discord.local',
+            email=f'worker.{uuid.uuid4().hex[:12]}@discord.local',
             discord_id=discord_id,
             role='admin',
             score=0.0
@@ -62,6 +81,7 @@ def log_action():
 
 
 @observer_bp.route('/observer/flag', methods=['POST'])
+@require_api_key
 def log_flag():
     """
     Receives a flagged event (ban reversed, timeout reversed early).
@@ -82,7 +102,7 @@ def log_flag():
     if not worker:
         worker = Worker(
             name=staff_name,
-            email=f'{staff_name.lower().replace(" ", ".")}@discord.local',
+            email=f'worker.{uuid.uuid4().hex[:12]}@discord.local',
             discord_id=discord_id,
             role='admin',
             score=0.0
@@ -119,6 +139,7 @@ def log_flag():
 
 
 @observer_bp.route('/observer/warn', methods=['POST'])
+@require_api_key
 def log_warn():
     """
     Receives a warn/infraction parsed from a mod bot embed.
@@ -154,6 +175,7 @@ def log_warn():
 
 
 @observer_bp.route('/observer/activity', methods=['POST'])
+@require_api_key
 def log_activity():
     """
     Receives passive staff message activity.
@@ -198,6 +220,7 @@ def log_activity():
 
 
 @observer_bp.route('/observer/confirm', methods=['POST'])
+@require_api_key
 def confirm_action():
     """
     Confirms a ban stood for 48+ hours (valid moderation action).
@@ -209,6 +232,7 @@ def confirm_action():
 
 
 @observer_bp.route('/observer/staff-activity', methods=['GET'])
+@require_api_key
 def get_staff_activity():
     """Returns current in-session staff activity summary."""
     summary = {
@@ -229,10 +253,10 @@ def get_staff_activity():
 # ─────────────────────────────────────────────
 
 @observer_bp.route('/observer/messages', methods=['POST'])
+@require_api_key
 def log_messages():
     """
     Receives a batch of message records from the bot.
-    Stores anonymized behavioral data (no message content).
     """
     data = request.json
     messages = data if isinstance(data, list) else [data]
@@ -243,9 +267,8 @@ def log_messages():
             name=msg.get('name', 'Unknown'),
             guild_id=msg.get('guild_id', ''),
             channel_name=msg.get('channel', 'unknown'),
-            is_public_channel=msg.get('channel_is_public', True),
             message_length=msg.get('length', 0),
-            message_content=msg.get('content') if msg.get('channel_is_public') else None,
+            message_content=msg.get('content'),
             hour_of_day=msg.get('hour'),
             day_of_week=msg.get('day'),
         )
@@ -256,6 +279,7 @@ def log_messages():
 
 
 @observer_bp.route('/observer/analytics/<discord_id>', methods=['GET'])
+@require_api_key
 def user_analytics(discord_id):
     """Returns behavioral analytics for a specific user."""
     stats = db.session.query(
@@ -287,6 +311,7 @@ def user_analytics(discord_id):
 
 
 @observer_bp.route('/observer/analytics', methods=['GET'])
+@require_api_key
 def all_analytics():
     """Returns overall behavioral analytics across all users."""
     total_messages = MessageRecord.query.count()
@@ -316,14 +341,16 @@ def all_analytics():
 # ─────────────────────────────────────────────
 
 @observer_bp.route('/observer/guild-scan', methods=['POST'])
+@require_api_key
 def receive_guild_scan():
     """
     Receives a full guild scan from the bot.
     Stores guild info, roles, and members with staff flags.
     """
     data = request.json
-
-    guild_id = data['guild_id']
+    guild_id = data.get('guild_id')
+    if not guild_id:
+        return jsonify({'error': 'guild_id is required'}), 400
 
     # Upsert GuildInfo
     guild = GuildInfo.query.filter_by(guild_id=guild_id).first()
@@ -386,6 +413,7 @@ def receive_guild_scan():
 
 
 @observer_bp.route('/observer/guilds', methods=['GET'])
+@require_api_key
 def list_guilds():
     """Lists all scanned guilds with summary stats."""
     guilds = GuildInfo.query.order_by(GuildInfo.name).all()
@@ -404,6 +432,7 @@ def list_guilds():
 
 
 @observer_bp.route('/observer/guilds/<guild_id>/members', methods=['GET'])
+@require_api_key
 def list_guild_members(guild_id):
     """Lists members of a guild, split by staff/non-staff."""
     staff_only = request.args.get('staff', '').lower() == 'true'
@@ -431,6 +460,7 @@ def list_guild_members(guild_id):
 
 
 @observer_bp.route('/observer/guilds/<guild_id>/roles', methods=['GET'])
+@require_api_key
 def list_guild_roles(guild_id):
     """Lists roles of a guild."""
     mods_only = request.args.get('mods', '').lower() == 'true'
@@ -457,6 +487,7 @@ def list_guild_roles(guild_id):
 
 
 @observer_bp.route('/observer/guilds/<guild_id>/prefix', methods=['GET', 'PATCH'])
+@require_api_key
 def guild_prefix(guild_id):
     """Get or set prefixes for a guild. Stores as JSON array."""
     guild = GuildInfo.query.filter_by(guild_id=guild_id).first_or_404()
@@ -474,3 +505,145 @@ def guild_prefix(guild_id):
 
     prefixes = json.loads(guild.prefix) if guild.prefix else ['!ss ']
     return jsonify({'guild_id': guild_id, 'prefixes': prefixes})
+
+
+# ─────────────────────────────────────────────
+# BEHAVIORAL ANOMALY DETECTION
+# ─────────────────────────────────────────────
+
+def detect_anomalies_for_user(discord_id, name=None):
+    """Run anomaly detection for a single user. Returns list of anomalies found."""
+    now = datetime.utcnow()
+    anomalies = []
+
+    all_msgs = MessageRecord.query.filter_by(discord_id=discord_id).order_by(MessageRecord.created_at).all()
+    if len(all_msgs) < 10:
+        return []
+
+    # ── Baseline: all messages ──
+    lengths = [m.message_length for m in all_msgs if m.message_length]
+    hours = [m.hour_of_day for m in all_msgs if m.hour_of_day is not None]
+
+    baseline_avg_len = sum(lengths) / len(lengths) if lengths else 0
+    baseline_std_len = math.sqrt(sum((x - baseline_avg_len) ** 2 for x in lengths) / len(lengths)) if len(lengths) > 1 else 0
+    active_hours = set(hours)
+
+    # Daily baseline
+    days_span = max(1, (all_msgs[-1].created_at - all_msgs[0].created_at).days or 1)
+    daily_avg = len(all_msgs) / days_span
+    # Approximate daily std from count variance across hours
+    hour_counts = defaultdict(int)
+    for h in hours:
+        hour_counts[h] += 1
+    hourly_avg = len(hours) / max(len(hour_counts), 1)
+
+    # ── Recent: last 24h ──
+    cutoff = now - timedelta(hours=24)
+    recent = [m for m in all_msgs if m.created_at >= cutoff]
+    if not recent:
+        return []
+
+    recent_lengths = [m.message_length for m in recent if m.message_length]
+    recent_hours = [m.hour_of_day for m in recent if m.hour_of_day is not None]
+    recent_count = len(recent)
+
+    anomalies_found = []
+
+    # 1. Odd hours — user posted in hours they never did before
+    new_hours = set(recent_hours) - active_hours
+    for h in new_hours:
+        anomalies_found.append({
+            'type': 'odd_hours',
+            'severity': 60,
+            'details': f'Posted at hour {h}:00, a time they have never posted before'
+        })
+
+    # 2. Volume spike/drop — recent 24h count vs daily avg
+    if daily_avg > 1 and len(all_msgs) > 20:
+        deviation = (recent_count - daily_avg) / max(daily_avg, 0.1)
+        if deviation > 2.0:
+            anomalies_found.append({
+                'type': 'volume_spike',
+                'severity': min(90, 50 + deviation * 10),
+                'details': f'{recent_count} messages in last 24h vs daily avg of {daily_avg:.1f} ({deviation:.1f}x spike)'
+            })
+        elif deviation < -0.8:
+            anomalies_found.append({
+                'type': 'volume_drop',
+                'severity': min(80, 40 + abs(deviation) * 15),
+                'details': f'Only {recent_count} messages in last 24h vs daily avg of {daily_avg:.1f} ({abs(deviation):.0f}% of normal)'
+            })
+
+    # 3. Message length shift
+    if baseline_std_len > 5 and len(recent_lengths) >= 5:
+        recent_avg_len = sum(recent_lengths) / len(recent_lengths)
+        z_score = abs(recent_avg_len - baseline_avg_len) / max(baseline_std_len, 1)
+        if z_score > 2.0:
+            direction = 'longer' if recent_avg_len > baseline_avg_len else 'shorter'
+            anomalies_found.append({
+                'type': 'length_shift',
+                'severity': min(70, 40 + z_score * 8),
+                'details': f'Messages {direction} than usual ({recent_avg_len:.0f} chars vs baseline {baseline_avg_len:.0f}, z={z_score:.1f})'
+            })
+
+    return anomalies_found
+
+
+@observer_bp.route('/observer/anomalies/scan', methods=['POST'])
+@require_api_key
+def scan_anomalies():
+    """Scan all tracked users for behavioral anomalies."""
+    now = datetime.utcnow()
+    discord_ids = db.session.query(MessageRecord.discord_id, MessageRecord.name).distinct().all()
+
+    total_flagged = 0
+    for discord_id, name in discord_ids:
+        anomalies = detect_anomalies_for_user(discord_id, name)
+        for a in anomalies:
+            existing = BehavioralAnomaly.query.filter_by(
+                discord_id=discord_id, anomaly_type=a['type'], cleared_at=None
+            ).filter(BehavioralAnomaly.detected_at > now - timedelta(hours=12)).first()
+            if not existing:
+                record = BehavioralAnomaly(
+                    discord_id=discord_id,
+                    name=name,
+                    anomaly_type=a['type'],
+                    severity=a['severity'],
+                    details=a['details'],
+                )
+                db.session.add(record)
+                total_flagged += 1
+
+    db.session.commit()
+    return jsonify({'scanned_users': len(discord_ids), 'new_anomalies': total_flagged})
+
+
+@observer_bp.route('/observer/anomalies', methods=['GET'])
+@require_api_key
+def list_anomalies():
+    """Return active anomalies, optionally filtered by severity."""
+    min_sev = request.args.get('min_severity', 0, type=float)
+    anomalies = BehavioralAnomaly.query.filter_by(cleared_at=None).filter(BehavioralAnomaly.severity >= min_sev).order_by(BehavioralAnomaly.severity.desc()).limit(50).all()
+    return jsonify([{
+        'id': a.id,
+        'discord_id': a.discord_id,
+        'name': a.name,
+        'type': a.anomaly_type,
+        'severity': a.severity,
+        'details': a.details,
+        'detected_at': a.detected_at.isoformat(),
+    } for a in anomalies])
+
+
+@observer_bp.route('/observer/anomalies/<discord_id>', methods=['GET'])
+@require_api_key
+def user_anomalies(discord_id):
+    """Return active anomalies for a specific user."""
+    anomalies = BehavioralAnomaly.query.filter_by(discord_id=discord_id, cleared_at=None).order_by(BehavioralAnomaly.severity.desc()).all()
+    return jsonify([{
+        'id': a.id,
+        'type': a.anomaly_type,
+        'severity': a.severity,
+        'details': a.details,
+        'detected_at': a.detected_at.isoformat(),
+    } for a in anomalies])
