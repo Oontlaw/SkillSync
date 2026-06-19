@@ -1,6 +1,8 @@
+import json
 from flask import Blueprint, request, jsonify
-from database import db, Worker, ScoreLog
+from database import db, Worker, ScoreLog, MessageRecord, GuildInfo, GuildRole, GuildMember
 from datetime import datetime
+from sqlalchemy import func
 
 observer_bp = Blueprint('observer', __name__)
 
@@ -220,3 +222,255 @@ def get_staff_activity():
         for discord_id, v in staff_activity.items()
     }
     return jsonify(summary)
+
+
+# ─────────────────────────────────────────────
+# BEHAVIORAL MESSAGE LOGGING (Community Engine)
+# ─────────────────────────────────────────────
+
+@observer_bp.route('/observer/messages', methods=['POST'])
+def log_messages():
+    """
+    Receives a batch of message records from the bot.
+    Stores anonymized behavioral data (no message content).
+    """
+    data = request.json
+    messages = data if isinstance(data, list) else [data]
+
+    for msg in messages:
+        record = MessageRecord(
+            discord_id=msg['discord_id'],
+            name=msg.get('name', 'Unknown'),
+            guild_id=msg.get('guild_id', ''),
+            channel_name=msg.get('channel', 'unknown'),
+            is_public_channel=msg.get('channel_is_public', True),
+            message_length=msg.get('length', 0),
+            message_content=msg.get('content') if msg.get('channel_is_public') else None,
+            hour_of_day=msg.get('hour'),
+            day_of_week=msg.get('day'),
+        )
+        db.session.add(record)
+
+    db.session.commit()
+    return jsonify({'message': f'{len(messages)} messages logged'}), 201
+
+
+@observer_bp.route('/observer/analytics/<discord_id>', methods=['GET'])
+def user_analytics(discord_id):
+    """Returns behavioral analytics for a specific user."""
+    stats = db.session.query(
+        func.count(MessageRecord.id).label('total_messages'),
+        func.avg(MessageRecord.message_length).label('avg_length'),
+        func.min(func.date(MessageRecord.created_at)).label('first_seen'),
+        func.max(func.date(MessageRecord.created_at)).label('last_seen'),
+    ).filter(MessageRecord.discord_id == discord_id).first()
+
+    hourly = db.session.query(
+        MessageRecord.hour_of_day,
+        func.count(MessageRecord.id).label('count')
+    ).filter(MessageRecord.discord_id == discord_id).group_by(MessageRecord.hour_of_day).order_by(MessageRecord.hour_of_day).all()
+
+    channels = db.session.query(
+        MessageRecord.channel_name,
+        func.count(MessageRecord.id).label('count')
+    ).filter(MessageRecord.discord_id == discord_id).group_by(MessageRecord.channel_name).order_by(func.count(MessageRecord.id).desc()).all()
+
+    return jsonify({
+        'discord_id': discord_id,
+        'total_messages': stats.total_messages or 0,
+        'avg_message_length': round(stats.avg_length or 0, 1),
+        'first_seen': str(stats.first_seen or ''),
+        'last_seen': str(stats.last_seen or ''),
+        'hourly_activity': {str(h.hour_of_day): h.count for h in hourly},
+        'channels': {c.channel_name: c.count for c in channels},
+    })
+
+
+@observer_bp.route('/observer/analytics', methods=['GET'])
+def all_analytics():
+    """Returns overall behavioral analytics across all users."""
+    total_messages = MessageRecord.query.count()
+    unique_users = db.session.query(MessageRecord.discord_id).distinct().count()
+
+    top_users = db.session.query(
+        MessageRecord.discord_id,
+        MessageRecord.name,
+        func.count(MessageRecord.id).label('count')
+    ).group_by(MessageRecord.discord_id, MessageRecord.name).order_by(func.count(MessageRecord.id).desc()).limit(10).all()
+
+    hourly_all = db.session.query(
+        MessageRecord.hour_of_day,
+        func.count(MessageRecord.id).label('count')
+    ).group_by(MessageRecord.hour_of_day).order_by(MessageRecord.hour_of_day).all()
+
+    return jsonify({
+        'total_messages': total_messages,
+        'unique_users': unique_users,
+        'top_users': [{'id': u.discord_id, 'name': u.name, 'messages': u.count} for u in top_users],
+        'hourly_activity': {str(h.hour_of_day): h.count for h in hourly_all},
+    })
+
+
+# ─────────────────────────────────────────────
+# GUILD SCANNING — Role & Staff Analysis
+# ─────────────────────────────────────────────
+
+@observer_bp.route('/observer/guild-scan', methods=['POST'])
+def receive_guild_scan():
+    """
+    Receives a full guild scan from the bot.
+    Stores guild info, roles, and members with staff flags.
+    """
+    data = request.json
+
+    guild_id = data['guild_id']
+
+    # Upsert GuildInfo
+    guild = GuildInfo.query.filter_by(guild_id=guild_id).first()
+    if not guild:
+        guild = GuildInfo(guild_id=guild_id)
+    guild.name = data['name']
+    guild.owner_id = data.get('owner_id')
+    guild.owner_name = data.get('owner_name')
+    guild.member_count = data.get('member_count', 0)
+    guild.online_count = data.get('online_count', 0)
+    guild.staff_count = data.get('staff_count', 0)
+    guild.bot_count = data.get('bot_count', 0)
+    guild.role_count = data.get('role_count', 0)
+    guild.prefix = data.get('prefix', '["!ss "]')
+    guild.scanned_at = datetime.utcnow()
+    db.session.add(guild)
+    db.session.flush()
+
+    # Upsert roles
+    GuildRole.query.filter_by(guild_id=guild_id).delete()
+    for r in data.get('roles', []):
+        role = GuildRole(
+            guild_id=guild_id,
+            role_id=r['role_id'],
+            name=r['name'],
+            position=r['position'],
+            color=r.get('color'),
+            is_admin=r.get('is_admin', False),
+            can_ban=r.get('can_ban', False),
+            can_kick=r.get('can_kick', False),
+            can_manage_messages=r.get('can_manage_messages', False),
+            can_manage_guild=r.get('can_manage_guild', False),
+            can_manage_roles=r.get('can_manage_roles', False),
+            is_mod=r.get('is_mod', False),
+            member_count=r.get('member_count', 0),
+        )
+        db.session.add(role)
+
+    # Upsert members
+    GuildMember.query.filter_by(guild_id=guild_id).delete()
+    for m in data.get('members', []):
+        member = GuildMember(
+            guild_id=guild_id,
+            member_id=m['member_id'],
+            name=m['name'],
+            display_name=m.get('display_name'),
+            joined_at=datetime.fromisoformat(m['joined_at']) if m.get('joined_at') else None,
+            is_bot=m.get('is_bot', False),
+            is_owner=m.get('is_owner', False),
+            is_staff=m.get('is_staff', False),
+            role_ids=m.get('role_ids'),
+            top_role_position=m.get('top_role_position', 0),
+        )
+        db.session.add(member)
+
+    db.session.commit()
+
+    print(f'[Observer API] Guild scan stored: {guild.name} — {guild.staff_count} staff, {guild.member_count} members')
+    return jsonify({'message': 'Guild scan stored', 'guild': guild.name, 'staff': guild.staff_count}), 201
+
+
+@observer_bp.route('/observer/guilds', methods=['GET'])
+def list_guilds():
+    """Lists all scanned guilds with summary stats."""
+    guilds = GuildInfo.query.order_by(GuildInfo.name).all()
+    return jsonify([{
+        'guild_id': g.guild_id,
+        'name': g.name,
+        'prefixes': json.loads(g.prefix) if g.prefix else ['!ss '],
+        'owner_name': g.owner_name,
+        'member_count': g.member_count,
+        'online_count': g.online_count,
+        'staff_count': g.staff_count,
+        'bot_count': g.bot_count,
+        'role_count': g.role_count,
+        'scanned_at': g.scanned_at.isoformat() if g.scanned_at else None,
+    } for g in guilds])
+
+
+@observer_bp.route('/observer/guilds/<guild_id>/members', methods=['GET'])
+def list_guild_members(guild_id):
+    """Lists members of a guild, split by staff/non-staff."""
+    staff_only = request.args.get('staff', '').lower() == 'true'
+    bots = request.args.get('bots', '').lower() == 'true'
+
+    query = GuildMember.query.filter_by(guild_id=guild_id)
+    if staff_only:
+        query = query.filter_by(is_staff=True)
+    if not bots:
+        query = query.filter_by(is_bot=False)
+
+    members = query.order_by(GuildMember.top_role_position.desc(), GuildMember.name).all()
+    return jsonify([{
+        'member_id': m.member_id,
+        'name': m.name,
+        'display_name': m.display_name,
+        'is_bot': m.is_bot,
+        'is_owner': m.is_owner,
+        'is_staff': m.is_staff,
+        'is_manually_set': m.is_manually_set,
+        'role_ids': m.role_ids.split(',') if m.role_ids else [],
+        'top_role_position': m.top_role_position,
+        'total_messages': m.total_messages,
+    } for m in members])
+
+
+@observer_bp.route('/observer/guilds/<guild_id>/roles', methods=['GET'])
+def list_guild_roles(guild_id):
+    """Lists roles of a guild."""
+    mods_only = request.args.get('mods', '').lower() == 'true'
+
+    query = GuildRole.query.filter_by(guild_id=guild_id)
+    if mods_only:
+        query = query.filter_by(is_mod=True)
+
+    roles = query.order_by(GuildRole.position.desc()).all()
+    return jsonify([{
+        'role_id': r.role_id,
+        'name': r.name,
+        'position': r.position,
+        'color': r.color,
+        'is_admin': r.is_admin,
+        'can_ban': r.can_ban,
+        'can_kick': r.can_kick,
+        'can_manage_messages': r.can_manage_messages,
+        'can_manage_guild': r.can_manage_guild,
+        'can_manage_roles': r.can_manage_roles,
+        'is_mod': r.is_mod,
+        'member_count': r.member_count,
+    } for r in roles])
+
+
+@observer_bp.route('/observer/guilds/<guild_id>/prefix', methods=['GET', 'PATCH'])
+def guild_prefix(guild_id):
+    """Get or set prefixes for a guild. Stores as JSON array."""
+    guild = GuildInfo.query.filter_by(guild_id=guild_id).first_or_404()
+
+    if request.method == 'PATCH':
+        data = request.json
+        new_prefixes = data.get('prefixes', ['!ss '])
+        for p in new_prefixes:
+            if len(p) > 10:
+                return jsonify({'error': f'Prefix "{p}" too long (max 10 chars)'}), 400
+        guild.prefix = json.dumps(new_prefixes)
+        db.session.commit()
+        print(f'[Observer API] Prefixes set for {guild.name}: {new_prefixes}')
+        return jsonify({'guild_id': guild_id, 'prefixes': new_prefixes})
+
+    prefixes = json.loads(guild.prefix) if guild.prefix else ['!ss ']
+    return jsonify({'guild_id': guild_id, 'prefixes': prefixes})

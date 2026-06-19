@@ -82,3 +82,93 @@ class AdminCorrection(db.Model):
 
     def __repr__(self):
         return f'<AdminCorrection worker={self.worker_id} by={self.corrected_by}>'
+
+
+class MessageRecord(db.Model):
+    __tablename__ = 'message_records'
+
+    id = db.Column(db.Integer, primary_key=True)
+    discord_id = db.Column(db.String(50), nullable=False)
+    name = db.Column(db.String(100), nullable=True)
+    guild_id = db.Column(db.String(50), nullable=False)
+    channel_name = db.Column(db.String(100), nullable=True)
+    is_public_channel = db.Column(db.Boolean, default=True)
+    message_length = db.Column(db.Integer, default=0)
+    message_content = db.Column(db.Text, nullable=True)      # Only stored for public channels
+    hour_of_day = db.Column(db.Integer, nullable=True)       # 0-23
+    day_of_week = db.Column(db.Integer, nullable=True)       # 0=Mon, 6=Sun
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<MessageRecord {self.discord_id} | len={self.message_length}>'
+
+
+class GuildInfo(db.Model):
+    """Stores scanned guild/server information."""
+    __tablename__ = 'guild_info'
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), unique=True, nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    owner_id = db.Column(db.String(50), nullable=True)
+    owner_name = db.Column(db.String(100), nullable=True)
+    member_count = db.Column(db.Integer, default=0)
+    online_count = db.Column(db.Integer, default=0)
+    staff_count = db.Column(db.Integer, default=0)
+    bot_count = db.Column(db.Integer, default=0)
+    role_count = db.Column(db.Integer, default=0)
+    prefix = db.Column(db.Text, default='["!ss "]')
+    scanned_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class GuildRole(db.Model):
+    """Stores role information per guild, including mod-relevant permissions."""
+    __tablename__ = 'guild_roles'
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False)
+    role_id = db.Column(db.String(50), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    position = db.Column(db.Integer, default=0)
+    color = db.Column(db.String(20), nullable=True)
+    is_admin = db.Column(db.Boolean, default=False)
+    can_ban = db.Column(db.Boolean, default=False)
+    can_kick = db.Column(db.Boolean, default=False)
+    can_manage_messages = db.Column(db.Boolean, default=False)
+    can_manage_guild = db.Column(db.Boolean, default=False)
+    can_manage_roles = db.Column(db.Boolean, default=False)
+    is_mod = db.Column(db.Boolean, default=False)
+    is_manually_set = db.Column(db.Boolean, default=False)
+    member_count = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def is_mod_role(self):
+        """Auto-determine if this role grants moderation power."""
+        return any([
+            self.is_admin,
+            self.can_ban,
+            self.can_kick,
+            self.can_manage_guild,
+            self.can_manage_roles,
+        ])
+
+
+class GuildMember(db.Model):
+    """Stores member information per guild with staff flags."""
+    __tablename__ = 'guild_members'
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False)
+    member_id = db.Column(db.String(50), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    display_name = db.Column(db.String(100), nullable=True)
+    joined_at = db.Column(db.DateTime, nullable=True)
+    is_bot = db.Column(db.Boolean, default=False)
+    is_owner = db.Column(db.Boolean, default=False)
+    is_staff = db.Column(db.Boolean, default=False)
+    is_manually_set = db.Column(db.Boolean, default=False)
+    role_ids = db.Column(db.Text, nullable=True)
+    top_role_position = db.Column(db.Integer, default=0)
+    total_messages = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
