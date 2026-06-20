@@ -1,4 +1,5 @@
 import os
+import secrets
 import requests
 from flask import Blueprint, redirect, request, session, url_for
 from database import db, GuildInfo
@@ -16,16 +17,24 @@ PERM_MANAGE_GUILD = 1 << 5
 
 @auth_bp.route('/login')
 def login():
+    state = secrets.token_hex(16)
+    session['oauth_state'] = state
     redirect_uri = url_for('auth.callback', _external=True, _scheme=request.scheme)
     return redirect(
         f'{DISCORD_API}/oauth2/authorize?client_id={CLIENT_ID}'
         f'&redirect_uri={redirect_uri}'
         f'&response_type=code&scope=identify%20guilds'
+        f'&state={state}'
     )
 
 
 @auth_bp.route('/callback')
 def callback():
+    returned_state = request.args.get('state')
+    stored_state = session.pop('oauth_state', None)
+    if not returned_state or returned_state != stored_state:
+        return 'Invalid state parameter. Possible CSRF attack.', 403
+
     code = request.args.get('code')
     if not code:
         return 'No authorization code received.', 400
@@ -79,7 +88,7 @@ def callback():
     return redirect(url_for('dashboard.index'))
 
 
-@auth_bp.route('/logout')
+@auth_bp.route('/logout', methods=['POST'])
 def logout():
     session.clear()
     return redirect(url_for('dashboard.index'))

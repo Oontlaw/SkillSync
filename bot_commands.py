@@ -3,15 +3,18 @@ from discord.ext import commands
 import requests
 import os
 import typing
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 SKILLSYNC_API = os.getenv('SKILLSYNC_API', 'http://localhost:5000/api')
 API_KEY = os.getenv('API_KEY')
 
-def api_post(endpoint, payload):
+async def api_post(endpoint, payload):
     try:
-        requests.post(f'{SKILLSYNC_API}{endpoint}', json=payload,
-                     headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
+        await asyncio.to_thread(
+            requests.post, f'{SKILLSYNC_API}{endpoint}', json=payload,
+            headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5
+        )
     except:
         pass
 
@@ -68,7 +71,10 @@ class Moderation(commands.Cog):
                 return
             prefixes.append(value)
             self.bot.prefix_cache[str(ctx.guild.id)] = prefixes
-            requests.patch(f'{SKILLSYNC_API}/observer/guilds/{ctx.guild.id}/prefix', json={'prefixes': prefixes}, headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
+            await asyncio.to_thread(
+                requests.patch, f'{SKILLSYNC_API}/observer/guilds/{ctx.guild.id}/prefix',
+                json={'prefixes': prefixes}, headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5
+            )
             await ctx.send(f'Added prefix `{value}`. Active: `{"`, `".join(prefixes)}`')
             return
 
@@ -82,7 +88,10 @@ class Moderation(commands.Cog):
                 return
             prefixes.remove(value)
             self.bot.prefix_cache[str(ctx.guild.id)] = prefixes
-            requests.patch(f'{SKILLSYNC_API}/observer/guilds/{ctx.guild.id}/prefix', json={'prefixes': prefixes}, headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
+            await asyncio.to_thread(
+                requests.patch, f'{SKILLSYNC_API}/observer/guilds/{ctx.guild.id}/prefix',
+                json={'prefixes': prefixes}, headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5
+            )
             await ctx.send(f'Removed prefix `{value}`. Active: `{"`, `".join(prefixes)}`')
             return
 
@@ -90,7 +99,10 @@ class Moderation(commands.Cog):
         if action == 'reset':
             prefixes = ['!ss ']
             self.bot.prefix_cache[str(ctx.guild.id)] = prefixes
-            requests.patch(f'{SKILLSYNC_API}/observer/guilds/{ctx.guild.id}/prefix', json={'prefixes': prefixes}, headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
+            await asyncio.to_thread(
+                requests.patch, f'{SKILLSYNC_API}/observer/guilds/{ctx.guild.id}/prefix',
+                json={'prefixes': prefixes}, headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5
+            )
             await ctx.send('Reset to default prefix: `!ss `')
             return
 
@@ -104,7 +116,10 @@ class Moderation(commands.Cog):
                 return
             prefixes.append(action)
             self.bot.prefix_cache[str(ctx.guild.id)] = prefixes
-            requests.patch(f'{SKILLSYNC_API}/observer/guilds/{ctx.guild.id}/prefix', json={'prefixes': prefixes}, headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
+            await asyncio.to_thread(
+                requests.patch, f'{SKILLSYNC_API}/observer/guilds/{ctx.guild.id}/prefix',
+                json={'prefixes': prefixes}, headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5
+            )
             await ctx.send(f'Added prefix `{action}`. Active: `{"`, `".join(prefixes)}`')
             return
 
@@ -119,7 +134,7 @@ class Moderation(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def rescan(self, ctx):
         await ctx.send('Scanning server roles, members, and permissions...')
-        self.bot.scan_guild(ctx.guild)
+        await self.bot.scan_guild(ctx.guild)
         await ctx.send('Scan complete.')
 
     # ── ban ──
@@ -132,7 +147,7 @@ class Moderation(commands.Cog):
             await ctx.send(err)
             return
         await target.ban(reason=f'{ctx.author.name}: {reason}')
-        api_post('/observer/action', {
+        await api_post('/observer/action', {
             'discord_id': str(ctx.author.id),
             'staff_name': ctx.author.name,
             'action_type': 'ban_issued',
@@ -162,7 +177,7 @@ class Moderation(commands.Cog):
             await ctx.send(err)
             return
         await target.kick(reason=f'{ctx.author.name}: {reason}')
-        api_post('/observer/action', {
+        await api_post('/observer/action', {
             'discord_id': str(ctx.author.id),
             'staff_name': ctx.author.name,
             'action_type': 'kick_issued',
@@ -194,7 +209,7 @@ class Moderation(commands.Cog):
             return
         until = discord.utils.utcnow() + timedelta(minutes=minutes)
         await target.timeout(until, reason=f'{ctx.author.name}: {reason}')
-        api_post('/observer/action', {
+        await api_post('/observer/action', {
             'discord_id': str(ctx.author.id),
             'staff_name': ctx.author.name,
             'action_type': 'timeout_issued',
@@ -221,7 +236,7 @@ class Moderation(commands.Cog):
         if not ok:
             await ctx.send(err)
             return
-        api_post('/observer/action', {
+        await api_post('/observer/action', {
             'discord_id': str(ctx.author.id),
             'staff_name': ctx.author.name,
             'action_type': 'warn_issued',

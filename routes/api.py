@@ -1,4 +1,5 @@
-from flask import Blueprint, request, jsonify
+from functools import wraps
+from flask import Blueprint, request, jsonify, session
 from database import db, Worker, Task, ScoreLog
 from scoring import award_points, admin_correction, get_leaderboard, get_worker_history
 from datetime import datetime
@@ -6,9 +7,19 @@ from datetime import datetime
 api_bp = Blueprint('api', __name__)
 
 
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user' not in session:
+            return jsonify({'error': 'Authentication required'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
 # --- Workers ---
 
 @api_bp.route('/workers', methods=['GET'])
+@login_required
 def get_workers():
     workers = Worker.query.all()
     return jsonify([{
@@ -18,6 +29,7 @@ def get_workers():
 
 
 @api_bp.route('/workers', methods=['POST'])
+@login_required
 def add_worker():
     data = request.json
     worker = Worker(
@@ -34,6 +46,7 @@ def add_worker():
 # --- Tasks ---
 
 @api_bp.route('/tasks', methods=['POST'])
+@login_required
 def assign_task():
     data = request.json
     task = Task(
@@ -48,6 +61,7 @@ def assign_task():
 
 
 @api_bp.route('/tasks/<int:task_id>/complete', methods=['POST'])
+@login_required
 def complete_task(task_id):
     data = request.json
     task = Task.query.get_or_404(task_id)
@@ -74,6 +88,7 @@ def complete_task(task_id):
 
 
 @api_bp.route('/tasks/<int:task_id>/miss', methods=['POST'])
+@login_required
 def miss_task(task_id):
     task = Task.query.get_or_404(task_id)
     task.status = 'missed'
@@ -84,6 +99,7 @@ def miss_task(task_id):
 
 
 @api_bp.route('/tasks/<int:task_id>/anomaly', methods=['POST'])
+@login_required
 def flag_anomaly(task_id):
     data = request.json
     task = Task.query.get_or_404(task_id)
@@ -97,6 +113,7 @@ def flag_anomaly(task_id):
 # --- Admin Correction ---
 
 @api_bp.route('/admin/correct', methods=['POST'])
+@login_required
 def correct_score():
     data = request.json
     result = admin_correction(
@@ -112,12 +129,14 @@ def correct_score():
 # --- Leaderboard & History ---
 
 @api_bp.route('/leaderboard', methods=['GET'])
+@login_required
 def leaderboard():
     workers = get_leaderboard()
     return jsonify([{'name': w.name, 'score': w.score, 'id': w.id} for w in workers])
 
 
 @api_bp.route('/workers/<int:worker_id>/history', methods=['GET'])
+@login_required
 def history(worker_id):
     logs = get_worker_history(worker_id)
     return jsonify([{

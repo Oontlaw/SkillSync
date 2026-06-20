@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Message Search – SkillSync</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    body { font-family: 'Inter', sans-serif; background: #0b0d11; }
+    .card-hover { transition: all 0.2s ease; }
+    .card-hover:hover { border-color: #3b82f6; transform: translateY(-2px); }
+    input:focus, select:focus { border-color: #3b82f6 !important; outline: none; box-shadow: 0 0 0 2px rgba(59,130,246,0.15); }
+  </style>
+</head>
+<body class="text-gray-100 min-h-screen">
+
+  <nav class="border-b border-gray-800/60 px-6 py-4 flex items-center justify-between max-w-7xl mx-auto">
+    <a href="/" class="flex items-center gap-2">
+      <span class="text-blue-400 text-2xl font-bold">⚡</span>
+      <span class="text-white font-bold text-lg">SkillSync</span>
+    </a>
+    <div class="flex items-center gap-4">
+      <span class="text-gray-500 text-sm">Message Search</span>
+      {% if user %}
+      <span class="text-gray-400 text-sm">{{ user.name }}</span>
+      <form method="POST" action="/auth/logout" style="display:inline">
+  <button type="submit" class="text-gray-500 hover:text-red-400 text-sm transition cursor-pointer">Logout</button>
+</form>
+      {% endif %}
+    </div>
+  </nav>
+
+  <div class="max-w-6xl mx-auto px-6 py-8">
+
+    <!-- Search Form -->
+    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 mb-8 glow">
+      <h1 class="text-lg font-bold text-white mb-5">🔍 Message Content Search</h1>
+      <form method="GET" action="/search" class="grid grid-cols-5 gap-4 items-end">
+        <div class="col-span-2">
+          <label class="text-xs text-gray-500 font-medium mb-1 block">Search keyword</label>
+          <input type="text" name="q" value="{{ q }}" placeholder="Type to search message content..." class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-3 py-2.5 text-white placeholder-gray-600"/>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 font-medium mb-1 block">Guild</label>
+          <select name="guild" class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-3 py-2.5 text-white">
+            <option value="">All guilds</option>
+            {% for g in guilds %}
+            <option value="{{ g.guild_id }}" {% if guild_filter == g.guild_id %}selected{% endif %}>{{ g.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 font-medium mb-1 block">Channel</label>
+          <input type="text" name="channel" value="{{ channel_filter }}" placeholder="Channel name..." class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-3 py-2.5 text-white placeholder-gray-600"/>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 font-medium mb-1 block">Days back</label>
+          <select name="days" class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-3 py-2.5 text-white">
+            <option value="1" {% if days == 1 %}selected{% endif %}>24 hours</option>
+            <option value="7" {% if days == 7 %}selected{% endif %}>7 days</option>
+            <option value="30" {% if days == 30 %}selected{% endif %}>30 days</option>
+            <option value="90" {% if days == 90 %}selected{% endif %}>90 days</option>
+          </select>
+        </div>
+        <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-medium px-4 py-2.5 rounded-lg transition col-span-5 mt-2">Search</button>
+      </form>
+    </div>
+
+    <!-- Results -->
+    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+      <div class="flex justify-between items-center mb-5">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Results</h2>
+        <span class="text-gray-500 text-xs">{{ total_results }} match{{ 'es' if total_results != 1 else '' }}{% if q %} for "{{ q }}"{% endif %}</span>
+      </div>
+
+      {% if messages %}
+      <div class="space-y-3">
+        {% for msg in messages %}
+        <div class="border border-gray-800/40 rounded-xl p-4 card-hover">
+          <div class="flex justify-between items-start mb-2">
+            <div>
+              <span class="text-white font-medium text-sm">{{ msg.name or 'Unknown' }}</span>
+              <span class="text-gray-600 text-xs ml-2">#{{ msg.channel_name }}</span>
+            </div>
+            <span class="text-gray-600 text-xs">{{ msg.created_at.strftime('%d %b %Y %H:%M') }}</span>
+          </div>
+          <p class="text-gray-300 text-sm leading-relaxed">{{ msg.message_content[:300] }}{% if msg.message_content|length > 300 %}...{% endif %}</p>
+          <div class="flex gap-2 mt-2">
+            <span class="text-xs text-gray-600">{{ msg.guild_id }}</span>
+            {% if msg.is_public_channel %}
+            <span class="text-xs text-green-500/60">public</span>
+            {% else %}
+            <span class="text-xs text-yellow-500/60">restricted</span>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <p class="text-gray-600 text-xs text-center mt-4">Showing up to 200 results. Refine your search for more specific results.</p>
+      {% elif q %}
+      <div class="text-center py-12">
+        <p class="text-gray-500">No messages match your search.</p>
+        <p class="text-gray-600 text-xs mt-2">Content is only stored for trusted guilds with public channels.</p>
+      </div>
+      {% else %}
+      <div class="text-center py-12">
+        <p class="text-gray-500">Enter a keyword above to search message content.</p>
+        <p class="text-gray-600 text-xs mt-2">Content is only stored for trusted guilds with public channels.</p>
+      </div>
+      {% endif %}
+    </div>
+
+  </div>
+
+  <footer class="border-t border-gray-800/40 py-6 text-center text-gray-600 text-xs mt-8">
+    SkillSync — Workforce Intelligence for Discord
+  </footer>
+
+</body>
+</html>

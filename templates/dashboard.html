@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>SkillSync – {% if logged_out %}Workforce Intelligence Bot{% else %}Admin Dashboard{% endif %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
   <style>
     body { font-family: 'Inter', sans-serif; background: #0b0d11; }
@@ -24,8 +25,11 @@
     </a>
     <div class="flex items-center gap-4">
       {% if user %}
+      <a href="/search" class="text-gray-400 hover:text-blue-400 text-sm transition">Search</a>
       <span class="text-gray-400 text-sm">{{ user.name }}</span>
-      <a href="/auth/logout" class="text-gray-500 hover:text-red-400 text-sm transition">Logout</a>
+      <form method="POST" action="/auth/logout" style="display:inline">
+  <button type="submit" class="text-gray-500 hover:text-red-400 text-sm transition cursor-pointer">Logout</button>
+</form>
       {% else %}
       <a href="/auth/login" class="border border-gray-700 hover:border-gray-500 px-5 py-2 rounded-lg text-sm font-medium transition">Login</a>
       <a href="{{ invite_url }}" target="_blank" class="bg-blue-600 hover:bg-blue-500 px-5 py-2 rounded-lg text-sm font-medium transition shadow-lg shadow-blue-600/20">Invite Bot</a>
@@ -115,6 +119,32 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Charts Row -->
+  <div class="max-w-7xl mx-auto px-6 pb-6">
+    <div class="grid grid-cols-3 gap-6">
+      <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🕐 Hourly Activity</h2>
+        <div class="relative" style="height:160px"><canvas id="hourlyChart"></canvas></div>
+      </div>
+      <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">📊 Community vs Staff</h2>
+        <div class="relative" style="height:160px"><canvas id="staffChart"></canvas></div>
+      </div>
+      <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">📈 Score Sources</h2>
+        <div class="relative" style="height:160px"><canvas id="sourcesChart"></canvas></div>
+      </div>
+    </div>
+    {% if daily_volume %}
+    <div class="grid grid-cols-1 mt-6">
+      <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">📅 Message Volume (7 days)</h2>
+        <div class="relative" style="height:120px"><canvas id="volumeChart"></canvas></div>
+      </div>
+    </div>
+    {% endif %}
   </div>
 
   <!-- Anomalies -->
@@ -255,6 +285,117 @@
       </div>
     </div>
   </div>
+
+  <script>
+    const gridColor = 'rgba(255,255,255,0.05)';
+    const textColor = '#9ca3af';
+    const font = 'Inter';
+
+    function darkChart(ctx, config) {
+      config.options.responsive = true;
+      config.options.maintainAspectRatio = true;
+      if (config.options.plugins && config.options.plugins.legend) {
+        config.options.plugins.legend.labels = config.options.plugins.legend.labels || {};
+        config.options.plugins.legend.labels.color = textColor;
+        config.options.plugins.legend.labels.font = { family: font };
+      }
+      if (config.options.scales) {
+        if (config.options.scales.x) { config.options.scales.x.ticks = config.options.scales.x.ticks || {}; config.options.scales.x.ticks.color = textColor; config.options.scales.x.grid = config.options.scales.x.grid || {}; config.options.scales.x.grid.color = gridColor; }
+        if (config.options.scales.y) { config.options.scales.y.ticks = config.options.scales.y.ticks || {}; config.options.scales.y.ticks.color = textColor; config.options.scales.y.grid = config.options.scales.y.grid || {}; config.options.scales.y.grid.color = gridColor; }
+      }
+      return new Chart(ctx, config);
+    }
+
+    // Hourly Activity
+    const hours = Array.from({length: 24}, (_, i) => `${i}:00`);
+    const hourlyData = {{ hourly_activity | tojson }};
+    darkChart(document.getElementById('hourlyChart'), {
+      type: 'bar',
+      data: {
+        labels: hours,
+        datasets: [{
+          label: 'Messages',
+          data: hours.map((_, i) => hourlyData[i] || 0),
+          backgroundColor: 'rgba(59,130,246,0.6)',
+          borderColor: '#3b82f6',
+          borderWidth: 1,
+          borderRadius: 3,
+        }]
+      },
+      options: {
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { maxTicksLimit: 8, font: { family: font } } },
+          y: { beginAtZero: true, ticks: { font: { family: font } } }
+        }
+      }
+    });
+
+    // Staff vs Community
+    const totalMembers = {{ total_members_tracked }};
+    const totalStaff = {{ total_staff_tracked }};
+    darkChart(document.getElementById('staffChart'), {
+      type: 'doughnut',
+      data: {
+        labels: ['Community', 'Staff'],
+        datasets: [{
+          data: [Math.max(0, totalMembers - totalStaff), totalStaff],
+          backgroundColor: ['rgba(75,85,99,0.6)', 'rgba(59,130,246,0.8)'],
+          borderColor: ['#4b5563', '#3b82f6'],
+          borderWidth: 2,
+        }]
+      },
+      options: { plugins: { legend: { position: 'bottom' } } }
+    });
+
+    // Score Sources
+    const sources = {{ score_sources | tojson }};
+    const sourceLabels = Object.keys(sources);
+    const sourceColors = {discord: '#3b82f6', system: '#10b981', admin: '#f59e0b'};
+    darkChart(document.getElementById('sourcesChart'), {
+      type: 'doughnut',
+      data: {
+        labels: sourceLabels,
+        datasets: [{
+          data: sourceLabels.map(k => sources[k]),
+          backgroundColor: sourceLabels.map(k => sourceColors[k] || 'rgba(156,163,175,0.6)'),
+          borderColor: '#111318',
+          borderWidth: 3,
+        }]
+      },
+      options: { plugins: { legend: { position: 'bottom' } } }
+    });
+
+    // Daily Volume
+    {% if daily_volume %}
+    const days = {{ daily_volume | tojson }};
+    const dayLabels = Object.keys(days);
+    const dayValues = Object.values(days);
+    darkChart(document.getElementById('volumeChart'), {
+      type: 'line',
+      data: {
+        labels: dayLabels,
+        datasets: [{
+          label: 'Messages',
+          data: dayValues,
+          borderColor: '#3b82f6',
+          backgroundColor: 'rgba(59,130,246,0.1)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 3,
+          pointBackgroundColor: '#3b82f6',
+        }]
+      },
+      options: {
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { font: { family: font } } },
+          y: { beginAtZero: true, ticks: { font: { family: font } } }
+        }
+      }
+    });
+    {% endif %}
+  </script>
 
   {% endif %}
 

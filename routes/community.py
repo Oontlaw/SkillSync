@@ -1,10 +1,22 @@
-from flask import Blueprint, request, jsonify
+from functools import wraps
+from flask import Blueprint, request, jsonify, session
 from database import db, CommunityEvent, Worker
 from scoring import award_points
 
 community_bp = Blueprint('community', __name__)
 
+
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user' not in session:
+            return jsonify({'error': 'Authentication required'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
 @community_bp.route('/community/event', methods=['POST'])
+@login_required
 def community_event():
     data = request.json
     discord_id = data.get('discord_id')

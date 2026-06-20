@@ -31,6 +31,7 @@ if not API_KEY:
 
 # How long to watch a ban before deciding it's "confirmed" (in hours)
 BAN_WATCH_HOURS = 48
+MESSAGE_RETENTION_DAYS = int(os.getenv('MESSAGE_RETENTION_DAYS', '90'))
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -47,6 +48,11 @@ prefix_cache = {}
 # ── Trusted guilds: { guild_id: True/False } ──
 # Only trusted guilds get message content stored (for compliance).
 content_trust = {}
+
+# ── Active @everyone/@here pings: { guild_id: {...} } ──
+# Tracks moderator pings within the 20-min observation window.
+active_pings = {}
+PING_WATCH_MINUTES = 20
 
 def get_prefix(bot_, message):
     """Dynamic prefix per guild + bot mention. Falls back to ['!ss ']."""
@@ -75,13 +81,20 @@ MOD_BOT_NAMES = ['mee6', 'dyno', 'carl-bot', 'wick', 'arcane', 'combot', 'gaius'
 # HELPERS
 # ─────────────────────────────────────────────
 
-def api_post(endpoint, payload):
-    """Send data to SkillSync backend silently."""
+def _api_post_sync(endpoint, payload):
+    """Send data to SkillSync backend silently. Returns response JSON or None."""
     try:
-        requests.post(f'{SKILLSYNC_API}{endpoint}', json=payload,
-                     headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
+        r = requests.post(f'{SKILLSYNC_API}{endpoint}', json=payload,
+                         headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
+        if r.ok:
+            return r.json()
     except Exception as e:
         print(f'[SkillSync Observer] API error on {endpoint}: {e}')
+    return None
+
+async def api_post(endpoint, payload):
+    """Send data to SkillSync backend silently and asynchronously. Returns response JSON or None."""
+    return await asyncio.to_thread(_api_post_sync, endpoint, payload)
 
 def is_mod_bot(member):
     """Check if a member is a known moderation bot."""
@@ -158,25 +171,41 @@ MESSAGE_BUFFER_LIMIT = 30
 presence_buffer = []
 PRESENCE_BUFFER_LIMIT = 50
 
-def flush_message_buffer():
+# Mention tracking buffer
+# { (channel_id, mentioned_id): buffer_index } for detecting reply times
+pending_mentions = {}
+mention_buffer = []
+MENTION_BUFFER_LIMIT = 30
+
+async def flush_message_buffer():
     """Send buffered messages to the API for behavioral analysis."""
     global message_buffer
     if not message_buffer:
         return
     batch = message_buffer[:]
     message_buffer = []
-    api_post('/observer/messages', batch)
+    await api_post('/observer/messages', batch)
     log(f'FLUSHED {len(batch)} messages to behavioral log')
 
-def flush_presence_buffer():
+async def flush_presence_buffer():
     """Send buffered presence updates to the API."""
     global presence_buffer
     if not presence_buffer:
         return
     batch = presence_buffer[:]
     presence_buffer = []
-    api_post('/observer/activity', {'batch': True, 'updates': batch})
+    await api_post('/observer/activity', {'batch': True, 'updates': batch})
     log(f'FLUSHED {len(batch)} presence updates')
+
+async def flush_mention_buffer():
+    """Send buffered mention records to the API."""
+    global mention_buffer
+    if not mention_buffer:
+        return
+    batch = mention_buffer[:]
+    mention_buffer = []
+    await api_post('/observer/mentions', batch)
+    log(f'FLUSHED {len(batch)} mentions')
 
 @bot.event
 async def on_message(message):
@@ -198,7 +227,7 @@ async def on_message(message):
             warn_data = extract_warn_from_embed(embed)
             if warn_data:
                 print(f'[Observer] Warn via {message.author.name}: {warn_data["target_name"]} - {warn_data["reason"]}')
-                api_post('/observer/warn', {
+                await api_post('/observer/warn', {
                     'source_bot': message.author.name,
                     'mod_name': warn_data['mod_name'],
                     'target_name': warn_data['target_name'],
@@ -261,7 +290,7 @@ async def on_message(message):
                 'timestamp': now
             }
             log(f'STAFF ACTIVE: {author.name} in {guild.name}')
-            api_post('/observer/activity', {
+            await api_post('/observer/activity', {
                 'discord_id': str(author.id),
                 'staff_name': author.name,
                 'channel': message.channel.name,
@@ -288,7 +317,66 @@ async def on_message(message):
         entry['content'] = message.content
     message_buffer.append(entry)
     if len(message_buffer) >= MESSAGE_BUFFER_LIMIT:
-        flush_message_buffer()
+        await flush_message_buffer()
+
+    # ── Job 4: Track mentions and reply times ──
+    # Record mentions made by this message
+    for mentioned in message.mentions:
+        if mentioned.bot:
+            continue
+        mention_entry = {
+            'mentioner_id': str(author.id),
+            'mentioner_name': author.name,
+            'mentioned_id': str(mentioned.id),
+            'mentioned_name': mentioned.name,
+            'guild_id': str(guild.id),
+            'channel_name': message.channel.name,
+            'timestamp': now.isoformat(),
+            'reply_time_seconds': None,
+        }
+        mention_buffer.append(mention_entry)
+        # Store timestamp + mentioner so we can detect replies even after buffer flush
+        pending_mentions[(message.channel.id, mentioned.id)] = {
+            'ts': now,
+            'name': author.name,
+            'author_id': str(author.id),
+        }
+
+    # Detect if this message is a reply to a pending mention
+    if not message.author.bot:
+        pending_key = (message.channel.id, author.id)
+        if pending_key in pending_mentions:
+            data = pending_mentions.pop(pending_key)
+            delta = (datetime.now(timezone.utc) - data['ts']).total_seconds()
+            # Update the most recent matching mention entry in the buffer
+            for entry in reversed(mention_buffer):
+                if entry['mentioned_id'] == str(author.id) and entry['channel_name'] == message.channel.name and entry['reply_time_seconds'] is None:
+                    entry['reply_time_seconds'] = round(delta, 1)
+                    break
+            log(f'REPLY: {author.name} replied to {data["name"]} in {round(delta, 1)}s')
+
+    if len(mention_buffer) >= MENTION_BUFFER_LIMIT:
+        await flush_mention_buffer()
+
+    # ── Job 5: Detect @everyone / @here pings by staff ──
+    is_member = hasattr(author, 'roles')
+    if ('@everyone' in message.content or '@here' in message.content) and is_member:
+        is_staff_ping = any(
+            r.permissions.administrator or r.permissions.mention_everyone
+            for r in author.roles
+        )
+        if is_staff_ping:
+            now_ts = datetime.now(timezone.utc)
+            active_pings[guild.id] = {
+                'mod_id': str(author.id),
+                'mod_name': author.name,
+                'channel': message.channel.name,
+                'guild_name': guild.name,
+                'timestamp': now_ts,
+                'join_count': 0,
+                'joiners': [],
+            }
+            log(f'PING DETECTED: {author.name} pinged @everyone in #{message.channel.name}')
 
     await bot.process_commands(message)
 
@@ -299,7 +387,7 @@ async def on_message(message):
 # GUILD SCANNING — Staff / Community Analysis
 # ─────────────────────────────────────────────
 
-def scan_guild(guild):
+async def scan_guild(guild):
     """
     Full scan of a guild: roles, members, permissions, hierarchy.
     Determines mod roles and staff members automatically.
@@ -404,7 +492,35 @@ def scan_guild(guild):
             'is_public': is_public,
         })
 
-    # ── 5. Post to API ──
+    # ── 5. AutoMod Rules ──
+    automod_data = []
+    try:
+        rules = await guild.fetch_automod_rules()
+        for rule in rules:
+            trigger_type = str(rule.trigger.type) if hasattr(rule.trigger, 'type') else str(rule.trigger)
+            if hasattr(rule.trigger, 'presets') and rule.trigger.presets:
+                trigger_text = ','.join(str(p) for p in rule.trigger.presets)
+            elif hasattr(rule.trigger, 'keyword_filter') and rule.trigger.keyword_filter:
+                trigger_text = ','.join(rule.trigger.keyword_filter[:5])
+            else:
+                trigger_text = str(rule.trigger)[:200]
+            action_type = str(rule.actions[0].type) if rule.actions else 'unknown'
+            automod_data.append({
+                'rule_id': str(rule.id),
+                'name': rule.name,
+                'creator_id': str(rule.creator.id) if rule.creator else None,
+                'creator_name': rule.creator.name if rule.creator else None,
+                'trigger_type': trigger_type,
+                'trigger_text': trigger_text[:500],
+                'action_type': action_type,
+                'enabled': rule.enabled,
+                'exempt_roles': ','.join(str(r.id) for r in rule.exempt_roles) if rule.exempt_roles else None,
+                'exempt_channels': ','.join(str(c.id) for c in rule.exempt_channels) if rule.exempt_channels else None,
+            })
+    except Exception as e:
+        print(f'[SkillSync] Could not fetch AutoMod rules for {guild.name}: {e}')
+
+    # ── 6. Post to API ──
     import json
     payload = {
         'guild_id': str(guild.id),
@@ -420,10 +536,11 @@ def scan_guild(guild):
         'roles': roles_data,
         'members': members_data,
         'channels': channels_data,
+        'automod_rules': automod_data,
     }
 
-    api_post('/observer/guild-scan', payload)
-    log(f'SCAN COMPLETE: {guild.name} — {len(roles_data)} roles, {guild.member_count} members, {len(staff_member_ids)} staff')
+    await api_post('/observer/guild-scan', payload)
+    log(f'SCAN COMPLETE: {guild.name} — {len(roles_data)} roles, {guild.member_count} members, {len(staff_member_ids)} staff, {len(automod_data)} automod rules')
     print(f'[SkillSync] Scan complete: {guild.name} — {len(staff_member_ids)} staff out of {guild.member_count} members')
 
 
@@ -442,11 +559,15 @@ async def on_ready():
                 print(f'[SkillSync] WARNING: Bot lacks view_audit_log permission in {guild.name}')
     print(f'[SkillSync] Bot online as {bot.user}')
     print(f'[SkillSync] Watching {len(bot.guilds)} server(s)')
+    print(f'[SkillSync] Message retention: {MESSAGE_RETENTION_DAYS} days')
+    print(f'[SkillSync] Ping watch window: {PING_WATCH_MINUTES} min')
     check_reversed_actions.start()
     flush_message_loop.start()
+    message_cleanup_loop.start()
+    check_ping_joins.start()
     # Fetch prefixes + content trust from API
     try:
-        resp = requests.get(f'{SKILLSYNC_API}/observer/guilds', headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
+        resp = await asyncio.to_thread(requests.get, f'{SKILLSYNC_API}/observer/guilds', headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
         if resp.ok:
             for g in resp.json():
                 prefix_cache[g['guild_id']] = g.get('prefixes', ['!ss '])
@@ -458,7 +579,7 @@ async def on_ready():
     await bot.change_presence(activity=discord.Game(name=f'{first_prefixes[0].strip()} | Observe & Moderate'))
     # Scan all existing guilds on startup
     for guild in bot.guilds:
-        scan_guild(guild)
+        await scan_guild(guild)
 
 
 @bot.event
@@ -467,7 +588,7 @@ async def on_guild_join(guild):
     log(f'JOINED new guild: {guild.name} (ID: {guild.id})')
     print(f'[SkillSync] Joined new guild: {guild.name}')
     prefix_cache[str(guild.id)] = ['!ss ']
-    scan_guild(guild)
+    await scan_guild(guild)
 
 
 # ─────────────────────────────────────────────
@@ -490,12 +611,12 @@ async def on_presence_update(before, after):
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
     if len(presence_buffer) >= PRESENCE_BUFFER_LIMIT:
-        flush_presence_buffer()
+        await flush_presence_buffer()
 
 @bot.event
 async def on_member_join(member):
-    """Track new members joining the server."""
-    api_post('/observer/activity', {
+    """Track new members joining the server, and correlate with recent @everyone pings."""
+    await api_post('/observer/activity', {
         'discord_id': str(member.id),
         'staff_name': member.name,
         'action_type': 'member_join',
@@ -503,6 +624,12 @@ async def on_member_join(member):
         'joined_at': member.joined_at.isoformat() if member.joined_at else None,
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
+
+    # Check if this join is within 20 min of an @everyone ping
+    ping = active_pings.get(member.guild.id)
+    if ping:
+        ping['join_count'] += 1
+        ping['joiners'].append(member.name)
 
 
 # ─────────────────────────────────────────────
@@ -531,6 +658,25 @@ async def on_member_ban(guild, user):
                     banner_name = entry.user.name
                     reason = entry.reason or 'No reason given'
                     break
+            # Also check if this was an AutoMod action (quarantine/ban)
+            if banner_id is None:
+                async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.automod_quarantine_user):
+                    if entry.target.id == user.id:
+                        banner_name = f'AutoMod ({entry.user.name})'
+                        reason = f'AutoMod quarantine: {entry.reason or "No reason given"}'
+                        # Try to attribute to rule creator
+                        await api_post('/observer/flag', {
+                            'discord_id': str(entry.user.id) if entry.user else None,
+                            'staff_name': entry.user.name if entry.user else 'AutoMod',
+                            'action_type': 'ban_issued',
+                            'target': user.name,
+                            'guild': guild.name,
+                            'flagged': True,
+                            'flag_reason': f'AutoMod rule triggered by {entry.user.name} — review needed',
+                            'timestamp': datetime.now(timezone.utc).isoformat()
+                        })
+                        log(f'AutoMod QUARANTINE detected: {user.name} triggered rule by {entry.user.name}')
+                        return
         except Exception as e:
             print(f'[Observer] Could not read audit log for ban: {e}')
             log(f'AUDIT LOG ERROR: {e}')
@@ -538,7 +684,7 @@ async def on_member_ban(guild, user):
         if banner_id is None:
             log(f'BANNER ID IS None - cannot identify banner (need View Audit Log permission)')
             print(f'[Observer] Ban detected but could not identify banner (missing audit log permission?)')
-            api_post('/observer/action', {
+            await api_post('/observer/action', {
                 'discord_id': None,
                 'staff_name': 'Unknown',
                 'action_type': 'ban_issued',
@@ -579,7 +725,7 @@ async def on_member_ban(guild, user):
             'timestamp': datetime.now(timezone.utc)
         }
 
-        api_post('/observer/action', {
+        await api_post('/observer/action', {
             'discord_id': str(banner_id),
             'staff_name': banner_name,
             'action_type': 'ban_issued',
@@ -616,24 +762,26 @@ async def on_member_unban(guild, user):
 
         if ban_data:
             elapsed = datetime.now(timezone.utc) - ban_data['timestamp']
-        hours_elapsed = elapsed.total_seconds() / 3600
-        is_hasty = hours_elapsed <= BAN_WATCH_HOURS
+            hours_elapsed = elapsed.total_seconds() / 3600
+            is_hasty = hours_elapsed <= BAN_WATCH_HOURS
 
-        print(f'[Observer] Unban: {user.name} — {hours_elapsed:.1f}h later — flagged: {is_hasty}')
+            print(f'[Observer] Unban: {user.name} — {hours_elapsed:.1f}h later — flagged: {is_hasty}')
 
-        api_post('/observer/flag', {
-            'discord_id': ban_data['banner_id'],
-            'staff_name': ban_data['banner_name'],
-            'action_type': 'ban_reversed',
-            'target': user.name,
-            'guild': ban_data['guild_name'],
-            'original_reason': ban_data['reason'],
-            'reversed_by': unbanner_name,
-            'hours_until_reversal': round(hours_elapsed, 2),
-            'flagged': is_hasty,
-            'flag_reason': 'Ban reversed within 48 hours — possible wrongful ban' if is_hasty else None,
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        })
+            await api_post('/observer/flag', {
+                'discord_id': ban_data['banner_id'],
+                'staff_name': ban_data['banner_name'],
+                'action_type': 'ban_reversed',
+                'target': user.name,
+                'guild': ban_data['guild_name'],
+                'original_reason': ban_data['reason'],
+                'reversed_by': unbanner_name,
+                'hours_until_reversal': round(hours_elapsed, 2),
+                'flagged': is_hasty,
+                'flag_reason': 'Ban reversed within 48 hours — possible wrongful ban' if is_hasty else None,
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            })
+        else:
+            print(f'[Observer] Unban: {user.name} — no original ban data found in pending_bans')
     except Exception as e:
         print(f'[Observer] Error in on_member_unban: {e}')
 
@@ -665,6 +813,15 @@ async def on_member_update(before, after):
                         mod_name = entry.user.name
                         reason = entry.reason or 'No reason given'
                         break
+                # Check if AutoMod issued the timeout
+                if mod_id is None:
+                    async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.automod_timeout_member):
+                        if entry.target.id == after.id:
+                            mod_name = f'AutoMod ({entry.user.name})'
+                            reason = f'AutoMod timeout: {entry.reason or "No reason given"}'
+                            mod_id = entry.user.id if entry.user else None
+                            log(f'AutoMod TIMEOUT detected: {after.name} triggered rule by {entry.user.name}')
+                            break
             except Exception as e:
                 log(f'TIMEOUT AUDIT LOG ERROR in {guild.name}: {e}')
                 print(f'[Observer] Could not read audit log for timeout in {guild.name}: {e}')
@@ -697,7 +854,7 @@ async def on_member_update(before, after):
 
             print(f'[Observer] Timeout: {after.name} by {mod_name}')
 
-            api_post('/observer/action', {
+            await api_post('/observer/action', {
                 'discord_id': str(mod_id),
                 'staff_name': mod_name,
                 'action_type': 'timeout_issued',
@@ -718,7 +875,7 @@ async def on_member_update(before, after):
                 now = datetime.now(timezone.utc)
                 removed_early = now < timeout_data['until'] - timedelta(minutes=5)
 
-                api_post('/observer/flag', {
+                await api_post('/observer/flag', {
                     'discord_id': timeout_data['mod_id'],
                     'staff_name': timeout_data['mod_name'],
                     'action_type': 'timeout_reversed',
@@ -768,7 +925,7 @@ async def on_member_remove(member):
                     else:
                         print(f'[Observer] Kick: {member.name} by {kicker_name}')
 
-                    api_post('/observer/action', {
+                    await api_post('/observer/action', {
                         'discord_id': str(kicker_id),
                         'staff_name': kicker_name,
                         'action_type': 'kick_issued',
@@ -795,8 +952,9 @@ async def on_member_remove(member):
 @tasks.loop(seconds=30)
 async def flush_message_loop():
     """Flush buffered messages and presence updates every 30 seconds."""
-    flush_message_buffer()
-    flush_presence_buffer()
+    await flush_message_buffer()
+    await flush_presence_buffer()
+    await flush_mention_buffer()
 
 @tasks.loop(hours=1)
 async def check_reversed_actions():
@@ -813,7 +971,7 @@ async def check_reversed_actions():
     for key in to_confirm:
         data = pending_bans.pop(key)
         print(f'[Observer] Ban confirmed valid: {data["user_name"]} by {data["banner_name"]}')
-        api_post('/observer/confirm', {
+        await api_post('/observer/confirm', {
             'discord_id': data['banner_id'],
             'staff_name': data['banner_name'],
             'action_type': 'ban_confirmed',
@@ -825,7 +983,51 @@ async def check_reversed_actions():
 
     # Also scan for behavioral anomalies
     print(f'[Observer] Scanning behavioral anomalies...')
-    api_post('/observer/anomalies/scan', {'trigger': 'hourly'})
+    await api_post('/observer/anomalies/scan', {'trigger': 'hourly'})
+
+
+# ─────────────────────────────────────────────
+# BACKGROUND TASK — Message Retention Cleanup
+# ─────────────────────────────────────────────
+
+@tasks.loop(hours=6)
+async def message_cleanup_loop():
+    """Delete messages older than MESSAGE_RETENTION_DAYS via API."""
+    try:
+        resp = await api_post('/observer/cleanup', {'retention_days': MESSAGE_RETENTION_DAYS})
+        if resp and resp.get('deleted'):
+            print(f'[Cleanup] Deleted {resp["deleted"]} old messages, {resp.get("deleted_mentions", 0)} old mentions')
+    except Exception as e:
+        print(f'[Cleanup] Error: {e}')
+
+
+# ─────────────────────────────────────────────
+# BACKGROUND TASK — Ping Join Observation
+# ─────────────────────────────────────────────
+
+@tasks.loop(minutes=5)
+async def check_ping_joins():
+    """Every 5 min, check if any active @everyone pings have expired (20 min window).
+    If so, POST the result to the API and clean up."""
+    now = datetime.now(timezone.utc)
+    expired = [
+        gid for gid, data in active_pings.items()
+        if (now - data['timestamp']).total_seconds() / 60 > PING_WATCH_MINUTES
+    ]
+    for gid in expired:
+        data = active_pings.pop(gid)
+        if data['join_count'] > 0:
+            print(f'[PingWatch] {data["mod_name"]} pinged @everyone, {data["join_count"]} joined within {PING_WATCH_MINUTES}min')
+            await api_post('/observer/ping-join', {
+                'moderator_id': data['mod_id'],
+                'moderator_name': data['mod_name'],
+                'guild_id': str(gid),
+                'guild_name': data['guild_name'],
+                'channel': data['channel'],
+                'new_members': data['join_count'],
+                'joiners': ','.join(data['joiners'][:50]),
+                'timestamp': data['timestamp'].isoformat(),
+            })
 
 
 if __name__ == '__main__':

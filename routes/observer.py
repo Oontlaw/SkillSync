@@ -5,7 +5,7 @@ import math
 from collections import defaultdict
 from functools import wraps
 from flask import Blueprint, request, jsonify
-from database import db, Worker, ScoreLog, MessageRecord, GuildInfo, GuildRole, GuildMember, GuildChannel, BehavioralAnomaly
+from database import db, Worker, ScoreLog, MessageRecord, GuildInfo, GuildRole, GuildMember, GuildChannel, BehavioralAnomaly, MentionRecord, AutoModRule, PingJoinEvent
 from datetime import datetime, timedelta
 from sqlalchemy import func
 
@@ -24,6 +24,28 @@ def require_api_key(f):
         return f(*args, **kwargs)
     return decorated
 
+
+def validate_payload(data, required_fields):
+    """Check required fields exist and are non-empty."""
+    missing = [f for f in required_fields if not data.get(f)]
+    if missing:
+        return False, f'Missing required fields: {", ".join(missing)}'
+    return True, None
+
+
+def sanitize_str(value, max_length=200):
+    """Strip and truncate string inputs."""
+    if value is None:
+        return None
+    return str(value).strip()[:max_length]
+
+
+VALID_ACTIONS = {
+    'ban_issued', 'kick_issued', 'timeout_issued', 'warn_issued',
+    'ban_confirmed', 'ban_reversed', 'timeout_reversed',
+    'presence_change', 'member_join'
+}
+
 # ── In-memory store for staff activity (aggregated per session) ──
 # { discord_id: { 'message_count': int, 'channels': set, 'last_seen': datetime } }
 staff_activity = {}
@@ -37,18 +59,28 @@ def log_action():
     Logs it and gives the staff member points for taking action.
     """
     data = request.json
-    discord_id = data.get('discord_id')
-    staff_name = data.get('staff_name', 'Unknown')
-    action_type = data.get('action_type')
-    target = data.get('target')
-    guild = data.get('guild')
-    reason = data.get('reason', 'No reason given')
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
+
+    ok, err = validate_payload(data, ['discord_id', 'staff_name', 'action_type', 'guild'])
+    if not ok:
+        return jsonify({'error': err}), 400
+
+    action_type = data.get('action_type', '')
+    if action_type not in VALID_ACTIONS:
+        return jsonify({'error': f'Invalid action_type: {action_type}'}), 400
+
+    discord_id = sanitize_str(data.get('discord_id'), 50)
+    staff_name = sanitize_str(data.get('staff_name'), 100)
+    guild = sanitize_str(data.get('guild'), 100)
+    target = sanitize_str(data.get('target'), 100)
+    reason = sanitize_str(data.get('reason', 'No reason given'), 300)
 
     # Find the worker by discord_id, create if doesn't exist
     worker = Worker.query.filter_by(discord_id=discord_id).first()
     if not worker:
         worker = Worker(
-            name=staff_name,
+            name=staff_name or 'Unknown',
             email=f'worker.{uuid.uuid4().hex[:12]}@discord.local',
             discord_id=discord_id,
             role='admin',
@@ -89,13 +121,23 @@ def log_flag():
     Deducts points if flagged=True.
     """
     data = request.json
-    discord_id = data.get('discord_id')
-    staff_name = data.get('staff_name', 'Unknown')
-    action_type = data.get('action_type')
-    target = data.get('target')
-    guild = data.get('guild')
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
+
+    ok, err = validate_payload(data, ['discord_id', 'staff_name', 'action_type', 'guild'])
+    if not ok:
+        return jsonify({'error': err}), 400
+
+    action_type = data.get('action_type', '')
+    if action_type not in VALID_ACTIONS:
+        return jsonify({'error': f'Invalid action_type: {action_type}'}), 400
+
+    discord_id = sanitize_str(data.get('discord_id'), 50)
+    staff_name = sanitize_str(data.get('staff_name'), 100)
+    guild = sanitize_str(data.get('guild'), 100)
+    target = sanitize_str(data.get('target'), 100)
     flagged = data.get('flagged', False)
-    flag_reason = data.get('flag_reason', '')
+    flag_reason = sanitize_str(data.get('flag_reason', ''), 300)
     hours = data.get('hours_until_reversal')
 
     # Find the worker by discord_id, create if doesn't exist
@@ -147,12 +189,15 @@ def log_warn():
     Awards small points to the staff member for issuing a warn.
     """
     data = request.json
-    mod_name = data.get('mod_name')
-    target_name = data.get('target_name')
-    reason = data.get('reason')
-    source_bot = data.get('source_bot')
-    channel = data.get('channel')
-    guild = data.get('guild')
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
+
+    mod_name = sanitize_str(data.get('mod_name'), 100)
+    target_name = sanitize_str(data.get('target_name'), 100)
+    reason = sanitize_str(data.get('reason'), 300)
+    source_bot = sanitize_str(data.get('source_bot'), 100)
+    channel = sanitize_str(data.get('channel'), 100)
+    guild = sanitize_str(data.get('guild'), 100)
 
     # Try to find worker by name (since we only have name from embed parsing)
     worker = Worker.query.filter(
@@ -260,17 +305,24 @@ def log_messages():
     Receives a batch of message records from the bot.
     """
     data = request.json
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
+
     messages = data if isinstance(data, list) else [data]
 
     for msg in messages:
+        ok, err = validate_payload(msg, ['discord_id'])
+        if not ok:
+            continue
+
         record = MessageRecord(
-            discord_id=msg['discord_id'],
-            name=msg.get('name', 'Unknown'),
-            guild_id=msg.get('guild_id', ''),
-            channel_name=msg.get('channel', 'unknown'),
+            discord_id=sanitize_str(msg['discord_id'], 50),
+            name=sanitize_str(msg.get('name', 'Unknown'), 100),
+            guild_id=sanitize_str(msg.get('guild_id', ''), 50),
+            channel_name=sanitize_str(msg.get('channel', 'unknown'), 100),
             message_length=msg.get('length', 0),
             is_public_channel=msg.get('is_public', True),
-            message_content=msg.get('content'),
+            message_content=sanitize_str(msg.get('content'), 2000) if msg.get('content') else None,
             hour_of_day=msg.get('hour'),
             day_of_week=msg.get('day'),
         )
@@ -278,6 +330,59 @@ def log_messages():
 
     db.session.commit()
     return jsonify({'message': f'{len(messages)} messages logged'}), 201
+
+
+@observer_bp.route('/observer/mentions', methods=['POST'])
+@require_api_key
+def log_mentions():
+    """Receives a batch of mention records from the bot."""
+    data = request.json
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
+
+    records = data if isinstance(data, list) else [data]
+    for rec in records:
+        ok, err = validate_payload(rec, ['mentioner_id', 'mentioned_id', 'guild_id'])
+        if not ok:
+            continue
+        entry = MentionRecord(
+            mentioner_id=sanitize_str(rec['mentioner_id'], 50),
+            mentioner_name=sanitize_str(rec.get('mentioner_name'), 100),
+            mentioned_id=sanitize_str(rec['mentioned_id'], 50),
+            mentioned_name=sanitize_str(rec.get('mentioned_name'), 100),
+            guild_id=sanitize_str(rec['guild_id'], 50),
+            channel_name=sanitize_str(rec.get('channel_name'), 100),
+            reply_time_seconds=rec.get('reply_time_seconds'),
+        )
+        db.session.add(entry)
+
+    db.session.commit()
+    return jsonify({'message': f'{len(records)} mentions logged'}), 201
+
+
+@observer_bp.route('/observer/mentions/<discord_id>', methods=['GET'])
+@require_api_key
+def user_mention_analytics(discord_id):
+    """Returns mention analytics for a specific user (who mentioned them)."""
+    mentions_received = MentionRecord.query.filter_by(mentioned_id=discord_id).count()
+    mentions_sent = MentionRecord.query.filter_by(mentioner_id=discord_id).count()
+
+    avg_reply_time = db.session.query(func.avg(MentionRecord.reply_time_seconds)).filter(
+        MentionRecord.mentioned_id == discord_id,
+        MentionRecord.reply_time_seconds != None
+    ).scalar()
+
+    slowest_reply = MentionRecord.query.filter_by(mentioned_id=discord_id).filter(
+        MentionRecord.reply_time_seconds != None
+    ).order_by(MentionRecord.reply_time_seconds.desc()).first()
+
+    return jsonify({
+        'discord_id': discord_id,
+        'mentions_received': mentions_received,
+        'mentions_sent': mentions_sent,
+        'avg_reply_time_seconds': round(avg_reply_time or 0, 1),
+        'slowest_reply_seconds': round(slowest_reply.reply_time_seconds or 0, 1) if slowest_reply else None,
+    })
 
 
 @observer_bp.route('/observer/analytics/<discord_id>', methods=['GET'])
@@ -350,17 +455,22 @@ def receive_guild_scan():
     Stores guild info, roles, and members with staff flags.
     """
     data = request.json
-    guild_id = data.get('guild_id')
-    if not guild_id:
-        return jsonify({'error': 'guild_id is required'}), 400
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
+
+    ok, err = validate_payload(data, ['guild_id', 'name'])
+    if not ok:
+        return jsonify({'error': err}), 400
+
+    guild_id = sanitize_str(data.get('guild_id'), 50)
 
     # Upsert GuildInfo
     guild = GuildInfo.query.filter_by(guild_id=guild_id).first()
     if not guild:
         guild = GuildInfo(guild_id=guild_id)
-    guild.name = data['name']
-    guild.owner_id = data.get('owner_id')
-    guild.owner_name = data.get('owner_name')
+    guild.name = sanitize_str(data.get('name'), 200)
+    guild.owner_id = sanitize_str(data.get('owner_id'), 50)
+    guild.owner_name = sanitize_str(data.get('owner_name'), 200)
     guild.member_count = data.get('member_count', 0)
     guild.online_count = data.get('online_count', 0)
     guild.staff_count = data.get('staff_count', 0)
@@ -379,9 +489,9 @@ def receive_guild_scan():
     for r in data.get('roles', []):
         role = GuildRole(
             guild_id=guild_id,
-            role_id=r['role_id'],
-            name=r['name'],
-            position=r['position'],
+            role_id=sanitize_str(r.get('role_id', ''), 50),
+            name=sanitize_str(r.get('name', ''), 200),
+            position=r.get('position', 0),
             color=r.get('color'),
             is_admin=r.get('is_admin', False),
             can_ban=r.get('can_ban', False),
@@ -397,11 +507,13 @@ def receive_guild_scan():
     # Upsert members
     GuildMember.query.filter_by(guild_id=guild_id).delete()
     for m in data.get('members', []):
+        if not m.get('member_id') or not m.get('name'):
+            continue
         member = GuildMember(
             guild_id=guild_id,
-            member_id=m['member_id'],
-            name=m['name'],
-            display_name=m.get('display_name'),
+            member_id=sanitize_str(m.get('member_id', ''), 50),
+            name=sanitize_str(m.get('name', ''), 200),
+            display_name=sanitize_str(m.get('display_name'), 200),
             joined_at=datetime.fromisoformat(m['joined_at']) if m.get('joined_at') else None,
             is_bot=m.get('is_bot', False),
             is_owner=m.get('is_owner', False),
@@ -414,21 +526,43 @@ def receive_guild_scan():
     # Upsert channels
     GuildChannel.query.filter_by(guild_id=guild_id).delete()
     for ch in data.get('channels', []):
+        if not ch.get('channel_id'):
+            continue
         channel = GuildChannel(
             guild_id=guild_id,
-            channel_id=ch['channel_id'],
-            name=ch['name'],
-            topic=ch.get('topic'),
-            channel_type=ch.get('channel_type', 'text'),
-            category=ch.get('category'),
+            channel_id=sanitize_str(ch.get('channel_id', ''), 50),
+            name=sanitize_str(ch.get('name', ''), 200),
+            topic=sanitize_str(ch.get('topic'), 500),
+            channel_type=sanitize_str(ch.get('channel_type', 'text'), 50),
+            category=sanitize_str(ch.get('category'), 200),
             position=ch.get('position', 0),
             is_public=ch.get('is_public', True),
         )
         db.session.add(channel)
 
+    # Upsert AutoMod rules
+    AutoModRule.query.filter_by(guild_id=guild_id).delete()
+    for ar in data.get('automod_rules', []):
+        if not ar.get('rule_id'):
+            continue
+        rule = AutoModRule(
+            guild_id=guild_id,
+            rule_id=sanitize_str(ar.get('rule_id', ''), 50),
+            name=sanitize_str(ar.get('name', ''), 200),
+            creator_id=sanitize_str(ar.get('creator_id'), 50),
+            creator_name=sanitize_str(ar.get('creator_name'), 100),
+            trigger_type=sanitize_str(ar.get('trigger_type', 'unknown'), 50),
+            trigger_text=sanitize_str(ar.get('trigger_text'), 500),
+            action_type=sanitize_str(ar.get('action_type', 'unknown'), 50),
+            enabled=ar.get('enabled', True),
+            exempt_roles=sanitize_str(ar.get('exempt_roles'), 500),
+            exempt_channels=sanitize_str(ar.get('exempt_channels'), 500),
+        )
+        db.session.add(rule)
+
     db.session.commit()
 
-    print(f'[Observer API] Guild scan stored: {guild.name} — {guild.staff_count} staff, {guild.member_count} members, {len(data.get("channels", []))} channels')
+    print(f'[Observer API] Guild scan stored: {guild.name} — {guild.staff_count} staff, {guild.member_count} members, {len(data.get("channels", []))} channels, {len(data.get("automod_rules", []))} automod rules')
     return jsonify({'message': 'Guild scan stored', 'guild': guild.name, 'staff': guild.staff_count}), 201
 
 
@@ -505,6 +639,24 @@ def list_guild_roles(guild_id):
         'is_mod': r.is_mod,
         'member_count': r.member_count,
     } for r in roles])
+
+
+@observer_bp.route('/observer/guilds/<guild_id>/automod', methods=['GET'])
+@require_api_key
+def list_guild_automod(guild_id):
+    """Lists AutoMod rules for a guild."""
+    rules = AutoModRule.query.filter_by(guild_id=guild_id).order_by(AutoModRule.created_at.desc()).all()
+    return jsonify([{
+        'rule_id': r.rule_id,
+        'name': r.name,
+        'creator_name': r.creator_name,
+        'trigger_type': r.trigger_type,
+        'trigger_text': r.trigger_text,
+        'action_type': r.action_type,
+        'enabled': r.enabled,
+        'exempt_roles': r.exempt_roles.split(',') if r.exempt_roles else [],
+        'exempt_channels': r.exempt_channels.split(',') if r.exempt_channels else [],
+    } for r in rules])
 
 
 @observer_bp.route('/observer/guilds/<guild_id>/trust', methods=['GET', 'POST'])
@@ -686,3 +838,59 @@ def user_anomalies(discord_id):
         'details': a.details,
         'detected_at': a.detected_at.isoformat(),
     } for a in anomalies])
+
+
+# ─────────────────────────────────────────────
+# MESSAGE RETENTION CLEANUP
+# ─────────────────────────────────────────────
+
+@observer_bp.route('/observer/cleanup', methods=['POST'])
+@require_api_key
+def cleanup_old_messages():
+    """Delete messages and mentions older than the retention period."""
+    data = request.json or {}
+    retention_days = int(data.get('retention_days', 90))
+    retention_days = max(7, min(365, retention_days))
+    cutoff = datetime.utcnow() - timedelta(days=retention_days)
+
+    deleted_msgs = MessageRecord.query.filter(MessageRecord.created_at < cutoff).delete()
+    deleted_mentions = MentionRecord.query.filter(MentionRecord.created_at < cutoff).delete()
+    db.session.commit()
+
+    return jsonify({
+        'deleted': deleted_msgs,
+        'deleted_mentions': deleted_mentions,
+        'retention_days': retention_days,
+    })
+
+
+# ─────────────────────────────────────────────
+# PING → JOIN EVENT TRACKING
+# ─────────────────────────────────────────────
+
+@observer_bp.route('/observer/ping-join', methods=['POST'])
+@require_api_key
+def log_ping_join():
+    """Records when a moderator's @everyone ping led to new member joins within 20 min."""
+    data = request.json
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
+
+    ok, err = validate_payload(data, ['moderator_id', 'moderator_name', 'guild_id'])
+    if not ok:
+        return jsonify({'error': err}), 400
+
+    event = PingJoinEvent(
+        guild_id=sanitize_str(data['guild_id'], 50),
+        guild_name=sanitize_str(data.get('guild_name'), 100),
+        moderator_id=sanitize_str(data['moderator_id'], 50),
+        moderator_name=sanitize_str(data['moderator_name'], 100),
+        channel=sanitize_str(data.get('channel'), 100),
+        new_members=int(data.get('new_members', 0)),
+        joiners=sanitize_str(data.get('joiners'), 500),
+    )
+    db.session.add(event)
+    db.session.commit()
+
+    print(f'[PingJoin API] {event.moderator_name} pinged @everyone → +{event.new_members} joins')
+    return jsonify({'message': 'Ping-join event logged', 'id': event.id}), 201

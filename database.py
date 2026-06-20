@@ -191,6 +191,23 @@ class GuildChannel(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+class MentionRecord(db.Model):
+    __tablename__ = 'mention_records'
+
+    id = db.Column(db.Integer, primary_key=True)
+    mentioner_id = db.Column(db.String(50), nullable=False)
+    mentioner_name = db.Column(db.String(100), nullable=True)
+    mentioned_id = db.Column(db.String(50), nullable=False)
+    mentioned_name = db.Column(db.String(100), nullable=True)
+    guild_id = db.Column(db.String(50), nullable=False)
+    channel_name = db.Column(db.String(100), nullable=True)
+    reply_time_seconds = db.Column(db.Float, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<MentionRecord {self.mentioner_id} -> {self.mentioned_id} reply={self.reply_time_seconds}>'
+
+
 class BehavioralAnomaly(db.Model):
     __tablename__ = 'behavioral_anomalies'
 
@@ -206,3 +223,42 @@ class BehavioralAnomaly(db.Model):
 
     def __repr__(self):
         return f'<BehavioralAnomaly {self.anomaly_type} | {self.discord_id} | sev={self.severity}>'
+
+
+class AutoModRule(db.Model):
+    __tablename__ = 'automod_rules'
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False)
+    rule_id = db.Column(db.String(50), nullable=False)
+    name = db.Column(db.String(200), nullable=False)
+    creator_id = db.Column(db.String(50), nullable=True)
+    creator_name = db.Column(db.String(100), nullable=True)
+    trigger_type = db.Column(db.String(50), nullable=False)
+    trigger_text = db.Column(db.Text, nullable=True)
+    action_type = db.Column(db.String(50), nullable=False)
+    enabled = db.Column(db.Boolean, default=True)
+    exempt_roles = db.Column(db.Text, nullable=True)
+    exempt_channels = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<AutoModRule {self.name} | {self.trigger_type} -> {self.action_type}>'
+
+
+class PingJoinEvent(db.Model):
+    """Records when a moderator pings @everyone and new members join within 20 min."""
+    __tablename__ = 'ping_join_events'
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False)
+    guild_name = db.Column(db.String(100), nullable=True)
+    moderator_id = db.Column(db.String(50), nullable=False)
+    moderator_name = db.Column(db.String(100), nullable=True)
+    channel = db.Column(db.String(100), nullable=True)
+    new_members = db.Column(db.Integer, default=0)
+    joiners = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<PingJoinEvent {self.moderator_name} | +{self.new_members} in {self.guild_name}>'
