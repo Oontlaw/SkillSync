@@ -246,6 +246,26 @@ class AutoModRule(db.Model):
         return f'<AutoModRule {self.name} | {self.trigger_type} -> {self.action_type}>'
 
 
+class VoiceActivity(db.Model):
+    __tablename__ = 'voice_activity'
+
+    id = db.Column(db.Integer, primary_key=True)
+    discord_id = db.Column(db.String(50), nullable=False, index=True)
+    name = db.Column(db.String(100), nullable=True)
+    guild_id = db.Column(db.String(50), nullable=False)
+    guild_name = db.Column(db.String(100), nullable=True)
+    channel_name = db.Column(db.String(100), nullable=True)
+    duration_seconds = db.Column(db.Float, default=0.0)
+    hour_of_day = db.Column(db.Integer, nullable=True)
+    day_of_week = db.Column(db.Integer, nullable=True)
+    joined_at = db.Column(db.DateTime, nullable=True)
+    left_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<VoiceActivity {self.discord_id} | {self.duration_seconds}s in {self.channel_name}>'
+
+
 class PingJoinEvent(db.Model):
     """Records when a moderator pings @everyone and new members join within 20 min."""
     __tablename__ = 'ping_join_events'

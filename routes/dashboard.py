@@ -1,5 +1,5 @@
 from flask import Blueprint, render_template, session, redirect, url_for, request
-from database import db, Worker, Task, ScoreLog, AdminCorrection, MessageRecord, GuildInfo, GuildRole, GuildMember, BehavioralAnomaly, MentionRecord, AutoModRule, PingJoinEvent
+from database import db, Worker, Task, ScoreLog, AdminCorrection, MessageRecord, GuildInfo, GuildRole, GuildMember, BehavioralAnomaly, MentionRecord, AutoModRule, PingJoinEvent, VoiceActivity
 from datetime import datetime, timedelta
 from sqlalchemy import func
 
@@ -43,17 +43,35 @@ def index():
     # Behavioral analytics
     total_messages_logged = MessageRecord.query.count()
     unique_users_tracked = db.session.query(MessageRecord.discord_id).distinct().count()
+    total_voice_sessions = VoiceActivity.query.count()
+    total_voice_hours = round((db.session.query(func.sum(VoiceActivity.duration_seconds)).scalar() or 0) / 3600, 1)
     most_active = db.session.query(
         MessageRecord.name, MessageRecord.discord_id, func.count(MessageRecord.id).label('count')
     ).group_by(MessageRecord.name, MessageRecord.discord_id).order_by(func.count(MessageRecord.id).desc()).limit(5).all()
 
-    # Hourly activity for charting
+    # Hourly activity for charting (aggregate)
     hourly_data = db.session.query(
         MessageRecord.hour_of_day, func.count(MessageRecord.id).label('count')
     ).group_by(MessageRecord.hour_of_day).order_by(MessageRecord.hour_of_day).all()
     hourly_activity = {str(h): 0 for h in range(24)}
     for h, c in hourly_data:
         hourly_activity[str(h)] = c
+
+    # Per-guild hourly activity for comparative chart
+    guild_hourly_raw = db.session.query(
+        MessageRecord.guild_id, MessageRecord.hour_of_day, func.count(MessageRecord.id).label('count')
+    ).filter(MessageRecord.guild_id.in_(accessible_ids)).group_by(MessageRecord.guild_id, MessageRecord.hour_of_day).order_by(MessageRecord.guild_id, MessageRecord.hour_of_day).all() if accessible_ids else []
+    guild_hourly = {}
+    for guild_id, hour, count in guild_hourly_raw:
+        if guild_id not in guild_hourly:
+            guild_hourly[guild_id] = {str(h): 0 for h in range(24)}
+        guild_hourly[guild_id][str(hour)] = count
+
+    # Per-guild message totals
+    guild_msg_counts_raw = db.session.query(
+        MessageRecord.guild_id, func.count(MessageRecord.id).label('count')
+    ).filter(MessageRecord.guild_id.in_(accessible_ids)).group_by(MessageRecord.guild_id).all() if accessible_ids else []
+    guild_msg_counts = {g: c for g, c in guild_msg_counts_raw}
 
     # Message volume last 7 days
     seven_days_ago = datetime.utcnow() - timedelta(days=7)
@@ -103,10 +121,15 @@ def index():
         total_members_tracked=total_members_tracked,
         total_online_members=total_online_members,
         total_staff_tracked=total_staff_tracked,
+        total_voice_sessions=total_voice_sessions,
+        total_voice_hours=total_voice_hours,
         anomalies=recent_anomalies,
         hourly_activity=hourly_activity,
         daily_volume=daily_volume,
         score_sources=score_sources,
+        guild_hourly=guild_hourly,
+        guild_msg_counts=guild_msg_counts,
+        guild_name_map={g.guild_id: g.name for g in guilds},
     )
 
 @dashboard_bp.route('/worker/<int:worker_id>')
@@ -165,13 +188,34 @@ def worker_detail(worker_id):
             'sent': mentions_sent,
             'avg_reply_seconds': round(avg_reply or 0, 1),
         }
+
+        # Voice activity analytics
+        voice = VoiceActivity.query.filter_by(discord_id=worker.discord_id)
+        total_voice_sessions = voice.count()
+        total_voice_time = db.session.query(func.sum(VoiceActivity.duration_seconds)).filter_by(discord_id=worker.discord_id).scalar() or 0
+        avg_voice_duration = db.session.query(func.avg(VoiceActivity.duration_seconds)).filter_by(discord_id=worker.discord_id).scalar() or 0
+        voice_channels = db.session.query(VoiceActivity.channel_name, func.count(VoiceActivity.id).label('c'), func.sum(VoiceActivity.duration_seconds).label('total')).filter_by(discord_id=worker.discord_id).group_by(VoiceActivity.channel_name).order_by(func.sum(VoiceActivity.duration_seconds).desc()).all()
+        voice_top_channels = [{'name': v.channel_name, 'sessions': v.c, 'total_seconds': round(v.total or 0, 1)} for v in voice_channels[:5]]
+        voice_hourly_data = db.session.query(VoiceActivity.hour_of_day, func.count(VoiceActivity.id).label('count')).filter_by(discord_id=worker.discord_id).filter(VoiceActivity.hour_of_day != None).group_by(VoiceActivity.hour_of_day).order_by(VoiceActivity.hour_of_day).all()
+        voice_hourly = {str(h): 0 for h in range(24)}
+        for h, c in voice_hourly_data:
+            voice_hourly[str(h)] = c
+        voice_stats = {
+            'total_sessions': total_voice_sessions,
+            'total_hours': round(total_voice_time / 3600, 1),
+            'avg_minutes': round(avg_voice_duration / 60, 1),
+            'top_channels': voice_top_channels,
+            'hourly': voice_hourly,
+        }
     else:
         mention_stats = None
+        voice_stats = None
 
     return render_template('worker.html',
         user=session.get('user'),
         accessible_guilds=session.get('accessible_guilds', []),
         worker=worker, logs=logs, tasks=tasks, behavior=behavior, anomalies=anomalies, mention_stats=mention_stats,
+        voice_stats=voice_stats,
         worker_hourly_activity=worker_hourly_activity, cumulative_score_data=cumulative_score_data)
 
 
@@ -192,11 +236,43 @@ def guild_detail(guild_id):
     non_staff = [m for m in members if not m.is_staff]
     automod_rules = AutoModRule.query.filter_by(guild_id=guild_id, enabled=True).order_by(AutoModRule.created_at.desc()).all()
     ping_events = PingJoinEvent.query.filter_by(guild_id=guild_id).order_by(PingJoinEvent.created_at.desc()).limit(20).all()
+
+    # Per-guild hourly activity for guild detail chart
+    gh_data = db.session.query(
+        MessageRecord.hour_of_day, func.count(MessageRecord.id).label('count')
+    ).filter(MessageRecord.guild_id == guild_id).group_by(MessageRecord.hour_of_day).order_by(MessageRecord.hour_of_day).all()
+    guild_hourly_chart = {str(h): 0 for h in range(24)}
+    for h, c in gh_data:
+        guild_hourly_chart[str(h)] = c
+    guild_msg_total = MessageRecord.query.filter_by(guild_id=guild_id).count()
+
+    # Per-guild voice stats
+    guild_voice_sessions = VoiceActivity.query.filter_by(guild_id=guild_id).count()
+    guild_voice_hours = round((db.session.query(func.sum(VoiceActivity.duration_seconds)).filter_by(guild_id=guild_id).scalar() or 0) / 3600, 1)
+    guild_voice_channels = db.session.query(VoiceActivity.channel_name, func.count(VoiceActivity.id).label('c'), func.sum(VoiceActivity.duration_seconds).label('total')).filter_by(guild_id=guild_id).group_by(VoiceActivity.channel_name).order_by(func.sum(VoiceActivity.duration_seconds).desc()).limit(5).all()
+    guild_voice_top_channels = [{'name': v.channel_name, 'sessions': v.c, 'hours': round((v.total or 0) / 3600, 1)} for v in guild_voice_channels]
+    guild_voice_hourly_raw = db.session.query(
+        VoiceActivity.hour_of_day, func.count(VoiceActivity.id).label('count')
+    ).filter_by(guild_id=guild_id).filter(VoiceActivity.hour_of_day != None).group_by(VoiceActivity.hour_of_day).order_by(VoiceActivity.hour_of_day).all()
+    guild_voice_hourly = {str(h): 0 for h in range(24)}
+    for h, c in guild_voice_hourly_raw:
+        guild_voice_hourly[str(h)] = c
+    # Voice users per guild
+    guild_voice_users = db.session.query(
+        VoiceActivity.name, VoiceActivity.discord_id,
+        func.count(VoiceActivity.id).label('sessions'),
+        func.sum(VoiceActivity.duration_seconds).label('total_time')
+    ).filter_by(guild_id=guild_id).group_by(VoiceActivity.name, VoiceActivity.discord_id).order_by(func.sum(VoiceActivity.duration_seconds).desc()).limit(20).all()
+    guild_voice_users_list = [{'name': u.name, 'discord_id': u.discord_id, 'sessions': u.sessions, 'hours': round((u.total_time or 0) / 3600, 1)} for u in guild_voice_users]
+
     return render_template('guild.html',
         user=session.get('user'),
         accessible_guilds=session.get('accessible_guilds', []),
         guild=guild, roles=roles, staff=staff, members=non_staff, automod_rules=automod_rules,
-        ping_events=ping_events)
+        ping_events=ping_events, guild_hourly_chart=guild_hourly_chart, guild_msg_total=guild_msg_total,
+        guild_voice_sessions=guild_voice_sessions, guild_voice_hours=guild_voice_hours,
+        guild_voice_top_channels=guild_voice_top_channels, guild_voice_hourly=guild_voice_hourly,
+        guild_voice_users=guild_voice_users_list)
 
 
 @dashboard_bp.route('/search', methods=['GET'])

@@ -49,6 +49,12 @@ prefix_cache = {}
 # Only trusted guilds get message content stored (for compliance).
 content_trust = {}
 
+# ── Voice session tracking: { user_id: session_data } ──
+# Tracks who is currently in a voice channel so we can log duration on leave.
+voice_sessions = {}
+voice_buffer = []
+VOICE_BUFFER_LIMIT = 30
+
 # ── Active @everyone/@here pings: { guild_id: {...} } ──
 # Tracks moderator pings within the 20-min observation window.
 active_pings = {}
@@ -196,6 +202,16 @@ async def flush_presence_buffer():
     presence_buffer = []
     await api_post('/observer/activity', {'batch': True, 'updates': batch})
     log(f'FLUSHED {len(batch)} presence updates')
+
+async def flush_voice_buffer():
+    """Send buffered voice sessions to the API."""
+    global voice_buffer
+    if not voice_buffer:
+        return
+    batch = voice_buffer[:]
+    voice_buffer = []
+    await api_post('/observer/voice-activity', {'batch': True, 'sessions': batch})
+    log(f'FLUSHED {len(batch)} voice sessions')
 
 async def flush_mention_buffer():
     """Send buffered mention records to the API."""
@@ -576,7 +592,7 @@ async def on_ready():
         print(f'[SkillSync] Could not fetch prefixes: {e}')
     # Set bot presence with prefix info
     first_prefixes = prefix_cache.get(str(bot.guilds[0].id), ['!ss ']) if bot.guilds else ['!ss ']
-    await bot.change_presence(activity=discord.Game(name=f'{first_prefixes[0].strip()} | Observe & Moderate'))
+    await bot.change_presence(activity=discord.Game(name=f'{first_prefixes[0].strip()} | Watches over you in your sleep'))
     # Scan all existing guilds on startup
     for guild in bot.guilds:
         await scan_guild(guild)
@@ -630,6 +646,66 @@ async def on_member_join(member):
     if ping:
         ping['join_count'] += 1
         ping['joiners'].append(member.name)
+
+
+# ─────────────────────────────────────────────
+# VOICE CHANNEL TRACKING
+# ─────────────────────────────────────────────
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    """Track voice channel joins/leaves/moves for behavioral pattern recognition.
+    Sessions are keyed per-guild so the same user in different servers is tracked separately.
+    """
+    if member.bot or not member.guild:
+        return
+    user_id = str(member.id)
+    guild_id = str(member.guild.id)
+    key = (guild_id, user_id)
+
+    def make_voice_entry(session_data, left_now):
+        duration = (left_now - session_data['joined_at']).total_seconds()
+        hour = session_data['joined_at'].hour
+        day = session_data['joined_at'].weekday()
+        return {
+            'discord_id': user_id,
+            'name': member.name,
+            'guild_id': guild_id,
+            'guild_name': member.guild.name,
+            'channel_name': session_data['channel_name'],
+            'duration_seconds': round(duration, 1),
+            'hour_of_day': hour,
+            'day_of_week': day,
+            'joined_at': session_data['joined_at'].isoformat(),
+            'left_at': left_now.isoformat(),
+        }
+
+    now = datetime.now(timezone.utc)
+
+    # Left voice channel entirely (or disconnected)
+    if before.channel and not after.channel:
+        session = voice_sessions.pop(key, None)
+        if session:
+            voice_buffer.append(make_voice_entry(session, now))
+            if len(voice_buffer) >= VOICE_BUFFER_LIMIT:
+                await flush_voice_buffer()
+
+    # Joined a voice channel (or moved)
+    if after.channel:
+        # If they moved channels, log the previous session first
+        if before.channel and before.channel != after.channel:
+            session = voice_sessions.pop(key, None)
+            if session:
+                voice_buffer.append(make_voice_entry(session, now))
+                if len(voice_buffer) >= VOICE_BUFFER_LIMIT:
+                    await flush_voice_buffer()
+
+        # Start new session (per-guild key)
+        voice_sessions[key] = {
+            'channel_name': after.channel.name,
+            'guild_id': guild_id,
+            'joined_at': now,
+        }
 
 
 # ─────────────────────────────────────────────
@@ -951,10 +1027,11 @@ async def on_member_remove(member):
 
 @tasks.loop(seconds=30)
 async def flush_message_loop():
-    """Flush buffered messages and presence updates every 30 seconds."""
+    """Flush buffered messages, presence updates, and voice sessions every 30 seconds."""
     await flush_message_buffer()
     await flush_presence_buffer()
     await flush_mention_buffer()
+    await flush_voice_buffer()
 
 @tasks.loop(hours=1)
 async def check_reversed_actions():

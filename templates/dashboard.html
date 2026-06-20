@@ -117,24 +117,45 @@
           <p class="text-gray-500 text-xs font-medium uppercase tracking-wider">Mod Actions</p>
           <p class="text-3xl font-bold text-white mt-1">{{ total_moderation_actions }}</p>
         </div>
+        <div>
+          <p class="text-gray-500 text-xs font-medium uppercase tracking-wider">Voice Sessions</p>
+          <p class="text-3xl font-bold text-white mt-1">{{ total_voice_sessions }}</p>
+        </div>
+        <div>
+          <p class="text-gray-500 text-xs font-medium uppercase tracking-wider">Voice Hours</p>
+          <p class="text-3xl font-bold text-white mt-1">{{ total_voice_hours }}</p>
+        </div>
       </div>
     </div>
   </div>
 
   <!-- Charts Row -->
   <div class="max-w-7xl mx-auto px-6 pb-6">
-    <div class="grid grid-cols-3 gap-6">
-      <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🕐 Hourly Activity</h2>
-        <div class="relative" style="height:160px"><canvas id="hourlyChart"></canvas></div>
+    <div class="grid grid-cols-12 gap-6">
+      <div class="col-span-7 bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🕐 Guild Activity Comparison</h2>
+        <p class="text-xs text-gray-600 mb-3">Peak hours per server — compare which timezones each guild is active in</p>
+        <div class="relative" style="height:200px"><canvas id="compareChart"></canvas></div>
       </div>
+      <div class="col-span-5 bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">📊 Message Distribution</h2>
+        <p class="text-xs text-gray-600 mb-3">Total messages per server</p>
+        <div class="relative" style="height:200px"><canvas id="distChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-3 gap-6 mt-6">
       <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
         <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">📊 Community vs Staff</h2>
-        <div class="relative" style="height:160px"><canvas id="staffChart"></canvas></div>
+        <div class="relative" style="height:140px"><canvas id="staffChart"></canvas></div>
       </div>
       <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
         <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">📈 Score Sources</h2>
-        <div class="relative" style="height:160px"><canvas id="sourcesChart"></canvas></div>
+        <div class="relative" style="height:140px"><canvas id="sourcesChart"></canvas></div>
+      </div>
+      <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🕐 Aggregate Hourly</h2>
+        <div class="relative" style="height:140px"><canvas id="hourlyChart"></canvas></div>
       </div>
     </div>
     {% if daily_volume %}
@@ -306,8 +327,62 @@
       return new Chart(ctx, config);
     }
 
-    // Hourly Activity
+    // Guild Comparative Activity (multi-line)
     const hours = Array.from({length: 24}, (_, i) => `${i}:00`);
+    const guildHourly = {{ guild_hourly | tojson }};
+    const guildNames = {{ guild_name_map | tojson }};
+    const guildColors = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16'];
+    const compareDatasets = Object.keys(guildHourly).map((gid, i) => ({
+      label: guildNames[gid] || gid,
+      data: hours.map((_, h) => guildHourly[gid][h] || 0),
+      borderColor: guildColors[i % guildColors.length],
+      backgroundColor: guildColors[i % guildColors.length] + '20',
+      fill: false,
+      tension: 0.3,
+      pointRadius: 2,
+      pointHitRadius: 5,
+    }));
+    darkChart(document.getElementById('compareChart'), {
+      type: 'line',
+      data: { labels: hours, datasets: compareDatasets },
+      options: {
+        plugins: { legend: { position: 'bottom', labels: { font: { family: font }, boxWidth: 12, padding: 8 } } },
+        scales: {
+          x: { ticks: { maxTicksLimit: 12, font: { family: font } } },
+          y: { beginAtZero: true, ticks: { font: { family: font } } }
+        }
+      }
+    });
+
+    // Guild Message Distribution (bar)
+    const guildMsgs = {{ guild_msg_counts | tojson }};
+    const distLabels = Object.keys(guildMsgs).map(gid => guildNames[gid] || gid);
+    const distData = Object.values(guildMsgs);
+    const distColors = distLabels.map((_, i) => guildColors[i % guildColors.length]);
+    darkChart(document.getElementById('distChart'), {
+      type: 'bar',
+      data: {
+        labels: distLabels,
+        datasets: [{
+          label: 'Messages',
+          data: distData,
+          backgroundColor: distColors.map(c => c + '99'),
+          borderColor: distColors,
+          borderWidth: 1,
+          borderRadius: 4,
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { beginAtZero: true, ticks: { font: { family: font } } },
+          y: { ticks: { font: { family: font, size: 10 } } }
+        }
+      }
+    });
+
+    // Aggregate Hourly Activity
     const hourlyData = {{ hourly_activity | tojson }};
     darkChart(document.getElementById('hourlyChart'), {
       type: 'bar',

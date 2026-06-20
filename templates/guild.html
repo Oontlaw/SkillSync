@@ -91,6 +91,49 @@
       </div>
     </div>
 
+    {% if guild_hourly_chart %}
+    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 mb-8">
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🕐 Hourly Activity ({{ guild_msg_total }} msgs)</h2>
+      <p class="text-xs text-gray-600 mb-3">Peak activity hours for this server — helps identify its dominant timezone</p>
+      <div class="relative" style="height:180px"><canvas id="guildHourlyChart"></canvas></div>
+    </div>
+    {% endif %}
+
+    <!-- Voice Activity (server-specific) -->
+    {% if guild_voice_sessions > 0 %}
+    <div class="bg-[#111318] rounded-2xl border border-emerald-800/40 p-6 mb-8">
+      <h2 class="text-sm font-semibold text-emerald-400 uppercase tracking-wider mb-5">🎙️ Voice Activity ({{ guild_voice_sessions }} sessions · {{ guild_voice_hours }}h)</h2>
+      <div class="grid grid-cols-3 gap-6">
+        <div>
+          <h3 class="text-xs text-gray-500 uppercase tracking-wider mb-3">Top Voice Channels</h3>
+          <div class="space-y-2">
+            {% for ch in guild_voice_top_channels %}
+            <div class="flex justify-between items-center border-b border-gray-800/40 pb-1.5">
+              <span class="text-gray-300 text-sm">{{ ch.name }}</span>
+              <span class="text-gray-500 text-xs">{{ ch.sessions }} sessions · {{ ch.hours }}h</span>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div>
+          <h3 class="text-xs text-gray-500 uppercase tracking-wider mb-3">Voice by Hour</h3>
+          <div class="relative" style="height:120px"><canvas id="guildVoiceHourlyChart"></canvas></div>
+        </div>
+        <div>
+          <h3 class="text-xs text-gray-500 uppercase tracking-wider mb-3">Top Voice Users</h3>
+          <div class="space-y-2 max-h-48 overflow-y-auto">
+            {% for u in guild_voice_users %}
+            <div class="flex justify-between items-center border-b border-gray-800/40 pb-1.5">
+              <span class="text-gray-300 text-sm">{{ u.name }}</span>
+              <span class="text-gray-500 text-xs">{{ u.sessions }} sessions · {{ u.hours }}h</span>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
     <!-- Roles & Permissions -->
     <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 mb-8">
       <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-5">🔑 Roles & Permissions</h2>
@@ -295,6 +338,72 @@
       },
       options: { plugins: { legend: { position: 'bottom' } } }
     });
+
+    {% if guild_hourly_chart %}
+    (function() {
+      const ghc = document.getElementById('guildHourlyChart');
+      if (!ghc) return;
+      const gh = {{ guild_hourly_chart | tojson }};
+      const hours = Array.from({length: 24}, (_, i) => `${i}:00`);
+      const data = hours.map((_, i) => gh[i] || 0);
+      const peak = Math.max(...data);
+      darkChart(ghc, {
+        type: 'bar',
+        data: {
+          labels: hours,
+          datasets: [{
+            label: 'Messages',
+            data: data,
+            backgroundColor: data.map(v =>
+              v === peak && peak > 0 ? 'rgba(245,158,11,0.7)' : 'rgba(59,130,246,0.5)'
+            ),
+            borderColor: data.map(v =>
+              v === peak && peak > 0 ? '#f59e0b' : '#3b82f6'
+            ),
+            borderWidth: 1,
+            borderRadius: 3,
+          }]
+        },
+        options: {
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { maxTicksLimit: 12, font: { family: font } } },
+            y: { beginAtZero: true, ticks: { font: { family: font } } }
+          }
+        }
+      });
+    })();
+    {% endif %}
+
+    {% if guild_voice_sessions > 0 %}
+    (function() {
+      const gvhc = document.getElementById('guildVoiceHourlyChart');
+      if (!gvhc) return;
+      const gvh = {{ guild_voice_hourly | tojson }};
+      const hours = Array.from({length: 24}, (_, i) => `${i}:00`);
+      darkChart(gvhc, {
+        type: 'bar',
+        data: {
+          labels: hours,
+          datasets: [{
+            label: 'Sessions',
+            data: hours.map((_, i) => gvh[i] || 0),
+            backgroundColor: 'rgba(16,185,129,0.5)',
+            borderColor: '#10b981',
+            borderWidth: 1,
+            borderRadius: 3,
+          }]
+        },
+        options: {
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { maxTicksLimit: 8, font: { size: 9, family: font } } },
+            y: { beginAtZero: true, ticks: { font: { size: 9, family: font } } }
+          }
+        }
+      });
+    })();
+    {% endif %}
   </script>
 
   <footer class="border-t border-gray-800/40 py-6 text-center text-gray-600 text-xs mt-4">

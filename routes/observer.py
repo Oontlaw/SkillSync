@@ -5,7 +5,7 @@ import math
 from collections import defaultdict
 from functools import wraps
 from flask import Blueprint, request, jsonify
-from database import db, Worker, ScoreLog, MessageRecord, GuildInfo, GuildRole, GuildMember, GuildChannel, BehavioralAnomaly, MentionRecord, AutoModRule, PingJoinEvent
+from database import db, Worker, ScoreLog, MessageRecord, GuildInfo, GuildRole, GuildMember, GuildChannel, BehavioralAnomaly, MentionRecord, AutoModRule, PingJoinEvent, VoiceActivity
 from datetime import datetime, timedelta
 from sqlalchemy import func
 
@@ -894,3 +894,41 @@ def log_ping_join():
 
     print(f'[PingJoin API] {event.moderator_name} pinged @everyone → +{event.new_members} joins')
     return jsonify({'message': 'Ping-join event logged', 'id': event.id}), 201
+
+
+# ─────────────────────────────────────────────
+# VOICE ACTIVITY TRACKING
+# ─────────────────────────────────────────────
+
+@observer_bp.route('/observer/voice-activity', methods=['POST'])
+@require_api_key
+def log_voice_activity():
+    """Batch-log voice channel sessions for behavioral pattern recognition."""
+    data = request.json
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
+
+    sessions = data.get('sessions', [data])
+    if not sessions:
+        return jsonify({'error': 'No sessions provided'}), 400
+
+    created = 0
+    for s in sessions:
+        entry = VoiceActivity(
+            discord_id=sanitize_str(s.get('discord_id', ''), 50),
+            name=sanitize_str(s.get('name'), 100),
+            guild_id=sanitize_str(s.get('guild_id', ''), 50),
+            guild_name=sanitize_str(s.get('guild_name'), 100),
+            channel_name=sanitize_str(s.get('channel_name'), 100),
+            duration_seconds=float(s.get('duration_seconds', 0)),
+            hour_of_day=int(s['hour_of_day']) if s.get('hour_of_day') is not None else None,
+            day_of_week=int(s['day_of_week']) if s.get('day_of_week') is not None else None,
+            joined_at=datetime.fromisoformat(s['joined_at']) if s.get('joined_at') else None,
+            left_at=datetime.fromisoformat(s['left_at']) if s.get('left_at') else None,
+        )
+        db.session.add(entry)
+        created += 1
+
+    db.session.commit()
+    print(f'[Voice API] Logged {created} voice sessions')
+    return jsonify({'message': f'{created} voice sessions logged', 'created': created}), 201
