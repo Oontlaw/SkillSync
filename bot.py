@@ -13,8 +13,8 @@ def log(msg):
     try:
         with open(LOG_FILE, 'a', encoding='utf-8') as f:
             f.write(f'[{datetime.now().strftime("%H:%M:%S")}] {msg}\n')
-    except:
-        pass
+    except Exception as e:
+        print(f'[SkillSync] Log write failed: {e}')
 
 load_dotenv()
 
@@ -116,7 +116,7 @@ def is_channel_public(channel, guild):
         return overwrites.read_messages is not False
     except Exception as e:
         print(f'[SkillSync] is_channel_public error: {e}')
-        return True
+        return False
 
 def extract_warn_from_embed(embed):
     """
@@ -591,8 +591,12 @@ async def on_ready():
     except Exception as e:
         print(f'[SkillSync] Could not fetch prefixes: {e}')
     # Set bot presence with prefix info
-    first_prefixes = prefix_cache.get(str(bot.guilds[0].id), ['!ss ']) if bot.guilds else ['!ss ']
-    await bot.change_presence(activity=discord.Game(name=f'{first_prefixes[0].strip()} | Watches over you in your sleep'))
+    if bot.guilds:
+        first_prefixes = prefix_cache.get(str(bot.guilds[0].id), ['!ss '])
+        try:
+            await bot.change_presence(activity=discord.Game(name=f'{first_prefixes[0].strip()} | Watches over you in your sleep'))
+        except Exception as e:
+            print(f'[SkillSync] Could not set presence: {e}')
     # Scan all existing guilds on startup
     for guild in bot.guilds:
         await scan_guild(guild)
@@ -729,29 +733,30 @@ async def on_member_ban(guild, user):
 
         try:
             async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.ban):
-                if entry.target.id == user.id:
-                    banner_id = entry.user.id
-                    banner_name = entry.user.name
+                if entry.target and entry.target.id == user.id:
+                    if entry.user:
+                        banner_id = entry.user.id
+                        banner_name = entry.user.name
                     reason = entry.reason or 'No reason given'
                     break
             # Also check if this was an AutoMod action (quarantine/ban)
             if banner_id is None:
                 async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.automod_quarantine_user):
-                    if entry.target.id == user.id:
-                        banner_name = f'AutoMod ({entry.user.name})'
+                    if entry.target and entry.target.id == user.id:
+                        entry_user_name = entry.user.name if entry.user else 'Unknown'
+                        banner_name = f'AutoMod ({entry_user_name})'
                         reason = f'AutoMod quarantine: {entry.reason or "No reason given"}'
-                        # Try to attribute to rule creator
                         await api_post('/observer/flag', {
                             'discord_id': str(entry.user.id) if entry.user else None,
-                            'staff_name': entry.user.name if entry.user else 'AutoMod',
+                            'staff_name': entry_user_name,
                             'action_type': 'ban_issued',
                             'target': user.name,
                             'guild': guild.name,
                             'flagged': True,
-                            'flag_reason': f'AutoMod rule triggered by {entry.user.name} — review needed',
+                            'flag_reason': f'AutoMod rule triggered by {entry_user_name} — review needed',
                             'timestamp': datetime.now(timezone.utc).isoformat()
                         })
-                        log(f'AutoMod QUARANTINE detected: {user.name} triggered rule by {entry.user.name}')
+                        log(f'AutoMod QUARANTINE detected: {user.name} triggered rule by {entry_user_name}')
                         return
         except Exception as e:
             print(f'[Observer] Could not read audit log for ban: {e}')
@@ -829,8 +834,8 @@ async def on_member_unban(guild, user):
         unbanner_name = 'Unknown'
         try:
             async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.unban):
-                if entry.target.id == user.id:
-                    unbanner_name = entry.user.name
+                if entry.target and entry.target.id == user.id:
+                    unbanner_name = entry.user.name if entry.user else 'Unknown'
                     break
         except Exception as e:
             log(f'UNBAN AUDIT LOG ERROR in {guild.name}: {e}')
@@ -874,6 +879,8 @@ async def on_member_update(before, after):
     """
     try:
         guild = after.guild
+        if not guild:
+            return
 
         # Timeout added
         if before.timed_out_until is None and after.timed_out_until is not None:
@@ -884,19 +891,20 @@ async def on_member_update(before, after):
 
             try:
                 async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.member_update):
-                    if entry.target.id == after.id:
-                        mod_id = entry.user.id
-                        mod_name = entry.user.name
+                    if entry.target and entry.target.id == after.id:
+                        mod_id = entry.user.id if entry.user else None
+                        mod_name = entry.user.name if entry.user else 'Unknown'
                         reason = entry.reason or 'No reason given'
                         break
                 # Check if AutoMod issued the timeout
                 if mod_id is None:
                     async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.automod_timeout_member):
-                        if entry.target.id == after.id:
-                            mod_name = f'AutoMod ({entry.user.name})'
+                        if entry.target and entry.target.id == after.id:
+                            entry_user_name = entry.user.name if entry.user else 'Unknown'
+                            mod_name = f'AutoMod ({entry_user_name})'
                             reason = f'AutoMod timeout: {entry.reason or "No reason given"}'
                             mod_id = entry.user.id if entry.user else None
-                            log(f'AutoMod TIMEOUT detected: {after.name} triggered rule by {entry.user.name}')
+                            log(f'AutoMod TIMEOUT detected: {after.name} triggered rule by {entry_user_name}')
                             break
             except Exception as e:
                 log(f'TIMEOUT AUDIT LOG ERROR in {guild.name}: {e}')
@@ -981,9 +989,9 @@ async def on_member_remove(member):
 
         try:
             async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.kick):
-                if entry.target.id == member.id:
-                    kicker_id = entry.user.id
-                    kicker_name = entry.user.name
+                if entry.target and entry.target.id == member.id:
+                    kicker_id = entry.user.id if entry.user else None
+                    kicker_name = entry.user.name if entry.user else 'Unknown'
 
                     # If kicker is a mod bot, attribute to the most recently active staff member
                     if is_mod_bot(entry.user):

@@ -685,6 +685,8 @@ def guild_prefix(guild_id):
 
     if request.method == 'PATCH':
         data = request.json
+        if not data:
+            return jsonify({'error': 'No JSON body'}), 400
         new_prefixes = data.get('prefixes', ['!ss '])
         for p in new_prefixes:
             if len(p) > 10:

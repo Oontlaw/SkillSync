@@ -9,7 +9,7 @@ class Worker(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(150), unique=True, nullable=False)
-    discord_id = db.Column(db.String(50), unique=True, nullable=True)
+    discord_id = db.Column(db.String(50), unique=True, nullable=True, index=True)
     role = db.Column(db.String(50), default='worker')  # worker / admin / hr
     score = db.Column(db.Float, default=0.0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -25,7 +25,7 @@ class Task(db.Model):
     __tablename__ = 'tasks'
 
     id = db.Column(db.Integer, primary_key=True)
-    worker_id = db.Column(db.Integer, db.ForeignKey('workers.id'), nullable=False)
+    worker_id = db.Column(db.Integer, db.ForeignKey('workers.id'), nullable=False, index=True)
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text, nullable=True)
     status = db.Column(db.String(30), default='pending')  # pending / completed / missed / anomaly
@@ -44,12 +44,12 @@ class ScoreLog(db.Model):
     __tablename__ = 'score_logs'
 
     id = db.Column(db.Integer, primary_key=True)
-    worker_id = db.Column(db.Integer, db.ForeignKey('workers.id'), nullable=False)
+    worker_id = db.Column(db.Integer, db.ForeignKey('workers.id'), nullable=False, index=True)
     change = db.Column(db.Float, nullable=False)       # positive or negative
     reason = db.Column(db.String(300), nullable=False)
     source = db.Column(db.String(50), default='system')  # system / admin / discord
     admin_correction = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     def __repr__(self):
         return f'<ScoreLog worker={self.worker_id} change={self.change}>'
@@ -59,7 +59,7 @@ class CommunityEvent(db.Model):
     __tablename__ = 'community_events'
 
     id = db.Column(db.Integer, primary_key=True)
-    discord_id = db.Column(db.String(50), nullable=False)
+    discord_id = db.Column(db.String(50), nullable=False, index=True)
     event_type = db.Column(db.String(100), nullable=False)  # message / moderation / rule_break / helpful
     detail = db.Column(db.Text, nullable=True)
     score_impact = db.Column(db.Float, default=0.0)
@@ -88,16 +88,16 @@ class MessageRecord(db.Model):
     __tablename__ = 'message_records'
 
     id = db.Column(db.Integer, primary_key=True)
-    discord_id = db.Column(db.String(50), nullable=False)
+    discord_id = db.Column(db.String(50), nullable=False, index=True)
     name = db.Column(db.String(100), nullable=True)
-    guild_id = db.Column(db.String(50), nullable=False)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
     channel_name = db.Column(db.String(100), nullable=True)
     is_public_channel = db.Column(db.Boolean, default=True)
     message_length = db.Column(db.Integer, default=0)
     message_content = db.Column(db.Text, nullable=True)      # Only stored for public channels
     hour_of_day = db.Column(db.Integer, nullable=True)       # 0-23
     day_of_week = db.Column(db.Integer, nullable=True)       # 0=Mon, 6=Sun
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     def __repr__(self):
         return f'<MessageRecord {self.discord_id} | len={self.message_length}>'
@@ -108,7 +108,7 @@ class GuildInfo(db.Model):
     __tablename__ = 'guild_info'
 
     id = db.Column(db.Integer, primary_key=True)
-    guild_id = db.Column(db.String(50), unique=True, nullable=False)
+    guild_id = db.Column(db.String(50), unique=True, nullable=False, index=True)
     name = db.Column(db.String(100), nullable=False)
     owner_id = db.Column(db.String(50), nullable=True)
     owner_name = db.Column(db.String(100), nullable=True)
@@ -128,7 +128,7 @@ class GuildRole(db.Model):
     __tablename__ = 'guild_roles'
 
     id = db.Column(db.Integer, primary_key=True)
-    guild_id = db.Column(db.String(50), nullable=False)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
     role_id = db.Column(db.String(50), nullable=False)
     name = db.Column(db.String(100), nullable=False)
     position = db.Column(db.Integer, default=0)
@@ -160,7 +160,7 @@ class GuildMember(db.Model):
     __tablename__ = 'guild_members'
 
     id = db.Column(db.Integer, primary_key=True)
-    guild_id = db.Column(db.String(50), nullable=False)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
     member_id = db.Column(db.String(50), nullable=False)
     name = db.Column(db.String(100), nullable=False)
     display_name = db.Column(db.String(100), nullable=True)
@@ -180,7 +180,7 @@ class GuildChannel(db.Model):
     __tablename__ = 'guild_channels'
 
     id = db.Column(db.Integer, primary_key=True)
-    guild_id = db.Column(db.String(50), nullable=False)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
     channel_id = db.Column(db.String(50), nullable=False)
     name = db.Column(db.String(100), nullable=False)
     topic = db.Column(db.Text, nullable=True)
@@ -195,11 +195,11 @@ class MentionRecord(db.Model):
     __tablename__ = 'mention_records'
 
     id = db.Column(db.Integer, primary_key=True)
-    mentioner_id = db.Column(db.String(50), nullable=False)
+    mentioner_id = db.Column(db.String(50), nullable=False, index=True)
     mentioner_name = db.Column(db.String(100), nullable=True)
-    mentioned_id = db.Column(db.String(50), nullable=False)
+    mentioned_id = db.Column(db.String(50), nullable=False, index=True)
     mentioned_name = db.Column(db.String(100), nullable=True)
-    guild_id = db.Column(db.String(50), nullable=False)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
     channel_name = db.Column(db.String(100), nullable=True)
     reply_time_seconds = db.Column(db.Float, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -252,7 +252,7 @@ class VoiceActivity(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     discord_id = db.Column(db.String(50), nullable=False, index=True)
     name = db.Column(db.String(100), nullable=True)
-    guild_id = db.Column(db.String(50), nullable=False)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
     guild_name = db.Column(db.String(100), nullable=True)
     channel_name = db.Column(db.String(100), nullable=True)
     duration_seconds = db.Column(db.Float, default=0.0)
@@ -271,7 +271,7 @@ class PingJoinEvent(db.Model):
     __tablename__ = 'ping_join_events'
 
     id = db.Column(db.Integer, primary_key=True)
-    guild_id = db.Column(db.String(50), nullable=False)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
     guild_name = db.Column(db.String(100), nullable=True)
     moderator_id = db.Column(db.String(50), nullable=False)
     moderator_name = db.Column(db.String(100), nullable=True)
@@ -291,7 +291,7 @@ class BurnoutRisk(db.Model):
     worker_id = db.Column(db.Integer, db.ForeignKey('workers.id'), nullable=False, index=True)
     discord_id = db.Column(db.String(50), nullable=False)
     name = db.Column(db.String(100), nullable=True)
-    score = db.Column(db.Float, default=0.0)
+    score = db.Column(db.Float, default=0.0, index=True)
     anomaly_freq = db.Column(db.Float, default=0.0)
     volume_volatility = db.Column(db.Float, default=0.0)
     reversal_rate = db.Column(db.Float, default=0.0)

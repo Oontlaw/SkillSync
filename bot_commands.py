@@ -15,8 +15,8 @@ async def api_post(endpoint, payload):
             requests.post, f'{SKILLSYNC_API}{endpoint}', json=payload,
             headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5
         )
-    except:
-        pass
+    except Exception as e:
+        print(f'[SkillSync] API error in bot_commands: {e}')
 
 
 class Moderation(commands.Cog):
@@ -146,7 +146,13 @@ class Moderation(commands.Cog):
         if not ok:
             await ctx.send(err)
             return
-        await target.ban(reason=f'{ctx.author.name}: {reason}')
+        try:
+            await target.ban(reason=f'{ctx.author.name}: {reason}')
+            await ctx.send(f'Banned {target.name}. Reason: {reason}')
+        except discord.Forbidden:
+            await ctx.send('I don\'t have permission to ban that user.')
+        except discord.HTTPException as e:
+            await ctx.send(f'Failed to ban: {e}')
         await api_post('/observer/action', {
             'discord_id': str(ctx.author.id),
             'staff_name': ctx.author.name,
@@ -158,7 +164,6 @@ class Moderation(commands.Cog):
             'flag_reason': None,
             'timestamp': datetime.now(timezone.utc).isoformat()
         })
-        await ctx.send(f'Banned {target.name}. Reason: {reason}')
 
     @ban.error
     async def ban_error(self, ctx, error):
@@ -176,7 +181,13 @@ class Moderation(commands.Cog):
         if not ok:
             await ctx.send(err)
             return
-        await target.kick(reason=f'{ctx.author.name}: {reason}')
+        try:
+            await target.kick(reason=f'{ctx.author.name}: {reason}')
+            await ctx.send(f'Kicked {target.name}. Reason: {reason}')
+        except discord.Forbidden:
+            await ctx.send('I don\'t have permission to kick that user.')
+        except discord.HTTPException as e:
+            await ctx.send(f'Failed to kick: {e}')
         await api_post('/observer/action', {
             'discord_id': str(ctx.author.id),
             'staff_name': ctx.author.name,
@@ -188,7 +199,6 @@ class Moderation(commands.Cog):
             'flag_reason': None,
             'timestamp': datetime.now(timezone.utc).isoformat()
         })
-        await ctx.send(f'Kicked {target.name}. Reason: {reason}')
 
     @kick.error
     async def kick_error(self, ctx, error):
@@ -208,7 +218,13 @@ class Moderation(commands.Cog):
             await ctx.send('Timeout must be between 1 minute and 28 days (40320 min).')
             return
         until = discord.utils.utcnow() + timedelta(minutes=minutes)
-        await target.timeout(until, reason=f'{ctx.author.name}: {reason}')
+        try:
+            await target.timeout(until, reason=f'{ctx.author.name}: {reason}')
+            await ctx.send(f'Timed out {target.name} for {minutes} min. Reason: {reason}')
+        except discord.Forbidden:
+            await ctx.send('I don\'t have permission to timeout that user.')
+        except discord.HTTPException as e:
+            await ctx.send(f'Failed to timeout: {e}')
         await api_post('/observer/action', {
             'discord_id': str(ctx.author.id),
             'staff_name': ctx.author.name,
@@ -220,7 +236,6 @@ class Moderation(commands.Cog):
             'flag_reason': None,
             'timestamp': datetime.now(timezone.utc).isoformat()
         })
-        await ctx.send(f'Timed out {target.name} for {minutes} min. Reason: {reason}')
 
     @timeout.error
     async def timeout_error(self, ctx, error):
@@ -257,8 +272,13 @@ class Moderation(commands.Cog):
         if count < 1 or count > 100:
             await ctx.send('You can purge between 1 and 100 messages.')
             return
-        deleted = await ctx.channel.purge(limit=count + 1)
-        await ctx.send(f'Deleted {len(deleted) - 1} messages.', delete_after=3)
+        try:
+            deleted = await ctx.channel.purge(limit=count + 1)
+            await ctx.send(f'Deleted {len(deleted) - 1} messages.', delete_after=3)
+        except discord.Forbidden:
+            await ctx.send('I don\'t have permission to purge messages.')
+        except discord.HTTPException as e:
+            await ctx.send(f'Failed to purge: {e}')
 
     @purge.error
     async def purge_error(self, ctx, error):

@@ -47,7 +47,7 @@ def callback():
         'redirect_uri': url_for('auth.callback', _external=True, _scheme=request.scheme),
     }
     headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-    resp = requests.post(f'{DISCORD_API}/oauth2/token', data=data, headers=headers)
+    resp = requests.post(f'{DISCORD_API}/oauth2/token', data=data, headers=headers, timeout=10)
     if not resp.ok:
         return 'Failed to exchange authorization code.', 400
     token_data = resp.json()
@@ -55,12 +55,12 @@ def callback():
 
     headers = {'Authorization': f'Bearer {access_token}'}
 
-    user_resp = requests.get(f'{DISCORD_API}/users/@me', headers=headers)
+    user_resp = requests.get(f'{DISCORD_API}/users/@me', headers=headers, timeout=10)
     if not user_resp.ok:
         return 'Failed to fetch user info.', 400
     user = user_resp.json()
 
-    guilds_resp = requests.get(f'{DISCORD_API}/users/@me/guilds', headers=headers)
+    guilds_resp = requests.get(f'{DISCORD_API}/users/@me/guilds', headers=headers, timeout=10)
     if not guilds_resp.ok:
         return 'Failed to fetch guilds.', 400
     guilds = guilds_resp.json()

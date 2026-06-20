@@ -19,6 +19,8 @@ def login_required(f):
 @login_required
 def community_event():
     data = request.json
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
     discord_id = data.get('discord_id')
     event_type = data.get('event_type')
     detail = data.get('detail', '')

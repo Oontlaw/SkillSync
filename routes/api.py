@@ -32,6 +32,8 @@ def get_workers():
 @login_required
 def add_worker():
     data = request.json
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
     worker = Worker(
         name=data['name'],
         email=data['email'],
@@ -49,6 +51,8 @@ def add_worker():
 @login_required
 def assign_task():
     data = request.json
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
     task = Task(
         worker_id=data['worker_id'],
         title=data['title'],
@@ -64,6 +68,8 @@ def assign_task():
 @login_required
 def complete_task(task_id):
     data = request.json
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
     task = Task.query.get_or_404(task_id)
     task.completed_at = datetime.utcnow()
     task.extra_contribution = data.get('extra_contribution', False)
@@ -102,6 +108,8 @@ def miss_task(task_id):
 @login_required
 def flag_anomaly(task_id):
     data = request.json
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
     task = Task.query.get_or_404(task_id)
     task.status = 'anomaly'
     result = award_points(task.worker_id, 'anomaly_detected', note=data.get('reason', 'Anomaly detected'))
@@ -116,6 +124,8 @@ def flag_anomaly(task_id):
 @login_required
 def correct_score():
     data = request.json
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
     result = admin_correction(
         worker_id=data['worker_id'],
         original_change=data['original_change'],
