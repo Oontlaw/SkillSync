@@ -1058,9 +1058,11 @@ async def check_reversed_actions():
             'timestamp': now.isoformat()
         })
 
-    # Also scan for behavioral anomalies
+    # Also scan for behavioral anomalies and burnout risks
     print(f'[Observer] Scanning behavioral anomalies...')
     await api_post('/observer/anomalies/scan', {'trigger': 'hourly'})
+    print(f'[Observer] Scanning burnout risks...')
+    await api_post('/observer/burnout-scan', {'trigger': 'hourly'})
 
 
 # ─────────────────────────────────────────────

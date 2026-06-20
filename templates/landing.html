@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}SkillSync – Workforce Intelligence Bot{% endblock %}
+
+{% block content %}
+
+<!-- Landing Hero -->
+<section class="max-w-5xl mx-auto px-6 pt-24 pb-20 text-center">
+  <h1 class="text-5xl md:text-6xl font-extrabold text-white leading-tight mb-4">
+    One bot.<br/>
+    <span class="gradient-text">Your whole workforce.</span>
+  </h1>
+  <p class="text-gray-400 text-lg max-w-2xl mx-auto mb-10 leading-relaxed">
+    Staff scoring, voice analytics, guild management — three engines in one dashboard.
+    Track who moderates, how they do it, and keep your team accountable.
+  </p>
+  <div class="flex gap-4 justify-center">
+    <a href="{{ invite_url }}" target="_blank" class="bg-blue-600 hover:bg-blue-500 px-8 py-3 rounded-lg text-base font-semibold transition shadow-lg shadow-blue-600/20">Invite Bot</a>
+    <a href="/auth/login" class="border border-gray-700 hover:border-gray-500 px-8 py-3 rounded-lg text-base font-semibold transition">View Dashboard</a>
+  </div>
+</section>
+
+<!-- Features -->
+<section class="max-w-6xl mx-auto px-6 pb-24">
+  <div class="text-center mb-14">
+    <h2 class="text-3xl font-bold text-white mb-3">Everything you need to run your staff team</h2>
+    <p class="text-gray-500">Modular by design. Enable what you need, ignore the rest.</p>
+  </div>
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+    {% set features = [
+      ('🕵️', 'Passive Observer', 'Watches audit logs and attributes moderation actions to the right staff — even through other bots.'),
+      ('📊', 'Staff Scoring', 'Auto-score bans, kicks, timeouts, and warns. Flag reversals and track team performance.'),
+      ('🛡️', 'Auto Staff Detection', 'Scans roles and permissions to identify your mod team automatically. Zero config required.'),
+      ('🔧', 'Moderation Suite', 'Built-in ban, kick, timeout, warn, and purge. All actions scored and logged automatically.'),
+      ('🎙️', 'Voice Analytics', 'Track voice activity, identify active staff, and measure engagement across channels.'),
+      ('📋', 'Guild Overview', 'Full server view with roles, permissions, staff list, voice activity, and community breakdown.'),
+    ] %}
+    {% for icon, title, desc in features %}
+    <div class="bg-[#111318] rounded-xl border border-gray-800/60 p-6 card-hover">
+      <div class="w-10 h-10 bg-blue-600/10 rounded-lg flex items-center justify-center mb-4"><span class="text-blue-400 text-lg">{{ icon }}</span></div>
+      <h3 class="text-white font-semibold mb-2">{{ title }}</h3>
+      <p class="text-gray-500 text-sm leading-relaxed">{{ desc }}</p>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+{% endblock %}

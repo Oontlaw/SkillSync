@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}SkillSync{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', sans-serif; background: #0b0d11; overflow-x: hidden; }
+    .gradient-text { background: linear-gradient(135deg, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .card-hover { transition: all 0.2s ease; }
+    .card-hover:hover { border-color: #3b82f6 !important; transform: translateY(-2px); }
+    .glow { box-shadow: 0 0 30px rgba(59,130,246,0.08); }
+    .table-hover tr:hover { background: rgba(59,130,246,0.04); }
+
+    /* Sidebar */
+    .sidebar { width: 220px; min-width: 220px; height: 100vh; position: fixed; top: 0; left: 0; z-index: 50; overflow-y: auto; }
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-thumb { background: #1f2937; border-radius: 2px; }
+    .main-content { margin-left: 220px; min-height: 100vh; }
+    .nav-link { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-radius: 8px; font-size: 14px; color: #6b7280; transition: all 0.15s ease; }
+    .nav-link:hover { color: #e5e7eb; background: rgba(59,130,246,0.08); }
+    .nav-link.active { color: #60a5fa; background: rgba(59,130,246,0.12); }
+
+    /* Mobile overlay */
+    .sidebar-overlay { display: none; }
+    @media (max-width: 768px) {
+      .sidebar { transform: translateX(-100%); transition: transform 0.25s ease; }
+      .sidebar.open { transform: translateX(0); }
+      .sidebar-overlay.open { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 40; }
+      .main-content { margin-left: 0; }
+    }
+
+    /* Animated counter */
+    .count-up { display: inline-block; }
+
+    /* Skeleton loader */
+    .skeleton { background: linear-gradient(90deg, #1f2937 25%, #2d3748 50%, #1f2937 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px; }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+    /* Empty state */
+    .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; text-align: center; }
+
+    /* Toast */
+    .toast { position: fixed; bottom: 24px; right: 24px; z-index: 100; padding: 12px 20px; border-radius: 10px; font-size: 13px; font-weight: 500; opacity: 0; transform: translateY(10px); transition: all 0.3s ease; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+  </style>
+  {% block head_extra %}{% endblock %}
+</head>
+<body class="text-gray-100 min-h-screen">
+
+{% if user and not logged_out %}
+
+<!-- SIDEBAR -->
+<aside class="sidebar bg-[#111318] border-r border-gray-800/40 flex flex-col" id="sidebar">
+  <div class="p-4 border-b border-gray-800/40 flex items-center gap-2">
+    <span class="text-blue-400 text-xl">⚡</span>
+    <span class="text-white font-bold">SkillSync</span>
+  </div>
+
+  <nav class="flex-1 p-3 space-y-1">
+    <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">
+      <span>📊</span> Dashboard
+    </a>
+    
+    {% if accessible_guilds %}
+    <div class="text-gray-600 text-xs uppercase tracking-wider px-3 pt-4 pb-1">Servers</div>
+    {% for g in accessible_guilds %}
+    <a href="/guild/{{ g.id }}" class="nav-link text-xs {% if request.path.startswith('/guild/' ~ g.id) %}active{% endif %}">
+      <span>🛡️</span>
+      <span class="truncate">{{ g.name }}</span>
+    </a>
+    {% endfor %}
+    {% endif %}
+  </nav>
+
+  <div class="p-3 border-t border-gray-800/40">
+    {% if user %}
+    <div class="flex items-center gap-2 px-2 py-2">
+      {% if user.avatar %}
+      <img src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png" class="w-7 h-7 rounded-full" alt=""/>
+      {% else %}
+      <div class="w-7 h-7 rounded-full bg-blue-600/30 flex items-center justify-center text-xs text-blue-300">{{ user.name[:1] }}</div>
+      {% endif %}
+      <div class="flex-1 min-w-0">
+        <p class="text-sm text-gray-300 truncate">{{ user.name }}</p>
+      </div>
+      <form method="POST" action="/auth/logout">
+        <button type="submit" class="text-gray-500 hover:text-red-400 text-xs transition cursor-pointer" title="Logout">✕</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+</aside>
+
+<!-- Mobile overlay -->
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+<!-- Hamburger (mobile) -->
+<button onclick="toggleSidebar()" class="md:hidden fixed top-4 left-4 z-50 bg-[#111318] border border-gray-800/60 p-2 rounded-lg text-gray-400">
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+</button>
+
+<!-- MAIN -->
+<main class="main-content">
+{% else %}
+<!-- LANDING / LOGGED OUT — full width, no sidebar -->
+<nav class="border-b border-gray-800/60 px-6 py-4 flex items-center justify-between max-w-7xl mx-auto">
+  <a href="/" class="flex items-center gap-2">
+    <span class="text-blue-400 text-2xl font-bold">⚡</span>
+    <span class="text-white font-bold text-lg">SkillSync</span>
+  </a>
+  <div class="flex items-center gap-4">
+    {% if user %}
+    <span class="text-gray-400 text-sm">{{ user.name }}</span>
+    <form method="POST" action="/auth/logout" style="display:inline">
+      <button type="submit" class="text-gray-500 hover:text-red-400 text-sm transition cursor-pointer">Logout</button>
+    </form>
+    {% else %}
+    <a href="/auth/login" class="border border-gray-700 hover:border-gray-500 px-5 py-2 rounded-lg text-sm font-medium transition">Login</a>
+    <a href="{{ invite_url }}" target="_blank" class="bg-blue-600 hover:bg-blue-500 px-5 py-2 rounded-lg text-sm font-medium transition shadow-lg shadow-blue-600/20">Invite Bot</a>
+    {% endif %}
+  </div>
+</nav>
+<main>
+{% endif %}
+
+{% block content %}{% endblock %}
+
+</main>
+
+{% if user and not logged_out %}
+<footer class="border-t border-gray-800/40 py-5 text-center text-gray-600 text-xs ml-[220px]">
+  SkillSync — Workforce Intelligence for Discord
+</footer>
+{% else %}
+<footer class="border-t border-gray-800/40 py-6 text-center text-gray-600 text-xs mt-8">
+  SkillSync — Workforce Intelligence for Discord
+</footer>
+{% endif %}
+
+<div class="toast" id="toast"></div>
+
+<script>
+  const font = 'Inter';
+  const gridColor = 'rgba(255,255,255,0.05)';
+  const textColor = '#9ca3af';
+
+  function darkChart(ctx, config) {
+    config.options.responsive = true;
+    config.options.maintainAspectRatio = true;
+    if (config.options.plugins && config.options.plugins.legend) {
+      config.options.plugins.legend.labels = config.options.plugins.legend.labels || {};
+      config.options.plugins.legend.labels.color = textColor;
+      config.options.plugins.legend.labels.font = { family: font };
+    }
+    if (config.options.scales) {
+      if (config.options.scales.x) { config.options.scales.x.ticks = config.options.scales.x.ticks || {}; config.options.scales.x.ticks.color = textColor; config.options.scales.x.grid = config.options.scales.x.grid || {}; config.options.scales.x.grid.color = gridColor; }
+      if (config.options.scales.y) { config.options.scales.y.ticks = config.options.scales.y.ticks || {}; config.options.scales.y.ticks.color = textColor; config.options.scales.y.grid = config.options.scales.y.grid || {}; config.options.scales.y.grid.color = gridColor; }
+    }
+    return new Chart(ctx, config);
+  }
+
+  function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('open');
+    document.getElementById('sidebarOverlay').classList.toggle('open');
+  }
+
+  function showToast(msg, type) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast show ' + (type === 'error' ? 'bg-red-700 text-red-100' : type === 'success' ? 'bg-emerald-700 text-emerald-100' : 'bg-gray-700 text-gray-100');
+    setTimeout(() => t.classList.remove('show'), 3000);
+  }
+
+  // Animated counters
+  document.addEventListener('DOMContentLoaded', function() {
+    const counters = document.querySelectorAll('.count-up');
+    if (!counters.length) return;
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        const el = entry.target;
+        const target = parseFloat(el.dataset.target || el.textContent.replace(/[^0-9.-]/g, ''));
+        const suffix = el.dataset.suffix || '';
+        const duration = 800;
+        const start = performance.now();
+        function update(now) {
+          const p = Math.min((now - start) / duration, 1);
+          const eased = 1 - Math.pow(1 - p, 3);
+          el.textContent = (target * eased).toFixed(target % 1 === 0 ? 0 : 1) + suffix;
+          if (p < 1) requestAnimationFrame(update);
+        }
+        requestAnimationFrame(update);
+        observer.unobserve(el);
+      });
+    }, { threshold: 0.5 });
+    counters.forEach(c => observer.observe(c));
+  });
+</script>
+
+{% block scripts %}{% endblock %}
+
+</body>
+</html>

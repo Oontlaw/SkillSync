@@ -1,414 +1,260 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>{{ guild.name }} – SkillSync</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
-  <style>
-    body { font-family: 'Inter', sans-serif; background: #0b0d11; }
-    .card-hover { transition: all 0.2s ease; }
-    .card-hover:hover { border-color: #3b82f6; transform: translateY(-2px); }
-    .glow { box-shadow: 0 0 30px rgba(59,130,246,0.08); }
-    .table-hover tr:hover { background: rgba(59,130,246,0.04); }
-  </style>
-</head>
-<body class="text-gray-100 min-h-screen">
+{% extends "base.html" %}
+{% block title %}{{ guild.name }} – SkillSync{% endblock %}
 
-  <nav class="border-b border-gray-800/60 px-6 py-4 flex items-center justify-between max-w-7xl mx-auto">
-    <a href="/" class="flex items-center gap-2">
-      <span class="text-blue-400 text-2xl font-bold">⚡</span>
-      <span class="text-white font-bold text-lg">SkillSync</span>
-    </a>
-    <div class="flex items-center gap-4">
-      <span class="text-gray-500 text-sm">Guild Profile</span>
-      {% if user %}
-      <span class="text-gray-400 text-sm">{{ user.name }}</span>
-      <form method="POST" action="/auth/logout" style="display:inline">
-  <button type="submit" class="text-gray-500 hover:text-red-400 text-sm transition cursor-pointer">Logout</button>
-</form>
-      {% else %}
-      <a href="/auth/login" class="border border-gray-700 hover:border-gray-500 px-5 py-2 rounded-lg text-sm font-medium transition">Login</a>
-      {% endif %}
-    </div>
-  </nav>
-
-  <div class="max-w-7xl mx-auto px-6 py-8">
-
-    <!-- Header -->
-    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 mb-8 glow">
-      <div class="flex justify-between items-start">
-        <div>
-          <h1 class="text-2xl font-bold text-white">{{ guild.name }}</h1>
-          <p class="text-gray-500 text-sm mt-1">Guild ID: {{ guild.guild_id }}</p>
-        </div>
-        <div class="text-right">
-          {% if guild.owner_name %}
-          <p class="text-gray-400 text-sm">Owner: <span class="text-white font-medium">{{ guild.owner_name }}</span></p>
-          {% endif %}
-          <p class="text-gray-600 text-xs mt-1">Scanned: {{ guild.scanned_at.strftime('%Y-%m-%d %H:%M') if guild.scanned_at else 'Not yet' }}</p>
-        </div>
+{% block content %}
+<div class="p-6">
+  <!-- Header -->
+  <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 mb-8 glow">
+    <div class="flex justify-between items-start">
+      <div>
+        <h1 class="text-2xl font-bold text-white">{{ guild.name }}</h1>
+        <p class="text-gray-500 text-sm mt-1">Guild ID: {{ guild.guild_id }}</p>
       </div>
-      <div class="grid grid-cols-5 gap-4 mt-6">
-        <div class="bg-[#0b0d11] rounded-xl border border-gray-800/40 p-4 text-center">
-          <p class="text-gray-500 text-xs uppercase tracking-wider">Members</p>
-          <p class="text-2xl font-bold text-white mt-1">{{ guild.member_count }}</p>
-        </div>
-        <div class="bg-[#0b0d11] rounded-xl border border-gray-800/40 p-4 text-center">
-          <p class="text-gray-500 text-xs uppercase tracking-wider">Online Now</p>
-          <p class="text-2xl font-bold text-green-400 mt-1">{{ guild.online_count }}</p>
-        </div>
-        <div class="bg-[#0b0d11] rounded-xl border border-gray-800/40 p-4 text-center">
-          <p class="text-gray-500 text-xs uppercase tracking-wider">Staff</p>
-          <p class="text-2xl font-bold text-blue-400 mt-1">{{ guild.staff_count }}</p>
-        </div>
-        <div class="bg-[#0b0d11] rounded-xl border border-gray-800/40 p-4 text-center">
-          <p class="text-gray-500 text-xs uppercase tracking-wider">Bots</p>
-          <p class="text-2xl font-bold text-gray-400 mt-1">{{ guild.bot_count }}</p>
-        </div>
-        <div class="bg-[#0b0d11] rounded-xl border border-gray-800/40 p-4 text-center">
-          <p class="text-gray-500 text-xs uppercase tracking-wider">Roles</p>
-          <p class="text-2xl font-bold text-white mt-1">{{ guild.role_count }}</p>
-        </div>
+      <div class="text-right">
+        {% if guild.owner_name %}
+        <p class="text-gray-400 text-sm">Owner: <span class="text-white font-medium">{{ guild.owner_name }}</span></p>
+        {% endif %}
+        <p class="text-gray-600 text-xs mt-1">Scanned: {{ guild.scanned_at.strftime('%Y-%m-%d %H:%M') if guild.scanned_at else 'Not yet' }}</p>
       </div>
     </div>
-
-    <!-- Guild Charts -->
-    <div class="grid grid-cols-3 gap-6 mb-8">
-      <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">👥 Composition</h2>
-        <div class="relative" style="height:160px"><canvas id="guildCompositionChart"></canvas></div>
+    <div class="grid grid-cols-5 gap-4 mt-6">
+      {% set hdr = [('Members', guild.member_count, 'white'), ('Online Now', guild.online_count, 'green'), ('Staff', guild.staff_count, 'blue'), ('Bots', guild.bot_count, 'gray'), ('Roles', guild.role_count, 'white')] %}
+      {% for label, val, color in hdr %}
+      <div class="bg-[#0b0d11] rounded-xl border border-gray-800/40 p-4 text-center">
+        <p class="text-gray-500 text-xs uppercase tracking-wider">{{ label }}</p>
+        <p class="text-2xl font-bold text-{{ color }}-400 mt-1">{{ val }}</p>
       </div>
-      <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🛡️ Staff vs Community</h2>
-        <div class="relative" style="height:160px"><canvas id="guildStaffChart"></canvas></div>
-      </div>
-      <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🤖 Bots vs Humans</h2>
-        <div class="relative" style="height:160px"><canvas id="guildBotsChart"></canvas></div>
-      </div>
-    </div>
-
-    {% if guild_hourly_chart %}
-    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 mb-8">
-      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🕐 Hourly Activity ({{ guild_msg_total }} msgs)</h2>
-      <p class="text-xs text-gray-600 mb-3">Peak activity hours for this server — helps identify its dominant timezone</p>
-      <div class="relative" style="height:180px"><canvas id="guildHourlyChart"></canvas></div>
-    </div>
-    {% endif %}
-
-    <!-- Voice Activity (server-specific) -->
-    {% if guild_voice_sessions > 0 %}
-    <div class="bg-[#111318] rounded-2xl border border-emerald-800/40 p-6 mb-8">
-      <h2 class="text-sm font-semibold text-emerald-400 uppercase tracking-wider mb-5">🎙️ Voice Activity ({{ guild_voice_sessions }} sessions · {{ guild_voice_hours }}h)</h2>
-      <div class="grid grid-cols-3 gap-6">
-        <div>
-          <h3 class="text-xs text-gray-500 uppercase tracking-wider mb-3">Top Voice Channels</h3>
-          <div class="space-y-2">
-            {% for ch in guild_voice_top_channels %}
-            <div class="flex justify-between items-center border-b border-gray-800/40 pb-1.5">
-              <span class="text-gray-300 text-sm">{{ ch.name }}</span>
-              <span class="text-gray-500 text-xs">{{ ch.sessions }} sessions · {{ ch.hours }}h</span>
-            </div>
-            {% endfor %}
-          </div>
-        </div>
-        <div>
-          <h3 class="text-xs text-gray-500 uppercase tracking-wider mb-3">Voice by Hour</h3>
-          <div class="relative" style="height:120px"><canvas id="guildVoiceHourlyChart"></canvas></div>
-        </div>
-        <div>
-          <h3 class="text-xs text-gray-500 uppercase tracking-wider mb-3">Top Voice Users</h3>
-          <div class="space-y-2 max-h-48 overflow-y-auto">
-            {% for u in guild_voice_users %}
-            <div class="flex justify-between items-center border-b border-gray-800/40 pb-1.5">
-              <span class="text-gray-300 text-sm">{{ u.name }}</span>
-              <span class="text-gray-500 text-xs">{{ u.sessions }} sessions · {{ u.hours }}h</span>
-            </div>
-            {% endfor %}
-          </div>
-        </div>
-      </div>
-    </div>
-    {% endif %}
-
-    <!-- Roles & Permissions -->
-    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 mb-8">
-      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-5">🔑 Roles & Permissions</h2>
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm table-hover">
-          <thead>
-            <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
-              <th class="text-left py-3 font-medium">Role</th>
-              <th class="text-center py-3 font-medium">Admin</th>
-              <th class="text-center py-3 font-medium">Ban</th>
-              <th class="text-center py-3 font-medium">Kick</th>
-              <th class="text-center py-3 font-medium">Manage Guild</th>
-              <th class="text-center py-3 font-medium">Manage Roles</th>
-              <th class="text-center py-3 font-medium">Mod</th>
-              <th class="text-right py-3 font-medium">Members</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for role in roles %}
-            <tr class="border-b border-gray-800/40">
-              <td class="py-3 font-medium" style="color: {{ role.color if role.color and role.color != '#000000' else '#fff' }}">{{ role.name }}</td>
-              <td class="py-3 text-center">{% if role.is_admin %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
-              <td class="py-3 text-center">{% if role.can_ban %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
-              <td class="py-3 text-center">{% if role.can_kick %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
-              <td class="py-3 text-center">{% if role.can_manage_guild %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
-              <td class="py-3 text-center">{% if role.can_manage_roles %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
-              <td class="py-3 text-center">
-                {% if role.is_mod %}
-                <span class="text-xs font-medium bg-blue-900/40 text-blue-300 px-2 py-1 rounded">MOD</span>
-                {% else %}
-                <span class="text-xs text-gray-600">—</span>
-                {% endif %}
-              </td>
-              <td class="py-3 text-right text-gray-400">{{ role.member_count }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- AutoMod Rules -->
-    {% if automod_rules %}
-    <div class="bg-[#111318] rounded-2xl border border-purple-800/40 p-6 mb-8">
-      <h2 class="text-sm font-semibold text-purple-400 uppercase tracking-wider mb-5">🤖 AutoMod Rules ({{ automod_rules|length }})</h2>
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm table-hover">
-          <thead>
-            <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
-              <th class="text-left py-3 font-medium">Rule</th>
-              <th class="text-left py-3 font-medium">Trigger</th>
-              <th class="text-left py-3 font-medium">Action</th>
-              <th class="text-left py-3 font-medium">Created By</th>
-              <th class="text-center py-3 font-medium">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for rule in automod_rules %}
-            <tr class="border-b border-gray-800/40">
-              <td class="py-3 font-medium text-white">{{ rule.name }}</td>
-              <td class="py-3 text-gray-400">{{ rule.trigger_type }}{% if rule.trigger_text %}: {{ rule.trigger_text[:60] }}{% endif %}</td>
-              <td class="py-3 text-gray-400">{{ rule.action_type | replace('_', ' ') | title }}</td>
-              <td class="py-3 text-gray-400">{{ rule.creator_name or 'Unknown' }}</td>
-              <td class="py-3 text-center">
-                {% if rule.enabled %}
-                <span class="text-xs font-medium bg-green-900/40 text-green-300 px-2 py-1 rounded">Active</span>
-                {% else %}
-                <span class="text-xs font-medium bg-gray-800/40 text-gray-500 px-2 py-1 rounded">Disabled</span>
-                {% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-    {% endif %}
-
-    <!-- Ping → Join Events -->
-    {% if ping_events %}
-    <div class="bg-[#111318] rounded-2xl border border-orange-800/40 p-6 mb-8">
-      <h2 class="text-sm font-semibold text-orange-400 uppercase tracking-wider mb-5">📢 @everyone Ping → New Members ({{ ping_events|length }})</h2>
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm table-hover">
-          <thead>
-            <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
-              <th class="text-left py-3 font-medium">Moderator</th>
-              <th class="text-left py-3 font-medium">Channel</th>
-              <th class="text-center py-3 font-medium">New Members</th>
-              <th class="text-left py-3 font-medium">Joiners</th>
-              <th class="text-right py-3 font-medium">When</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for ev in ping_events %}
-            <tr class="border-b border-gray-800/40">
-              <td class="py-3 font-medium text-white">{{ ev.moderator_name }}</td>
-              <td class="py-3 text-gray-400">#{{ ev.channel or '?' }}</td>
-              <td class="py-3 text-center">
-                <span class="text-sm font-bold text-orange-400">+{{ ev.new_members }}</span>
-              </td>
-              <td class="py-3 text-gray-400 text-xs">{{ ev.joiners[:80] }}{% if ev.joiners and ev.joiners|length > 80 %}...{% endif %}</td>
-              <td class="py-3 text-right text-gray-600 text-xs">{{ ev.created_at.strftime('%d %b %H:%M') }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-    {% endif %}
-
-    <div class="grid grid-cols-2 gap-8">
-
-      <!-- Staff -->
-      <div class="bg-[#111318] rounded-2xl border border-blue-800/40 p-6 card-hover">
-        <h2 class="text-sm font-semibold text-blue-400 uppercase tracking-wider mb-5">👤 Staff ({{ staff|length }})</h2>
-        <div class="space-y-2">
-          {% for m in staff %}
-          <div class="flex justify-between items-center border-b border-gray-800/40 py-2.5 last:border-0">
-            <div>
-              <span class="text-white">{{ m.name }}</span>
-              {% if m.is_owner %}
-              <span class="text-xs font-medium bg-yellow-900/40 text-yellow-300 px-1.5 py-0.5 rounded ml-2">Owner</span>
-              {% endif %}
-            </div>
-            <span class="text-gray-600 text-xs">{{ m.member_id }}</span>
-          </div>
-          {% endfor %}
-        </div>
-      </div>
-
-      <!-- Community -->
-      <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 card-hover">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-5">👥 Community ({{ members|length }})</h2>
-        <div class="space-y-1 max-h-96 overflow-y-auto">
-          {% for m in members[:50] %}
-          <div class="flex justify-between items-center border-b border-gray-800/40 py-1.5">
-            <span class="text-gray-300 text-sm">{{ m.name }}</span>
-            <span class="text-gray-600 text-xs">{{ m.member_id }}</span>
-          </div>
-          {% endfor %}
-          {% if members|length > 50 %}
-          <p class="text-gray-600 text-xs text-center mt-3">...and {{ members|length - 50 }} more</p>
-          {% endif %}
-        </div>
-      </div>
-
+      {% endfor %}
     </div>
   </div>
 
-  <script>
-    const textColor = '#9ca3af';
-    const font = 'Inter';
+  <!-- Charts -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6"><h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">👥 Composition</h2><div class="relative" style="height:160px"><canvas id="guildCompositionChart"></canvas></div></div>
+    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6"><h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🛡️ Staff vs Community</h2><div class="relative" style="height:160px"><canvas id="guildStaffChart"></canvas></div></div>
+    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6"><h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🤖 Bots vs Humans</h2><div class="relative" style="height:160px"><canvas id="guildBotsChart"></canvas></div></div>
+  </div>
 
-    function darkChart(ctx, cfg) {
-      cfg.options.responsive = true;
-      cfg.options.maintainAspectRatio = true;
-      cfg.options.plugins = cfg.options.plugins || {};
-      cfg.options.plugins.legend = cfg.options.plugins.legend || {};
-      cfg.options.plugins.legend.labels = { color: textColor, font: { family: font } };
-      return new Chart(ctx, cfg);
-    }
+  {% if guild_hourly_chart %}
+  <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 mb-8">
+    <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🕐 Hourly Activity ({{ guild_msg_total }} msgs)</h2>
+    <p class="text-xs text-gray-600 mb-3">Peak activity hours for this server — helps identify its dominant timezone</p>
+    <div class="relative" style="height:180px"><canvas id="guildHourlyChart"></canvas></div>
+  </div>
 
-    darkChart(document.getElementById('guildCompositionChart'), {
-      type: 'doughnut',
-      data: {
-        labels: ['Members', 'Online', 'Offline'],
-        datasets: [{
-          data: [{{ guild.member_count }}, {{ guild.online_count }}, {{ guild.member_count - guild.online_count }}],
-          backgroundColor: ['rgba(59,130,246,0.7)', 'rgba(16,185,129,0.7)', 'rgba(75,85,99,0.5)'],
-          borderColor: '#111318',
-          borderWidth: 3,
-        }]
-      },
-      options: { plugins: { legend: { position: 'bottom' } } }
-    });
+  <!-- Peak Hour Staffing (#3) -->
+  {% if community_hourly and staff_hourly %}
+  <div class="bg-[#111318] rounded-2xl border border-yellow-800/40 p-6 mb-8">
+    <h2 class="text-sm font-semibold text-yellow-400 uppercase tracking-wider mb-4">⏰ Peak Hour Staffing</h2>
+    <p class="text-xs text-gray-600 mb-3">Community activity vs staff presence — reveals understaffed hours</p>
+    <div class="relative" style="height:200px"><canvas id="staffingChart"></canvas></div>
+  </div>
+  {% endif %}
+  {% endif %}
 
-    darkChart(document.getElementById('guildStaffChart'), {
-      type: 'doughnut',
-      data: {
-        labels: ['Community', 'Staff'],
-        datasets: [{
-          data: [Math.max(0, {{ guild.member_count }} - {{ guild.staff_count }}), {{ guild.staff_count }}],
-          backgroundColor: ['rgba(75,85,99,0.6)', 'rgba(59,130,246,0.8)'],
-          borderColor: '#111318',
-          borderWidth: 3,
-        }]
-      },
-      options: { plugins: { legend: { position: 'bottom' } } }
-    });
+  {% if guild_voice_sessions > 0 %}
+  <div class="bg-[#111318] rounded-2xl border border-emerald-800/40 p-6 mb-8">
+    <h2 class="text-sm font-semibold text-emerald-400 uppercase tracking-wider mb-5">🎙️ Voice Activity ({{ guild_voice_sessions }} sessions · {{ guild_voice_hours }}h)</h2>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div>
+        <h3 class="text-xs text-gray-500 uppercase tracking-wider mb-3">Top Voice Channels</h3>
+        <div class="space-y-2">
+          {% for ch in guild_voice_top_channels %}
+          <div class="flex justify-between items-center border-b border-gray-800/40 pb-1.5">
+            <span class="text-gray-300 text-sm">{{ ch.name }}</span>
+            <span class="text-gray-500 text-xs">{{ ch.sessions }} sessions · {{ ch.hours }}h</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      <div>
+        <h3 class="text-xs text-gray-500 uppercase tracking-wider mb-3">Voice by Hour</h3>
+        <div class="relative" style="height:120px"><canvas id="guildVoiceHourlyChart"></canvas></div>
+      </div>
+      <div>
+        <h3 class="text-xs text-gray-500 uppercase tracking-wider mb-3">Top Voice Users</h3>
+        <div class="space-y-2 max-h-48 overflow-y-auto">
+          {% for u in guild_voice_users %}
+          <div class="flex justify-between items-center border-b border-gray-800/40 pb-1.5">
+            <span class="text-gray-300 text-sm">{{ u.name }}</span>
+            <span class="text-gray-500 text-xs">{{ u.sessions }} sessions · {{ u.hours }}h</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
-    darkChart(document.getElementById('guildBotsChart'), {
-      type: 'doughnut',
-      data: {
-        labels: ['Humans', 'Bots'],
-        datasets: [{
-          data: [{{ guild.member_count - guild.bot_count }}, {{ guild.bot_count }}],
-          backgroundColor: ['rgba(16,185,129,0.7)', 'rgba(139,92,246,0.7)'],
-          borderColor: '#111318',
-          borderWidth: 3,
-        }]
-      },
-      options: { plugins: { legend: { position: 'bottom' } } }
-    });
+  <!-- Roles & Permissions -->
+  <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 mb-8">
+    <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-5">🔑 Roles & Permissions</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm table-hover">
+        <thead>
+          <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
+            <th class="text-left py-3 font-medium">Role</th><th class="text-center py-3 font-medium">Admin</th><th class="text-center py-3 font-medium">Ban</th><th class="text-center py-3 font-medium">Kick</th><th class="text-center py-3 font-medium">Manage Guild</th><th class="text-center py-3 font-medium">Manage Roles</th><th class="text-center py-3 font-medium">Mod</th><th class="text-right py-3 font-medium">Members</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for role in roles %}
+          <tr class="border-b border-gray-800/40">
+            <td class="py-3 font-medium" style="color: {{ role.color if role.color and role.color != '#000000' else '#fff' }}">{{ role.name }}</td>
+            <td class="py-3 text-center">{% if role.is_admin %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
+            <td class="py-3 text-center">{% if role.can_ban %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
+            <td class="py-3 text-center">{% if role.can_kick %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
+            <td class="py-3 text-center">{% if role.can_manage_guild %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
+            <td class="py-3 text-center">{% if role.can_manage_roles %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
+            <td class="py-3 text-center">{% if role.is_mod %}<span class="text-xs font-medium bg-blue-900/40 text-blue-300 px-2 py-1 rounded">MOD</span>{% else %}<span class="text-xs text-gray-600">—</span>{% endif %}</td>
+            <td class="py-3 text-right text-gray-400">{{ role.member_count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
 
-    {% if guild_hourly_chart %}
-    (function() {
-      const ghc = document.getElementById('guildHourlyChart');
-      if (!ghc) return;
-      const gh = {{ guild_hourly_chart | tojson }};
-      const hours = Array.from({length: 24}, (_, i) => `${i}:00`);
-      const data = hours.map((_, i) => gh[i] || 0);
-      const peak = Math.max(...data);
-      darkChart(ghc, {
-        type: 'bar',
-        data: {
-          labels: hours,
-          datasets: [{
-            label: 'Messages',
-            data: data,
-            backgroundColor: data.map(v =>
-              v === peak && peak > 0 ? 'rgba(245,158,11,0.7)' : 'rgba(59,130,246,0.5)'
-            ),
-            borderColor: data.map(v =>
-              v === peak && peak > 0 ? '#f59e0b' : '#3b82f6'
-            ),
-            borderWidth: 1,
-            borderRadius: 3,
-          }]
-        },
-        options: {
-          plugins: { legend: { display: false } },
-          scales: {
-            x: { ticks: { maxTicksLimit: 12, font: { family: font } } },
-            y: { beginAtZero: true, ticks: { font: { family: font } } }
-          }
-        }
-      });
-    })();
-    {% endif %}
+  <!-- AutoMod -->
+  {% if automod_rules %}
+  <div class="bg-[#111318] rounded-2xl border border-purple-800/40 p-6 mb-8">
+    <h2 class="text-sm font-semibold text-purple-400 uppercase tracking-wider mb-5">🤖 AutoMod Rules ({{ automod_rules|length }})</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm table-hover">
+        <thead>
+          <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
+            <th class="text-left py-3 font-medium">Rule</th><th class="text-left py-3 font-medium">Trigger</th><th class="text-left py-3 font-medium">Action</th><th class="text-left py-3 font-medium">Created By</th><th class="text-center py-3 font-medium">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for rule in automod_rules %}
+          <tr class="border-b border-gray-800/40">
+            <td class="py-3 font-medium text-white">{{ rule.name }}</td>
+            <td class="py-3 text-gray-400">{{ rule.trigger_type }}{% if rule.trigger_text %}: {{ rule.trigger_text[:60] }}{% endif %}</td>
+            <td class="py-3 text-gray-400">{{ rule.action_type | replace('_', ' ') | title }}</td>
+            <td class="py-3 text-gray-400">{{ rule.creator_name or 'Unknown' }}</td>
+            <td class="py-3 text-center">{% if rule.enabled %}<span class="text-xs font-medium bg-green-900/40 text-green-300 px-2 py-1 rounded">Active</span>{% else %}<span class="text-xs font-medium bg-gray-800/40 text-gray-500 px-2 py-1 rounded">Disabled</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
 
-    {% if guild_voice_sessions > 0 %}
-    (function() {
-      const gvhc = document.getElementById('guildVoiceHourlyChart');
-      if (!gvhc) return;
-      const gvh = {{ guild_voice_hourly | tojson }};
-      const hours = Array.from({length: 24}, (_, i) => `${i}:00`);
-      darkChart(gvhc, {
-        type: 'bar',
-        data: {
-          labels: hours,
-          datasets: [{
-            label: 'Sessions',
-            data: hours.map((_, i) => gvh[i] || 0),
-            backgroundColor: 'rgba(16,185,129,0.5)',
-            borderColor: '#10b981',
-            borderWidth: 1,
-            borderRadius: 3,
-          }]
-        },
-        options: {
-          plugins: { legend: { display: false } },
-          scales: {
-            x: { ticks: { maxTicksLimit: 8, font: { size: 9, family: font } } },
-            y: { beginAtZero: true, ticks: { font: { size: 9, family: font } } }
-          }
-        }
-      });
-    })();
-    {% endif %}
-  </script>
+  <!-- Ping → Join -->
+  {% if ping_events %}
+  <div class="bg-[#111318] rounded-2xl border border-orange-800/40 p-6 mb-8">
+    <h2 class="text-sm font-semibold text-orange-400 uppercase tracking-wider mb-5">📢 @everyone Ping → New Members ({{ ping_events|length }})</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm table-hover">
+        <thead>
+          <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
+            <th class="text-left py-3 font-medium">Moderator</th><th class="text-left py-3 font-medium">Channel</th><th class="text-center py-3 font-medium">New Members</th><th class="text-left py-3 font-medium">Joiners</th><th class="text-right py-3 font-medium">When</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ev in ping_events %}
+          <tr class="border-b border-gray-800/40">
+            <td class="py-3 font-medium text-white">{{ ev.moderator_name }}</td>
+            <td class="py-3 text-gray-400">#{{ ev.channel or '?' }}</td>
+            <td class="py-3 text-center"><span class="text-sm font-bold text-orange-400">+{{ ev.new_members }}</span></td>
+            <td class="py-3 text-gray-400 text-xs">{{ ev.joiners[:80] }}{% if ev.joiners and ev.joiners|length > 80 %}...{% endif %}</td>
+            <td class="py-3 text-right text-gray-600 text-xs">{{ ev.created_at.strftime('%d %b %H:%M') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
 
-  <footer class="border-t border-gray-800/40 py-6 text-center text-gray-600 text-xs mt-4">
-    SkillSync — Workforce Intelligence for Discord
-  </footer>
+  <!-- Staff + Community -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+    <div class="bg-[#111318] rounded-2xl border border-blue-800/40 p-6">
+      <h2 class="text-sm font-semibold text-blue-400 uppercase tracking-wider mb-5">👤 Staff ({{ staff|length }})</h2>
+      {% if staff %}
+      <div class="space-y-2">
+        {% for m in staff %}
+        <div class="flex justify-between items-center border-b border-gray-800/40 py-2.5 last:border-0">
+          <div>
+            <span class="text-white">{{ m.name }}</span>
+            {% if m.is_owner %}<span class="text-xs font-medium bg-yellow-900/40 text-yellow-300 px-1.5 py-0.5 rounded ml-2">Owner</span>{% endif %}
+          </div>
+          <span class="text-gray-600 text-xs">{{ m.member_id }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state py-6"><span class="text-2xl mb-2">👤</span><p class="text-gray-500 text-sm">No staff detected</p></div>
+      {% endif %}
+    </div>
 
-</body>
-</html>
+    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-5">👥 Community ({{ members|length }})</h2>
+      {% if members %}
+      <div class="space-y-1 max-h-96 overflow-y-auto">
+        {% for m in members[:50] %}
+        <div class="flex justify-between items-center border-b border-gray-800/40 py-1.5">
+          <span class="text-gray-300 text-sm">{{ m.name }}</span>
+          <span class="text-gray-600 text-xs">{{ m.member_id }}</span>
+        </div>
+        {% endfor %}
+        {% if members|length > 50 %}<p class="text-gray-600 text-xs text-center mt-3">...and {{ members|length - 50 }} more</p>{% endif %}
+      </div>
+      {% else %}
+      <div class="empty-state py-6"><span class="text-2xl mb-2">👥</span><p class="text-gray-500 text-sm">No community members tracked</p></div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const gc = document.getElementById('guildCompositionChart');
+if (gc) darkChart(gc, { type: 'doughnut', data: { labels: ['Members', 'Online', 'Offline'], datasets: [{ data: [{{ guild.member_count }}, {{ guild.online_count }}, {{ guild.member_count - guild.online_count }}], backgroundColor: ['rgba(59,130,246,0.7)', 'rgba(16,185,129,0.7)', 'rgba(75,85,99,0.5)'], borderColor: '#111318', borderWidth: 3 }] }, options: { plugins: { legend: { position: 'bottom' } } } });
+
+const gs = document.getElementById('guildStaffChart');
+if (gs) darkChart(gs, { type: 'doughnut', data: { labels: ['Community', 'Staff'], datasets: [{ data: [Math.max(0, {{ guild.member_count }} - {{ guild.staff_count }}), {{ guild.staff_count }}], backgroundColor: ['rgba(75,85,99,0.6)', 'rgba(59,130,246,0.8)'], borderColor: '#111318', borderWidth: 3 }] }, options: { plugins: { legend: { position: 'bottom' } } } });
+
+const gb = document.getElementById('guildBotsChart');
+if (gb) darkChart(gb, { type: 'doughnut', data: { labels: ['Humans', 'Bots'], datasets: [{ data: [{{ guild.member_count - guild.bot_count }}, {{ guild.bot_count }}], backgroundColor: ['rgba(16,185,129,0.7)', 'rgba(139,92,246,0.7)'], borderColor: '#111318', borderWidth: 3 }] }, options: { plugins: { legend: { position: 'bottom' } } } });
+
+{% if guild_hourly_chart %}
+(function() {
+  const el = document.getElementById('guildHourlyChart'); if (!el) return;
+  const gh = {{ guild_hourly_chart | tojson }};
+  const h = Array.from({length:24},(_,i)=>`${i}:00`), d = h.map((_,i)=>gh[i]||0), p = Math.max(...d);
+  darkChart(el, { type: 'bar', data: { labels: h, datasets: [{ label: 'Messages', data: d, backgroundColor: d.map(v => v === p && p > 0 ? 'rgba(245,158,11,0.7)' : 'rgba(59,130,246,0.5)'), borderColor: d.map(v => v === p && p > 0 ? '#f59e0b' : '#3b82f6'), borderWidth: 1, borderRadius: 3 }] }, options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 12, font: { family: font } } }, y: { beginAtZero: true, ticks: { font: { family: font } } } } } });
+})();
+{% endif %}
+
+{% if community_hourly and staff_hourly %}
+(function() {
+  const el = document.getElementById('staffingChart'); if (!el) return;
+  const ch = {{ community_hourly | tojson }}, sh = {{ staff_hourly | tojson }};
+  const h = Array.from({length:24},(_,i)=>`${i}:00`);
+  const staffData = h.map((_,i)=>sh[i]||0), commData = h.map((_,i)=>ch[i]||0);
+  darkChart(el, { type: 'line', data: {
+    labels: h,
+    datasets: [
+      { label: 'Community', data: commData, borderColor: '#6b7280', backgroundColor: 'rgba(107,114,128,0.1)', fill: true, tension: 0.3, pointRadius: 2, pointHitRadius: 5 },
+      { label: 'Staff', data: staffData, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.1)', fill: true, tension: 0.3, pointRadius: 3, pointHitRadius: 5 },
+    ]
+  }, options: {
+    plugins: { legend: { position: 'bottom', labels: { font: { family: font }, boxWidth: 12, padding: 8 } } },
+    scales: { x: { ticks: { maxTicksLimit: 12, font: { family: font } } }, y: { beginAtZero: true, ticks: { font: { family: font } } } }
+  } });
+})();
+{% endif %}
+
+{% if guild_voice_sessions > 0 %}
+(function() {
+  const el = document.getElementById('guildVoiceHourlyChart'); if (!el) return;
+  const vh = {{ guild_voice_hourly | tojson }};
+  const h = Array.from({length:24},(_,i)=>`${i}:00`);
+  darkChart(el, { type: 'bar', data: { labels: h, datasets: [{ label: 'Sessions', data: h.map((_,i)=>vh[i]||0), backgroundColor: 'rgba(16,185,129,0.5)', borderColor: '#10b981', borderWidth: 1, borderRadius: 3 }] }, options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 8, font: { size: 9, family: font } } }, y: { beginAtZero: true, ticks: { font: { size: 9, family: font } } } } } });
+})();
+{% endif %}
+</script>
+{% endblock %}

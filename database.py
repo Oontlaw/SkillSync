@@ -282,3 +282,22 @@ class PingJoinEvent(db.Model):
 
     def __repr__(self):
         return f'<PingJoinEvent {self.moderator_name} | +{self.new_members} in {self.guild_name}>'
+
+
+class BurnoutRisk(db.Model):
+    __tablename__ = 'burnout_risks'
+
+    id = db.Column(db.Integer, primary_key=True)
+    worker_id = db.Column(db.Integer, db.ForeignKey('workers.id'), nullable=False, index=True)
+    discord_id = db.Column(db.String(50), nullable=False)
+    name = db.Column(db.String(100), nullable=True)
+    score = db.Column(db.Float, default=0.0)
+    anomaly_freq = db.Column(db.Float, default=0.0)
+    volume_volatility = db.Column(db.Float, default=0.0)
+    reversal_rate = db.Column(db.Float, default=0.0)
+    voice_creep = db.Column(db.Float, default=0.0)
+    signals = db.Column(db.Text, nullable=True)
+    detected_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<BurnoutRisk {self.name} | score={self.score}>'

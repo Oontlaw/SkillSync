@@ -1,482 +1,312 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>SkillSync – {% if logged_out %}Workforce Intelligence Bot{% else %}Admin Dashboard{% endif %}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
-  <style>
-    body { font-family: 'Inter', sans-serif; background: #0b0d11; }
-    .gradient-text { background: linear-gradient(135deg, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .card-hover { transition: all 0.2s ease; }
-    .card-hover:hover { border-color: #3b82f6; transform: translateY(-2px); }
-    .glow { box-shadow: 0 0 30px rgba(59,130,246,0.08); }
-    .table-hover tr:hover { background: rgba(59,130,246,0.04); }
-  </style>
-</head>
-<body class="text-gray-100 min-h-screen">
+{% extends "base.html" %}
+{% block title %}SkillSync – Admin Dashboard{% endblock %}
 
-  <nav class="border-b border-gray-800/60 px-6 py-4 flex items-center justify-between max-w-7xl mx-auto">
-    <a href="/" class="flex items-center gap-2">
-      <span class="text-blue-400 text-2xl font-bold">⚡</span>
-      <span class="text-white font-bold text-lg">SkillSync</span>
-    </a>
-    <div class="flex items-center gap-4">
-      {% if user %}
-      <a href="/search" class="text-gray-400 hover:text-blue-400 text-sm transition">Search</a>
-      <span class="text-gray-400 text-sm">{{ user.name }}</span>
-      <form method="POST" action="/auth/logout" style="display:inline">
-  <button type="submit" class="text-gray-500 hover:text-red-400 text-sm transition cursor-pointer">Logout</button>
-</form>
+{% block content %}
+
+<!-- Stats Row -->
+<div class="max-w-7xl mx-auto px-6 pt-8 pb-6">
+  <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 glow">
+    <div class="grid grid-cols-2 md:grid-cols-6 gap-4">
+      {% set stats = [
+        ('Workers', total_workers, ''),
+        ('Tasks', total_tasks, ''),
+        ('Messages Tracked', total_messages_logged, ''),
+        ('Mod Actions', total_moderation_actions, ''),
+        ('Voice Sessions', total_voice_sessions, ''),
+        ('Voice Hours', total_voice_hours, 'h'),
+      ] %}
+      {% for label, val, suffix in stats %}
+      <div>
+        <p class="text-gray-500 text-xs font-medium uppercase tracking-wider">{{ label }}</p>
+        <p class="text-3xl font-bold text-white mt-1"><span class="count-up" data-target="{{ val }}" data-suffix="{{ suffix }}">{{ val }}{{ suffix }}</span></p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<!-- Charts Row -->
+<div class="max-w-7xl mx-auto px-6 pb-6">
+  {% if guild_hourly and guild_hourly.keys()|length > 0 %}
+  <div class="grid grid-cols-12 gap-6">
+    <div class="col-span-12 md:col-span-7 bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🕐 Guild Activity Comparison</h2>
+      <p class="text-xs text-gray-600 mb-3">Peak hours per server — compare which timezones each guild is active in</p>
+      <div class="relative" style="height:200px"><canvas id="compareChart"></canvas></div>
+    </div>
+    <div class="col-span-12 md:col-span-5 bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">📊 Message Distribution</h2>
+      <p class="text-xs text-gray-600 mb-3">Total messages per server</p>
+      {% if guild_msg_counts and guild_msg_counts.keys()|length > 0 %}
+      <div class="relative" style="height:200px"><canvas id="distChart"></canvas></div>
       {% else %}
-      <a href="/auth/login" class="border border-gray-700 hover:border-gray-500 px-5 py-2 rounded-lg text-sm font-medium transition">Login</a>
-      <a href="{{ invite_url }}" target="_blank" class="bg-blue-600 hover:bg-blue-500 px-5 py-2 rounded-lg text-sm font-medium transition shadow-lg shadow-blue-600/20">Invite Bot</a>
+      <div class="empty-state h-full">
+        <span class="text-3xl mb-2">📭</span>
+        <p class="text-gray-500 text-sm">No messages tracked yet</p>
+        <p class="text-gray-600 text-xs mt-1">Messages appear here once the bot starts logging</p>
+      </div>
       {% endif %}
     </div>
-  </nav>
-
-  {% if logged_out %}
-
-  <!-- Landing Hero -->
-  <section class="max-w-5xl mx-auto px-6 pt-24 pb-20 text-center">
-    <h1 class="text-5xl md:text-6xl font-extrabold text-white leading-tight mb-4">
-      One bot.<br/>
-      <span class="gradient-text">Your whole workforce.</span>
-    </h1>
-    <p class="text-gray-400 text-lg max-w-2xl mx-auto mb-10 leading-relaxed">
-      Staff scoring, behavioral analytics, guild management — three engines in one dashboard.
-      Track who moderates, how they do it, and keep your team accountable.
-    </p>
-    <div class="flex gap-4 justify-center">
-      <a href="{{ invite_url }}" target="_blank" class="bg-blue-600 hover:bg-blue-500 px-8 py-3 rounded-lg text-base font-semibold transition shadow-lg shadow-blue-600/20">Invite Bot</a>
-      <a href="/auth/login" class="border border-gray-700 hover:border-gray-500 px-8 py-3 rounded-lg text-base font-semibold transition">View Dashboard</a>
-    </div>
-  </section>
-
-  <!-- Features -->
-  <section class="max-w-6xl mx-auto px-6 pb-24">
-    <div class="text-center mb-14">
-      <h2 class="text-3xl font-bold text-white mb-3">Everything you need to run your staff team</h2>
-      <p class="text-gray-500">Modular by design. Enable what you need, ignore the rest.</p>
-    </div>
-    <div class="grid grid-cols-3 gap-5">
-      <div class="bg-[#111318] rounded-xl border border-gray-800/60 p-6 card-hover">
-        <div class="w-10 h-10 bg-blue-600/10 rounded-lg flex items-center justify-center mb-4"><span class="text-blue-400 text-lg">🕵️</span></div>
-        <h3 class="text-white font-semibold mb-2">Passive Observer</h3>
-        <p class="text-gray-500 text-sm leading-relaxed">Watches audit logs and attributes moderation actions to the right staff — even through other bots.</p>
-      </div>
-      <div class="bg-[#111318] rounded-xl border border-gray-800/60 p-6 card-hover">
-        <div class="w-10 h-10 bg-purple-600/10 rounded-lg flex items-center justify-center mb-4"><span class="text-purple-400 text-lg">📊</span></div>
-        <h3 class="text-white font-semibold mb-2">Staff Scoring</h3>
-        <p class="text-gray-500 text-sm leading-relaxed">Auto-score bans, kicks, timeouts, and warns. Flag reversals and track team performance.</p>
-      </div>
-      <div class="bg-[#111318] rounded-xl border border-gray-800/60 p-6 card-hover">
-        <div class="w-10 h-10 bg-green-600/10 rounded-lg flex items-center justify-center mb-4"><span class="text-green-400 text-lg">🧠</span></div>
-        <h3 class="text-white font-semibold mb-2">Behavioral Analytics</h3>
-        <p class="text-gray-500 text-sm leading-relaxed">Track message patterns, detect anomalies, and understand community activity at a glance.</p>
-      </div>
-      <div class="bg-[#111318] rounded-xl border border-gray-800/60 p-6 card-hover">
-        <div class="w-10 h-10 bg-yellow-600/10 rounded-lg flex items-center justify-center mb-4"><span class="text-yellow-400 text-lg">🛡️</span></div>
-        <h3 class="text-white font-semibold mb-2">Auto Staff Detection</h3>
-        <p class="text-gray-500 text-sm leading-relaxed">Scans roles and permissions to identify your mod team automatically. Zero config required.</p>
-      </div>
-      <div class="bg-[#111318] rounded-xl border border-gray-800/60 p-6 card-hover">
-        <div class="w-10 h-10 bg-red-600/10 rounded-lg flex items-center justify-center mb-4"><span class="text-red-400 text-lg">🔧</span></div>
-        <h3 class="text-white font-semibold mb-2">Moderation Suite</h3>
-        <p class="text-gray-500 text-sm leading-relaxed">Built-in ban, kick, timeout, warn, and purge. All actions scored and logged automatically.</p>
-      </div>
-      <div class="bg-[#111318] rounded-xl border border-gray-800/60 p-6 card-hover">
-        <div class="w-10 h-10 bg-indigo-600/10 rounded-lg flex items-center justify-center mb-4"><span class="text-indigo-400 text-lg">📋</span></div>
-        <h3 class="text-white font-semibold mb-2">Guild Overview</h3>
-        <p class="text-gray-500 text-sm leading-relaxed">Full server view with roles, permissions, staff list, and community breakdown.</p>
-      </div>
-    </div>
-  </section>
-
+  </div>
   {% else %}
-
-  <!-- Stats Row -->
-  <div class="max-w-7xl mx-auto px-6 pt-8 pb-6">
-    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 glow">
-      <div class="grid grid-cols-4 gap-6">
-        <div>
-          <p class="text-gray-500 text-xs font-medium uppercase tracking-wider">Workers</p>
-          <p class="text-3xl font-bold text-white mt-1">{{ total_workers }}</p>
-        </div>
-        <div>
-          <p class="text-gray-500 text-xs font-medium uppercase tracking-wider">Tasks</p>
-          <p class="text-3xl font-bold text-white mt-1">{{ total_tasks }}</p>
-        </div>
-        <div>
-          <p class="text-gray-500 text-xs font-medium uppercase tracking-wider">Messages Tracked</p>
-          <p class="text-3xl font-bold text-white mt-1">{{ total_messages_logged }}</p>
-        </div>
-        <div>
-          <p class="text-gray-500 text-xs font-medium uppercase tracking-wider">Mod Actions</p>
-          <p class="text-3xl font-bold text-white mt-1">{{ total_moderation_actions }}</p>
-        </div>
-        <div>
-          <p class="text-gray-500 text-xs font-medium uppercase tracking-wider">Voice Sessions</p>
-          <p class="text-3xl font-bold text-white mt-1">{{ total_voice_sessions }}</p>
-        </div>
-        <div>
-          <p class="text-gray-500 text-xs font-medium uppercase tracking-wider">Voice Hours</p>
-          <p class="text-3xl font-bold text-white mt-1">{{ total_voice_hours }}</p>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Charts Row -->
-  <div class="max-w-7xl mx-auto px-6 pb-6">
-    <div class="grid grid-cols-12 gap-6">
-      <div class="col-span-7 bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🕐 Guild Activity Comparison</h2>
-        <p class="text-xs text-gray-600 mb-3">Peak hours per server — compare which timezones each guild is active in</p>
-        <div class="relative" style="height:200px"><canvas id="compareChart"></canvas></div>
-      </div>
-      <div class="col-span-5 bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">📊 Message Distribution</h2>
-        <p class="text-xs text-gray-600 mb-3">Total messages per server</p>
-        <div class="relative" style="height:200px"><canvas id="distChart"></canvas></div>
-      </div>
-    </div>
-
-    <div class="grid grid-cols-3 gap-6 mt-6">
-      <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">📊 Community vs Staff</h2>
-        <div class="relative" style="height:140px"><canvas id="staffChart"></canvas></div>
-      </div>
-      <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">📈 Score Sources</h2>
-        <div class="relative" style="height:140px"><canvas id="sourcesChart"></canvas></div>
-      </div>
-      <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🕐 Aggregate Hourly</h2>
-        <div class="relative" style="height:140px"><canvas id="hourlyChart"></canvas></div>
-      </div>
-    </div>
-    {% if daily_volume %}
-    <div class="grid grid-cols-1 mt-6">
-      <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">📅 Message Volume (7 days)</h2>
-        <div class="relative" style="height:120px"><canvas id="volumeChart"></canvas></div>
-      </div>
-    </div>
-    {% endif %}
-  </div>
-
-  <!-- Anomalies -->
-  {% if anomalies %}
-  <div class="max-w-7xl mx-auto px-6 mb-6">
-    <div class="bg-[#111318] rounded-2xl border border-red-900/40 p-6">
-      <h2 class="text-sm font-semibold text-red-400 uppercase tracking-wider mb-4">🚨 Behavioral Anomalies</h2>
-      <div class="space-y-2">
-        {% for a in anomalies %}
-        <div class="flex justify-between items-center py-2 border-b border-gray-800/40 last:border-0">
-          <div>
-            <span class="text-red-400 text-sm font-medium">{{ a.anomaly_type | replace('_', ' ') | title }}</span>
-            <span class="text-gray-400 text-sm ml-2">— {{ a.name or a.discord_id }}</span>
-            <p class="text-gray-600 text-xs mt-0.5">{{ a.details }}</p>
-          </div>
-          <span class="text-red-400 text-xs font-bold px-2 py-1 bg-red-900/30 rounded">{{ "%.0f"|format(a.severity) }}%</span>
-        </div>
-        {% endfor %}
-      </div>
+  <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+    <div class="empty-state">
+      <span class="text-4xl mb-3">📊</span>
+      <h3 class="text-gray-300 font-semibold mb-1">No activity data yet</h3>
+      <p class="text-gray-500 text-sm max-w-md">Charts will populate once the bot collects message and voice activity across your servers.</p>
     </div>
   </div>
   {% endif %}
 
-  <!-- Guilds + Content -->
-  <div class="max-w-7xl mx-auto px-6 pb-8">
-    <div class="grid grid-cols-3 gap-6 mb-8">
-      {% if guilds %}
-      <div class="col-span-2 bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🛡️ Server Overview</h2>
-        <div class="grid grid-cols-4 gap-4 mb-5 pb-5 border-b border-gray-800/40">
-          <div>
-            <p class="text-gray-500 text-xs">Tracked</p>
-            <p class="text-xl font-bold text-white">{{ total_guilds }}</p>
-          </div>
-          <div>
-            <p class="text-gray-500 text-xs">Members</p>
-            <p class="text-xl font-bold text-white">{{ total_members_tracked }}</p>
-          </div>
-          <div>
-            <p class="text-gray-500 text-xs">Staff</p>
-            <p class="text-xl font-bold text-blue-400">{{ total_staff_tracked }}</p>
-          </div>
-          <div>
-            <p class="text-gray-500 text-xs">Online</p>
-            <p class="text-xl font-bold text-green-400">{{ "%.0f"|format(total_online_members / total_members_tracked * 100 if total_members_tracked else 0) }}%</p>
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
+    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">📊 Community vs Staff</h2>
+      <div class="relative" style="height:140px"><canvas id="staffChart"></canvas></div>
+    </div>
+    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">📈 Score Sources</h2>
+      <div class="relative" style="height:140px"><canvas id="sourcesChart"></canvas></div>
+    </div>
+    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🕐 Aggregate Hourly</h2>
+      <div class="relative" style="height:140px"><canvas id="hourlyChart"></canvas></div>
+    </div>
+  </div>
+  {% if daily_volume %}
+  <div class="grid grid-cols-1 mt-6">
+    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">📅 Message Volume (7 days)</h2>
+      <div class="relative" style="height:120px"><canvas id="volumeChart"></canvas></div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Anomalies -->
+{% if anomalies %}
+<div class="max-w-7xl mx-auto px-6 mb-6">
+  <div class="bg-[#111318] rounded-2xl border border-red-900/40 p-6">
+    <h2 class="text-sm font-semibold text-red-400 uppercase tracking-wider mb-4">🚨 Behavioral Anomalies</h2>
+    <div class="space-y-2">
+      {% for a in anomalies %}
+      <div class="flex justify-between items-center py-2 border-b border-gray-800/40 last:border-0">
+        <div>
+          <span class="text-red-400 text-sm font-medium">{{ a.anomaly_type | replace('_', ' ') | title }}</span>
+          <span class="text-gray-400 text-sm ml-2">— {{ a.name or a.discord_id }}</span>
+          <p class="text-gray-600 text-xs mt-0.5">{{ a.details }}</p>
+        </div>
+        <span class="text-red-400 text-xs font-bold px-2 py-1 bg-red-900/30 rounded">{{ "%.0f"|format(a.severity) }}%</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Burnout Risks (#2) -->
+{% if burnout_risks %}
+<div class="max-w-7xl mx-auto px-6 mb-6">
+  <div class="bg-[#111318] rounded-2xl border border-yellow-900/40 p-6">
+    <h2 class="text-sm font-semibold text-yellow-400 uppercase tracking-wider mb-4">🔥 Staff Burnout Risk</h2>
+    <div class="grid grid-cols-5 gap-3">
+      {% for br in burnout_risks %}
+      <div class="bg-[#0b0d11] rounded-xl border border-gray-800/40 p-4 text-center">
+        <p class="text-gray-300 font-medium text-sm truncate" title="{{ br.name }}">{{ br.name }}</p>
+        <p class="text-2xl font-bold {% if br.score >= 60 %}text-red-400{% elif br.score >= 25 %}text-yellow-400{% else %}text-green-400{% endif %} mt-1">{{ "%.0f"|format(br.score) }}</p>
+        <p class="text-xs text-gray-600 mt-1">
+          {% if br.signals %}
+            {% set sigs = br.signals.split(',') %}
+            {% for s in sigs %}
+              <span class="inline-block mr-1">{{ {'frequent_anomalies':'⚠️','volume_volatility':'📊','increasing_reversals':'🔄','voice_creep':'🎙️'}.get(s,'') }}</span>
+            {% endfor %}
+          {% endif %}
+        </p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Guilds + Content -->
+<div class="max-w-7xl mx-auto px-6 pb-8">
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+    {% if guilds %}
+    <div class="lg:col-span-2 bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🛡️ Server Overview</h2>
+      <div class="grid grid-cols-4 gap-4 mb-5 pb-5 border-b border-gray-800/40">
+        <div><p class="text-gray-500 text-xs">Tracked</p><p class="text-xl font-bold text-white">{{ total_guilds }}</p></div>
+        <div><p class="text-gray-500 text-xs">Members</p><p class="text-xl font-bold text-white">{{ total_members_tracked }}</p></div>
+        <div><p class="text-gray-500 text-xs">Staff</p><p class="text-xl font-bold text-blue-400">{{ total_staff_tracked }}</p></div>
+        <div><p class="text-gray-500 text-xs">Online</p><p class="text-xl font-bold text-green-400">{{ "%.0f"|format(total_online_members / total_members_tracked * 100 if total_members_tracked else 0) }}%</p></div>
+      </div>
+      {% for guild in guilds %}
+      <a href="/guild/{{ guild.guild_id }}" class="flex justify-between items-center py-3 px-4 rounded-lg card-hover border border-transparent hover:border-gray-700/50 {% if not loop.last %}mb-1{% endif %}">
+        <div>
+          <span class="text-white font-medium">{{ guild.name }}</span>
+          <span class="text-gray-600 text-xs ml-2">ID: {{ guild.guild_id }}</span>
+        </div>
+        <div class="flex gap-5 text-xs">
+          <span class="text-gray-400">{{ guild.member_count }} members</span>
+          <span class="text-green-400">{{ guild.online_count }} online</span>
+          <span class="text-blue-400">{{ guild.staff_count }} staff</span>
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Activity -->
+    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🕐 Recent Activity</h2>
+      {% if recent_logs %}
+      <div class="space-y-3">
+        {% for log in recent_logs %}
+        <div class="border-b border-gray-800/40 pb-3 last:border-0 last:pb-0">
+          <p class="text-sm text-white">{{ log.worker.name }}</p>
+          <p class="text-xs text-gray-500">{{ log.reason[:60] }}{% if log.reason|length > 60 %}...{% endif %}</p>
+          <div class="flex justify-between items-center mt-1">
+            <span class="text-xs text-gray-600">{{ log.source }}</span>
+            <span class="text-xs font-bold {% if log.change >= 0 %}text-green-400{% else %}text-red-400{% endif %}">{% if log.change >= 0 %}+{% endif %}{{ log.change }} pts</span>
           </div>
         </div>
-        {% for guild in guilds %}
-        <a href="/guild/{{ guild.guild_id }}" class="flex justify-between items-center py-3 px-4 rounded-lg card-hover border border-transparent hover:border-gray-700/50 {% if not loop.last %}mb-1{% endif %}">
-          <div>
-            <span class="text-white font-medium">{{ guild.name }}</span>
-            <span class="text-gray-600 text-xs ml-2">ID: {{ guild.guild_id }}</span>
-          </div>
-          <div class="flex gap-5 text-xs">
-            <span class="text-gray-400">{{ guild.member_count }} members</span>
-            <span class="text-green-400">{{ guild.online_count }} online</span>
-            <span class="text-blue-400">{{ guild.staff_count }} staff</span>
-          </div>
-        </a>
         {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state py-8">
+        <span class="text-2xl mb-2">📭</span>
+        <p class="text-gray-500 text-sm">No activity yet</p>
       </div>
       {% endif %}
 
-      <!-- Activity -->
-      <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🕐 Recent Activity</h2>
-        <div class="space-y-3">
-          {% for log in recent_logs %}
-          <div class="border-b border-gray-800/40 pb-3 last:border-0 last:pb-0">
-            <p class="text-sm text-white">{{ log.worker.name }}</p>
-            <p class="text-xs text-gray-500">{{ log.reason[:60] }}{% if log.reason|length > 60 %}...{% endif %}</p>
-            <div class="flex justify-between items-center mt-1">
-              <span class="text-xs text-gray-600">{{ log.source }}</span>
-              <span class="text-xs font-bold {% if log.change >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
-                {% if log.change >= 0 %}+{% endif %}{{ log.change }} pts
-              </span>
-            </div>
-          </div>
-          {% endfor %}
+      {% if most_active %}
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mt-6 mb-4">📊 Most Active</h2>
+      <div class="space-y-2">
+        {% for active in most_active %}
+        <div class="flex justify-between items-center">
+          <span class="text-gray-300 text-sm">{{ active.name }}</span>
+          <span class="text-blue-400 text-xs font-bold">{{ active.count }}</span>
         </div>
-
-        {% if most_active %}
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mt-6 mb-4">📊 Most Active</h2>
-        <div class="space-y-2">
-          {% for active in most_active %}
-          <div class="flex justify-between items-center">
-            <span class="text-gray-300 text-sm">{{ active.name }}</span>
-            <span class="text-blue-400 text-xs font-bold">{{ active.count }}</span>
-          </div>
-          {% endfor %}
-          <p class="text-xs text-gray-600 mt-2">{{ unique_users_tracked }} unique users</p>
-        </div>
-        {% endif %}
+        {% endfor %}
+        <p class="text-xs text-gray-600 mt-2">{{ unique_users_tracked }} unique users</p>
       </div>
-    </div>
-
-    <!-- Leaderboard -->
-    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
-      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🏆 Worker Leaderboard</h2>
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm table-hover">
-          <thead>
-            <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
-              <th class="text-left py-3 font-medium">#</th>
-              <th class="text-left py-3 font-medium">Name</th>
-              <th class="text-left py-3 font-medium">Email</th>
-              <th class="text-left py-3 font-medium">Role</th>
-              <th class="text-right py-3 font-medium">Score</th>
-              <th class="text-right py-3 font-medium"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for worker in workers %}
-            <tr class="border-b border-gray-800/40">
-              <td class="py-3 text-gray-500">{{ loop.index }}</td>
-              <td class="py-3 font-medium text-white">
-                <a href="/worker/{{ worker.id }}" class="hover:text-blue-400 transition">{{ worker.name }}</a>
-              </td>
-              <td class="py-3 text-gray-500">{{ worker.email }}</td>
-              <td class="py-3">
-                <span class="px-2 py-0.5 rounded text-xs font-medium
-                  {% if worker.role == 'admin' %}bg-purple-900/40 text-purple-300
-                  {% elif worker.role == 'hr' %}bg-blue-900/40 text-blue-300
-                  {% else %}bg-gray-800/40 text-gray-300{% endif %}">
-                  {{ worker.role }}
-                </span>
-              </td>
-              <td class="py-3 text-right font-bold {% if worker.score >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
-                {{ worker.score }} pts
-              </td>
-              <td class="py-3 text-right">
-                <a href="/worker/{{ worker.id }}" class="text-blue-400 hover:underline text-xs">View</a>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
+      {% endif %}
     </div>
   </div>
 
-  <script>
-    const gridColor = 'rgba(255,255,255,0.05)';
-    const textColor = '#9ca3af';
-    const font = 'Inter';
+  <!-- Leaderboard -->
+  {% if workers %}
+  <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+    <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🏆 Worker Leaderboard</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm table-hover">
+        <thead>
+          <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
+            <th class="text-left py-3 font-medium">#</th>
+            <th class="text-left py-3 font-medium">Name</th>
+            <th class="text-left py-3 font-medium">Email</th>
+            <th class="text-left py-3 font-medium">Role</th>
+            <th class="text-right py-3 font-medium">Score</th>
+            <th class="text-right py-3 font-medium"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for worker in workers %}
+          <tr class="border-b border-gray-800/40">
+            <td class="py-3 text-gray-500">{{ loop.index }}</td>
+            <td class="py-3 font-medium text-white"><a href="/worker/{{ worker.id }}" class="hover:text-blue-400 transition">{{ worker.name }}</a></td>
+            <td class="py-3 text-gray-500">{{ worker.email }}</td>
+            <td class="py-3">
+              <span class="px-2 py-0.5 rounded text-xs font-medium
+                {% if worker.role == 'admin' %}bg-purple-900/40 text-purple-300
+                {% elif worker.role == 'hr' %}bg-blue-900/40 text-blue-300
+                {% else %}bg-gray-800/40 text-gray-300{% endif %}">
+                {{ worker.role }}
+              </span>
+            </td>
+            <td class="py-3 text-right font-bold {% if worker.score >= 0 %}text-green-400{% else %}text-red-400{% endif %}">{{ worker.score }} pts</td>
+            <td class="py-3 text-right"><a href="/worker/{{ worker.id }}" class="text-blue-400 hover:underline text-xs">View</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+    <div class="empty-state py-10">
+      <span class="text-4xl mb-3">🏆</span>
+      <h3 class="text-gray-300 font-semibold mb-1">No workers yet</h3>
+      <p class="text-gray-500 text-sm max-w-md">Add workers through the API or Discord activity tracking to see them here.</p>
+    </div>
+  </div>
+  {% endif %}
+</div>
 
-    function darkChart(ctx, config) {
-      config.options.responsive = true;
-      config.options.maintainAspectRatio = true;
-      if (config.options.plugins && config.options.plugins.legend) {
-        config.options.plugins.legend.labels = config.options.plugins.legend.labels || {};
-        config.options.plugins.legend.labels.color = textColor;
-        config.options.plugins.legend.labels.font = { family: font };
-      }
-      if (config.options.scales) {
-        if (config.options.scales.x) { config.options.scales.x.ticks = config.options.scales.x.ticks || {}; config.options.scales.x.ticks.color = textColor; config.options.scales.x.grid = config.options.scales.x.grid || {}; config.options.scales.x.grid.color = gridColor; }
-        if (config.options.scales.y) { config.options.scales.y.ticks = config.options.scales.y.ticks || {}; config.options.scales.y.ticks.color = textColor; config.options.scales.y.grid = config.options.scales.y.grid || {}; config.options.scales.y.grid.color = gridColor; }
-      }
-      return new Chart(ctx, config);
-    }
+{% endblock %}
 
-    // Guild Comparative Activity (multi-line)
-    const hours = Array.from({length: 24}, (_, i) => `${i}:00`);
-    const guildHourly = {{ guild_hourly | tojson }};
-    const guildNames = {{ guild_name_map | tojson }};
-    const guildColors = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16'];
-    const compareDatasets = Object.keys(guildHourly).map((gid, i) => ({
+{% block scripts %}
+<script>
+const hours = Array.from({length: 24}, (_, i) => `${i}:00`);
+
+{% if guild_hourly and guild_hourly.keys()|length > 0 %}
+const guildHourly = {{ guild_hourly | tojson }};
+const guildNames = {{ guild_name_map | tojson }};
+const guildColors = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16'];
+darkChart(document.getElementById('compareChart'), {
+  type: 'line', data: {
+    labels: hours,
+    datasets: Object.keys(guildHourly).map((gid, i) => ({
       label: guildNames[gid] || gid,
       data: hours.map((_, h) => guildHourly[gid][h] || 0),
       borderColor: guildColors[i % guildColors.length],
       backgroundColor: guildColors[i % guildColors.length] + '20',
-      fill: false,
-      tension: 0.3,
-      pointRadius: 2,
-      pointHitRadius: 5,
-    }));
-    darkChart(document.getElementById('compareChart'), {
-      type: 'line',
-      data: { labels: hours, datasets: compareDatasets },
-      options: {
-        plugins: { legend: { position: 'bottom', labels: { font: { family: font }, boxWidth: 12, padding: 8 } } },
-        scales: {
-          x: { ticks: { maxTicksLimit: 12, font: { family: font } } },
-          y: { beginAtZero: true, ticks: { font: { family: font } } }
-        }
-      }
-    });
+      fill: false, tension: 0.3, pointRadius: 2, pointHitRadius: 5,
+    }))
+  },
+  options: {
+    plugins: { legend: { position: 'bottom', labels: { font: { family: font }, boxWidth: 12, padding: 8 } } },
+    scales: { x: { ticks: { maxTicksLimit: 12, font: { family: font } } }, y: { beginAtZero: true, ticks: { font: { family: font } } } }
+  }
+});
+{% endif %}
 
-    // Guild Message Distribution (bar)
-    const guildMsgs = {{ guild_msg_counts | tojson }};
-    const distLabels = Object.keys(guildMsgs).map(gid => guildNames[gid] || gid);
-    const distData = Object.values(guildMsgs);
-    const distColors = distLabels.map((_, i) => guildColors[i % guildColors.length]);
-    darkChart(document.getElementById('distChart'), {
-      type: 'bar',
-      data: {
-        labels: distLabels,
-        datasets: [{
-          label: 'Messages',
-          data: distData,
-          backgroundColor: distColors.map(c => c + '99'),
-          borderColor: distColors,
-          borderWidth: 1,
-          borderRadius: 4,
-        }]
-      },
-      options: {
-        indexAxis: 'y',
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { beginAtZero: true, ticks: { font: { family: font } } },
-          y: { ticks: { font: { family: font, size: 10 } } }
-        }
-      }
-    });
+{% if guild_msg_counts and guild_msg_counts.keys()|length > 0 %}
+const guildMsgs = {{ guild_msg_counts | tojson }};
+const guildNames2 = {{ guild_name_map | tojson }};
+const distLabels = Object.keys(guildMsgs).map(gid => guildNames2[gid] || gid);
+const distColors = distLabels.map((_, i) => ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16'][i % 8]);
+darkChart(document.getElementById('distChart'), {
+  type: 'bar', data: { labels: distLabels, datasets: [{ label: 'Messages', data: Object.values(guildMsgs), backgroundColor: distColors.map(c => c + '99'), borderColor: distColors, borderWidth: 1, borderRadius: 4 }] },
+  options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { font: { family: font } } }, y: { ticks: { font: { family: font, size: 10 } } } } }
+});
+{% endif %}
 
-    // Aggregate Hourly Activity
-    const hourlyData = {{ hourly_activity | tojson }};
-    darkChart(document.getElementById('hourlyChart'), {
-      type: 'bar',
-      data: {
-        labels: hours,
-        datasets: [{
-          label: 'Messages',
-          data: hours.map((_, i) => hourlyData[i] || 0),
-          backgroundColor: 'rgba(59,130,246,0.6)',
-          borderColor: '#3b82f6',
-          borderWidth: 1,
-          borderRadius: 3,
-        }]
-      },
-      options: {
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { ticks: { maxTicksLimit: 8, font: { family: font } } },
-          y: { beginAtZero: true, ticks: { font: { family: font } } }
-        }
-      }
-    });
+const hourlyData = {{ hourly_activity | tojson }};
+darkChart(document.getElementById('hourlyChart'), {
+  type: 'bar', data: { labels: hours, datasets: [{ label: 'Messages', data: hours.map((_, i) => hourlyData[i] || 0), backgroundColor: 'rgba(59,130,246,0.6)', borderColor: '#3b82f6', borderWidth: 1, borderRadius: 3 }] },
+  options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 8, font: { family: font } } }, y: { beginAtZero: true, ticks: { font: { family: font } } } } }
+});
 
-    // Staff vs Community
-    const totalMembers = {{ total_members_tracked }};
-    const totalStaff = {{ total_staff_tracked }};
-    darkChart(document.getElementById('staffChart'), {
-      type: 'doughnut',
-      data: {
-        labels: ['Community', 'Staff'],
-        datasets: [{
-          data: [Math.max(0, totalMembers - totalStaff), totalStaff],
-          backgroundColor: ['rgba(75,85,99,0.6)', 'rgba(59,130,246,0.8)'],
-          borderColor: ['#4b5563', '#3b82f6'],
-          borderWidth: 2,
-        }]
-      },
-      options: { plugins: { legend: { position: 'bottom' } } }
-    });
+const totalMembers = {{ total_members_tracked }}, totalStaff = {{ total_staff_tracked }};
+darkChart(document.getElementById('staffChart'), {
+  type: 'doughnut', data: { labels: ['Community', 'Staff'], datasets: [{ data: [Math.max(0, totalMembers - totalStaff), totalStaff], backgroundColor: ['rgba(75,85,99,0.6)', 'rgba(59,130,246,0.8)'], borderColor: ['#4b5563', '#3b82f6'], borderWidth: 2 }] },
+  options: { plugins: { legend: { position: 'bottom' } } }
+});
 
-    // Score Sources
-    const sources = {{ score_sources | tojson }};
-    const sourceLabels = Object.keys(sources);
-    const sourceColors = {discord: '#3b82f6', system: '#10b981', admin: '#f59e0b'};
-    darkChart(document.getElementById('sourcesChart'), {
-      type: 'doughnut',
-      data: {
-        labels: sourceLabels,
-        datasets: [{
-          data: sourceLabels.map(k => sources[k]),
-          backgroundColor: sourceLabels.map(k => sourceColors[k] || 'rgba(156,163,175,0.6)'),
-          borderColor: '#111318',
-          borderWidth: 3,
-        }]
-      },
-      options: { plugins: { legend: { position: 'bottom' } } }
-    });
+const sources = {{ score_sources | tojson }};
+const sourceLabels = Object.keys(sources);
+darkChart(document.getElementById('sourcesChart'), {
+  type: 'doughnut', data: { labels: sourceLabels, datasets: [{ data: sourceLabels.map(k => sources[k]), backgroundColor: sourceLabels.map(k => ({discord: '#3b82f6', system: '#10b981', admin: '#f59e0b'}[k] || 'rgba(156,163,175,0.6)')), borderColor: '#111318', borderWidth: 3 }] },
+  options: { plugins: { legend: { position: 'bottom' } } }
+});
 
-    // Daily Volume
-    {% if daily_volume %}
-    const days = {{ daily_volume | tojson }};
-    const dayLabels = Object.keys(days);
-    const dayValues = Object.values(days);
-    darkChart(document.getElementById('volumeChart'), {
-      type: 'line',
-      data: {
-        labels: dayLabels,
-        datasets: [{
-          label: 'Messages',
-          data: dayValues,
-          borderColor: '#3b82f6',
-          backgroundColor: 'rgba(59,130,246,0.1)',
-          fill: true,
-          tension: 0.3,
-          pointRadius: 3,
-          pointBackgroundColor: '#3b82f6',
-        }]
-      },
-      options: {
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { ticks: { font: { family: font } } },
-          y: { beginAtZero: true, ticks: { font: { family: font } } }
-        }
-      }
-    });
-    {% endif %}
-  </script>
-
-  {% endif %}
-
-  <footer class="border-t border-gray-800/40 py-6 text-center text-gray-600 text-xs mt-8">
-    SkillSync — Workforce Intelligence for Discord
-  </footer>
-
-</body>
-</html>
+{% if daily_volume %}
+const days = {{ daily_volume | tojson }};
+darkChart(document.getElementById('volumeChart'), {
+  type: 'line', data: { labels: Object.keys(days), datasets: [{ label: 'Messages', data: Object.values(days), borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', fill: true, tension: 0.3, pointRadius: 3, pointBackgroundColor: '#3b82f6' }] },
+  options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { font: { family: font } } }, y: { beginAtZero: true, ticks: { font: { family: font } } } } }
+});
+{% endif %}
+</script>
+{% endblock %}

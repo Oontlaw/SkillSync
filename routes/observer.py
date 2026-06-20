@@ -5,7 +5,7 @@ import math
 from collections import defaultdict
 from functools import wraps
 from flask import Blueprint, request, jsonify
-from database import db, Worker, ScoreLog, MessageRecord, GuildInfo, GuildRole, GuildMember, GuildChannel, BehavioralAnomaly, MentionRecord, AutoModRule, PingJoinEvent, VoiceActivity
+from database import db, Worker, ScoreLog, MessageRecord, GuildInfo, GuildRole, GuildMember, GuildChannel, BehavioralAnomaly, MentionRecord, AutoModRule, PingJoinEvent, VoiceActivity, BurnoutRisk
 from datetime import datetime, timedelta
 from sqlalchemy import func
 
@@ -932,3 +932,106 @@ def log_voice_activity():
     db.session.commit()
     print(f'[Voice API] Logged {created} voice sessions')
     return jsonify({'message': f'{created} voice sessions logged', 'created': created}), 201
+
+
+# ─────────────────────────────────────────────
+# BURNOUT RISK SCANNING
+# ─────────────────────────────────────────────
+
+@observer_bp.route('/observer/burnout-scan', methods=['POST'])
+@require_api_key
+def scan_burnout_risks():
+    """Scan all workers for burnout risk indicators (anomalies + voice + reversals)."""
+    now = datetime.utcnow()
+    workers = Worker.query.filter(Worker.discord_id != None).all()
+    thirty_days = timedelta(days=30)
+    fourteen_days = timedelta(days=14)
+    cutoff_30 = now - thirty_days
+    cutoff_14 = now - fourteen_days
+
+    results = []
+    for w in workers:
+        did = w.discord_id
+        # Anomaly frequency (last 30 days)
+        anomaly_count = BehavioralAnomaly.query.filter(
+            BehavioralAnomaly.discord_id == did,
+            BehavioralAnomaly.detected_at >= cutoff_30
+        ).count()
+        anomaly_freq = min(1.0, anomaly_count / 10)
+
+        # Voice session creep: compare last 14 days avg vs prior 14
+        voice_recent = db.session.query(func.avg(VoiceActivity.duration_seconds)).filter(
+            VoiceActivity.discord_id == did,
+            VoiceActivity.created_at >= cutoff_14
+        ).scalar() or 0
+        voice_prior = db.session.query(func.avg(VoiceActivity.duration_seconds)).filter(
+            VoiceActivity.discord_id == did,
+            VoiceActivity.created_at >= cutoff_30,
+            VoiceActivity.created_at < cutoff_14
+        ).scalar() or 0
+        voice_creep = 0
+        if voice_prior > 0 and voice_recent > voice_prior:
+            voice_creep = min(1.0, (voice_recent - voice_prior) / voice_prior)
+
+        # Reversal rate increase (last 14 days vs prior 14)
+        reversals_recent = ScoreLog.query.filter(
+            ScoreLog.worker_id == w.id,
+            ScoreLog.source == 'discord',
+            ScoreLog.change < 0,
+            ScoreLog.created_at >= cutoff_14
+        ).count()
+        reversals_prior = ScoreLog.query.filter(
+            ScoreLog.worker_id == w.id,
+            ScoreLog.source == 'discord',
+            ScoreLog.change < 0,
+            ScoreLog.created_at >= cutoff_30,
+            ScoreLog.created_at < cutoff_14
+        ).count()
+        reversal_risk = 0
+        if reversals_prior > 0 and reversals_recent > reversals_prior:
+            reversal_risk = min(1.0, (reversals_recent - reversals_prior) / reversals_prior)
+
+        # Volume volatility: recent anomaly presence
+        has_volume_anomaly = BehavioralAnomaly.query.filter(
+            BehavioralAnomaly.discord_id == did,
+            BehavioralAnomaly.anomaly_type.in_(['volume_spike', 'volume_drop']),
+            BehavioralAnomaly.detected_at >= cutoff_14,
+            BehavioralAnomaly.cleared_at == None
+        ).count() > 0
+        volume_volatility = 0.6 if has_volume_anomaly else 0
+
+        # Composite burnout score (0-100)
+        score = (anomaly_freq * 30) + (volume_volatility * 25) + (reversal_risk * 25) + (voice_creep * 20)
+        score = round(min(100, score), 1)
+
+        signals = []
+        if anomaly_freq > 0.3: signals.append('frequent_anomalies')
+        if has_volume_anomaly: signals.append('volume_volatility')
+        if reversal_risk > 0.3: signals.append('increasing_reversals')
+        if voice_creep > 0.3: signals.append('voice_creep')
+
+        # Upsert
+        existing = BurnoutRisk.query.filter_by(worker_id=w.id).first()
+        if existing:
+            existing.score = score
+            existing.anomaly_freq = anomaly_freq
+            existing.volume_volatility = volume_volatility
+            existing.reversal_rate = reversal_risk
+            existing.voice_creep = voice_creep
+            existing.signals = ','.join(signals) if signals else None
+            existing.detected_at = now
+        else:
+            br = BurnoutRisk(
+                worker_id=w.id, discord_id=did, name=w.name,
+                score=score, anomaly_freq=anomaly_freq,
+                volume_volatility=volume_volatility,
+                reversal_rate=reversal_risk, voice_creep=voice_creep,
+                signals=','.join(signals) if signals else None,
+            )
+            db.session.add(br)
+
+        results.append({'name': w.name, 'score': score, 'signals': signals})
+
+    db.session.commit()
+    flagged = [r for r in results if r['score'] >= 25]
+    return jsonify({'scanned': len(results), 'flagged': len(flagged), 'results': results})

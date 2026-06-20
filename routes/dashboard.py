@@ -1,5 +1,5 @@
 from flask import Blueprint, render_template, session, redirect, url_for, request
-from database import db, Worker, Task, ScoreLog, AdminCorrection, MessageRecord, GuildInfo, GuildRole, GuildMember, BehavioralAnomaly, MentionRecord, AutoModRule, PingJoinEvent, VoiceActivity
+from database import db, Worker, Task, ScoreLog, AdminCorrection, MessageRecord, GuildInfo, GuildRole, GuildMember, BehavioralAnomaly, MentionRecord, AutoModRule, PingJoinEvent, VoiceActivity, BurnoutRisk
 from datetime import datetime, timedelta
 from sqlalchemy import func
 
@@ -28,9 +28,8 @@ def index():
 
     # Public landing page when not logged in
     if not user:
-        return render_template('dashboard.html',
-            user=None, accessible_guilds=[],
-            invite_url=BOT_INVITE_URL, logged_out=True)
+        return render_template('landing.html',
+            user=None, invite_url=BOT_INVITE_URL, logged_out=True)
 
     accessible_ids = get_accessible_guild_ids()
     workers = Worker.query.order_by(Worker.score.desc()).all()
@@ -103,6 +102,9 @@ def index():
         BehavioralAnomaly.detected_at > datetime.utcnow() - timedelta(hours=24)
     ).order_by(BehavioralAnomaly.severity.desc()).limit(10).all() if accessible_ids else []
 
+    # Burnout risks (#2)
+    burnout_risks = BurnoutRisk.query.order_by(BurnoutRisk.score.desc()).limit(5).all() if accessible_ids else []
+
     return render_template('dashboard.html',
         user=user,
         accessible_guilds=session.get('accessible_guilds', []),
@@ -130,6 +132,7 @@ def index():
         guild_hourly=guild_hourly,
         guild_msg_counts=guild_msg_counts,
         guild_name_map={g.guild_id: g.name for g in guilds},
+        burnout_risks=burnout_risks,
     )
 
 @dashboard_bp.route('/worker/<int:worker_id>')
@@ -207,16 +210,112 @@ def worker_detail(worker_id):
             'top_channels': voice_top_channels,
             'hourly': voice_hourly,
         }
+
+        # Activity Consistency & Trend (#1)
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        daily_counts = db.session.query(
+            func.date(MessageRecord.created_at).label('day'),
+            func.count(MessageRecord.id).label('c')
+        ).filter(
+            MessageRecord.discord_id == worker.discord_id,
+            MessageRecord.created_at >= thirty_days_ago
+        ).group_by(func.date(MessageRecord.created_at)).order_by(func.date(MessageRecord.created_at)).all()
+        daily_vals = [d.c for d in daily_counts]
+
+        consistency_score = 0
+        trend = 'flat'
+        off_hours_ratio = 0
+        recent_total = 0
+        prior_total = 0
+
+        if daily_vals:
+            import statistics
+            mean = sum(daily_vals) / len(daily_vals)
+            if mean > 0:
+                stdev = statistics.pstdev(daily_vals)
+                cv = stdev / mean
+                consistency_score = round(max(0, min(100, (1 - cv) * 100)), 1)
+
+            # Trend: compare last 7 days vs prior 7 days
+            seven_days_ago = datetime.utcnow() - timedelta(days=7)
+            fourteen_days_ago = datetime.utcnow() - timedelta(days=14)
+            recent = db.session.query(func.count(MessageRecord.id)).filter(
+                MessageRecord.discord_id == worker.discord_id,
+                MessageRecord.created_at >= seven_days_ago
+            ).scalar() or 0
+            prior = db.session.query(func.count(MessageRecord.id)).filter(
+                MessageRecord.discord_id == worker.discord_id,
+                MessageRecord.created_at >= fourteen_days_ago,
+                MessageRecord.created_at < seven_days_ago
+            ).scalar() or 0
+            recent_total = recent
+            prior_total = prior
+            if prior > 0:
+                change_pct = (recent - prior) / prior * 100
+                if change_pct > 20:
+                    trend = 'up'
+                elif change_pct < -20:
+                    trend = 'down'
+                else:
+                    trend = 'flat'
+
+            # Off-hours ratio (outside 09:00-17:00)
+            total_msgs = recent + prior
+            off_hours = db.session.query(func.count(MessageRecord.id)).filter(
+                MessageRecord.discord_id == worker.discord_id,
+                MessageRecord.created_at >= fourteen_days_ago,
+                ~MessageRecord.hour_of_day.between(9, 16)
+            ).scalar() or 0
+            off_hours_ratio = round(off_hours / total_msgs * 100, 1) if total_msgs > 0 else 0
+
+        activity_consistency = {
+            'score': consistency_score,
+            'trend': trend,
+            'off_hours_ratio': off_hours_ratio,
+            'recent_total': recent_total,
+            'prior_total': prior_total,
+        }
+
+        # Moderation Quality Score (#4)
+        mod_logs = ScoreLog.query.filter_by(worker_id=worker_id, source='discord').all()
+        total_actions = len(mod_logs)
+        total_warns = sum(1 for l in mod_logs if 'warn' in l.reason.lower())
+        total_bans = sum(1 for l in mod_logs if 'ban' in l.reason.lower())
+        total_kicks = sum(1 for l in mod_logs if 'kick' in l.reason.lower())
+        total_timeouts = sum(1 for l in mod_logs if 'timeout' in l.reason.lower())
+        punitive_actions = total_bans + total_kicks + total_timeouts
+
+        reversal_count = ScoreLog.query.filter_by(worker_id=worker_id, source='discord').filter(
+            ScoreLog.change < 0, ScoreLog.reason.ilike('%reversal%')
+        ).count()
+
+        action_warn_ratio = round(punitive_actions / max(total_warns, 1), 1) if total_warns > 0 else 0
+        reversal_rate = round(reversal_count / max(total_actions, 1) * 100, 1)
+        q_score = 100
+        if total_actions > 0:
+            q_score -= reversal_rate * 2
+            q_score = max(0, min(100, round(q_score, 1)))
+
+        mod_quality = {
+            'total_actions': total_actions,
+            'total_warns': total_warns,
+            'action_warn_ratio': action_warn_ratio,
+            'reversal_rate': reversal_rate,
+            'quality_score': q_score,
+        }
     else:
         mention_stats = None
         voice_stats = None
+        activity_consistency = None
+        mod_quality = None
 
     return render_template('worker.html',
         user=session.get('user'),
         accessible_guilds=session.get('accessible_guilds', []),
         worker=worker, logs=logs, tasks=tasks, behavior=behavior, anomalies=anomalies, mention_stats=mention_stats,
         voice_stats=voice_stats,
-        worker_hourly_activity=worker_hourly_activity, cumulative_score_data=cumulative_score_data)
+        worker_hourly_activity=worker_hourly_activity, cumulative_score_data=cumulative_score_data,
+        activity_consistency=activity_consistency, mod_quality=mod_quality)
 
 
 @dashboard_bp.route('/guild/<guild_id>')
@@ -265,6 +364,22 @@ def guild_detail(guild_id):
     ).filter_by(guild_id=guild_id).group_by(VoiceActivity.name, VoiceActivity.discord_id).order_by(func.sum(VoiceActivity.duration_seconds).desc()).limit(20).all()
     guild_voice_users_list = [{'name': u.name, 'discord_id': u.discord_id, 'sessions': u.sessions, 'hours': round((u.total_time or 0) / 3600, 1)} for u in guild_voice_users]
 
+    # Peak Hour Staffing Overlay (#3) — community vs staff hourly activity
+    staff_ids = [m.member_id for m in staff]
+    community_hourly = {str(h): 0 for h in range(24)}
+    staff_hourly = {str(h): 0 for h in range(24)}
+    if staff_ids:
+        for is_staff_list, target in [(staff_ids, staff_hourly), (None, community_hourly)]:
+            q = db.session.query(
+                MessageRecord.hour_of_day, func.count(MessageRecord.id).label('count')
+            ).filter(MessageRecord.guild_id == guild_id)
+            if is_staff_list:
+                q = q.filter(MessageRecord.discord_id.in_(staff_ids))
+            else:
+                q = q.filter(~MessageRecord.discord_id.in_(staff_ids)) if staff_ids else q
+            for h, c in q.group_by(MessageRecord.hour_of_day).order_by(MessageRecord.hour_of_day).all():
+                target[str(h)] = c
+
     return render_template('guild.html',
         user=session.get('user'),
         accessible_guilds=session.get('accessible_guilds', []),
@@ -272,52 +387,8 @@ def guild_detail(guild_id):
         ping_events=ping_events, guild_hourly_chart=guild_hourly_chart, guild_msg_total=guild_msg_total,
         guild_voice_sessions=guild_voice_sessions, guild_voice_hours=guild_voice_hours,
         guild_voice_top_channels=guild_voice_top_channels, guild_voice_hourly=guild_voice_hourly,
-        guild_voice_users=guild_voice_users_list)
+        guild_voice_users=guild_voice_users_list,
+        community_hourly=community_hourly, staff_hourly=staff_hourly)
 
 
-@dashboard_bp.route('/search', methods=['GET'])
-def message_search():
-    """Search message content across trusted guilds."""
-    redirect_resp = require_auth()
-    if redirect_resp:
-        return redirect_resp
 
-    accessible_ids = get_accessible_guild_ids()
-    q = request.args.get('q', '').strip()
-    guild_filter = request.args.get('guild', '').strip()
-    channel_filter = request.args.get('channel', '').strip()
-    days = request.args.get('days', '7')
-    try:
-        days = int(days)
-    except ValueError:
-        days = 7
-    days = max(1, min(90, days))
-
-    base_query = MessageRecord.query.filter(
-        MessageRecord.guild_id.in_(accessible_ids),
-        MessageRecord.message_content != None,
-        MessageRecord.message_content != '',
-    )
-
-    if q:
-        base_query = base_query.filter(MessageRecord.message_content.ilike(f'%{q}%'))
-    if guild_filter:
-        base_query = base_query.filter(MessageRecord.guild_id == guild_filter)
-    if channel_filter:
-        base_query = base_query.filter(MessageRecord.channel_name.ilike(f'%{channel_filter}%'))
-    if days:
-        cutoff = datetime.utcnow() - timedelta(days=days)
-        base_query = base_query.filter(MessageRecord.created_at >= cutoff)
-
-    messages = base_query.order_by(MessageRecord.created_at.desc()).limit(200).all()
-    total_results = base_query.count()
-
-    # Guilds for filter dropdown
-    guilds = GuildInfo.query.filter(GuildInfo.guild_id.in_(accessible_ids)).order_by(GuildInfo.name).all()
-
-    return render_template('search.html',
-        user=session.get('user'),
-        accessible_guilds=session.get('accessible_guilds', []),
-        messages=messages, total_results=total_results,
-        q=q, guild_filter=guild_filter, channel_filter=channel_filter,
-        days=days, guilds=guilds)
