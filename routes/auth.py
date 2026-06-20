@@ -84,6 +84,7 @@ def callback():
         'name': user.get('global_name') or user['username'],
     }
     session['accessible_guilds'] = accessible
+    session['discord_token'] = access_token
 
     return redirect(url_for('dashboard.index'))
 

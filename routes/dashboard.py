@@ -1,9 +1,15 @@
+import os
+import requests
 from flask import Blueprint, render_template, session, redirect, url_for, request
 from database import db, Worker, Task, ScoreLog, AdminCorrection, MessageRecord, GuildInfo, GuildRole, GuildMember, BehavioralAnomaly, MentionRecord, AutoModRule, PingJoinEvent, VoiceActivity, BurnoutRisk
 from datetime import datetime, timedelta
 from sqlalchemy import func
 
 dashboard_bp = Blueprint('dashboard', __name__)
+
+DISCORD_API = 'https://discord.com/api/v10'
+PERM_ADMINISTRATOR = 1 << 3
+PERM_MANAGE_GUILD = 1 << 5
 
 CLIENT_ID = '1513743115364597790'
 BOT_PERMISSIONS = 1099780156550
@@ -17,9 +23,47 @@ def require_auth():
     return None
 
 
+
+
+
 def get_accessible_guild_ids():
     """Return list of guild IDs the logged-in user can access (only those the bot is also in)."""
+    refresh_accessible_guilds()
     return [g['id'] for g in session.get('accessible_guilds', [])]
+
+
+def refresh_accessible_guilds():
+    """Always re-fetch the user's guilds from Discord API and cross-reference with bot's GuildInfo.
+    Falls back to cross-referencing session guilds with GuildInfo if the API call fails."""
+    bot_guild_ids = set(
+        g.guild_id for g in GuildInfo.query.with_entities(GuildInfo.guild_id).all()
+    )
+
+    token = session.get('discord_token')
+    if token:
+        try:
+            resp = requests.get(f'{DISCORD_API}/users/@me/guilds',
+                headers={'Authorization': f'Bearer {token}'}, timeout=10)
+            if resp.ok:
+                user_guilds = resp.json()
+                accessible = []
+                for g in user_guilds:
+                    perms = int(g.get('permissions', '0'))
+                    has_perm = perms & PERM_ADMINISTRATOR or perms & PERM_MANAGE_GUILD
+                    if has_perm and g['id'] in bot_guild_ids:
+                        accessible.append({'id': g['id'], 'name': g['name']})
+                session['accessible_guilds'] = accessible
+                session.modified = True
+                return
+        except Exception as e:
+            print(f'[Dashboard] Guild refresh failed: {e}')
+
+    # Fallback: cross-reference current session guilds with GuildInfo
+    current = session.get('accessible_guilds', [])
+    filtered = [g for g in current if g['id'] in bot_guild_ids]
+    if filtered != current:
+        session['accessible_guilds'] = filtered
+        session.modified = True
 
 
 @dashboard_bp.route('/')
@@ -39,27 +83,38 @@ def index():
     total_moderation_actions = ScoreLog.query.filter_by(source='discord').count()
     recent_logs = ScoreLog.query.order_by(ScoreLog.created_at.desc()).limit(10).all()
 
+    # Common guild filter for message/voice queries
+    guild_filter = MessageRecord.guild_id.in_(accessible_ids) if accessible_ids else None
+    voice_guild_filter = VoiceActivity.guild_id.in_(accessible_ids) if accessible_ids else None
+
     # Behavioral analytics
-    total_messages_logged = MessageRecord.query.count()
-    unique_users_tracked = db.session.query(MessageRecord.discord_id).distinct().count()
-    total_voice_sessions = VoiceActivity.query.count()
-    total_voice_hours = round((db.session.query(func.sum(VoiceActivity.duration_seconds)).scalar() or 0) / 3600, 1)
-    most_active = db.session.query(
+    msg_base = MessageRecord.query
+    if guild_filter is not None:
+        msg_base = msg_base.filter(guild_filter)
+    total_messages_logged = msg_base.count()
+    unique_users_tracked = msg_base.with_entities(MessageRecord.discord_id).distinct().count()
+
+    voice_base = VoiceActivity.query
+    if voice_guild_filter is not None:
+        voice_base = voice_base.filter(voice_guild_filter)
+    total_voice_sessions = voice_base.count()
+    total_voice_hours = round((voice_base.with_entities(func.sum(VoiceActivity.duration_seconds)).scalar() or 0) / 3600, 1)
+
+    most_active = msg_base.with_entities(
         MessageRecord.name, MessageRecord.discord_id, func.count(MessageRecord.id).label('count')
     ).group_by(MessageRecord.name, MessageRecord.discord_id).order_by(func.count(MessageRecord.id).desc()).limit(5).all()
 
     # Hourly activity for charting (aggregate)
-    hourly_data = db.session.query(
+    hourly_data = msg_base.with_entities(
         MessageRecord.hour_of_day, func.count(MessageRecord.id).label('count')
     ).group_by(MessageRecord.hour_of_day).order_by(MessageRecord.hour_of_day).all()
     hourly_activity = {str(h): 0 for h in range(24)}
     for h, c in hourly_data:
         hourly_activity[str(h)] = c
-
     # Per-guild hourly activity for comparative chart
-    guild_hourly_raw = db.session.query(
+    guild_hourly_raw = msg_base.with_entities(
         MessageRecord.guild_id, MessageRecord.hour_of_day, func.count(MessageRecord.id).label('count')
-    ).filter(MessageRecord.guild_id.in_(accessible_ids)).group_by(MessageRecord.guild_id, MessageRecord.hour_of_day).order_by(MessageRecord.guild_id, MessageRecord.hour_of_day).all() if accessible_ids else []
+    ).group_by(MessageRecord.guild_id, MessageRecord.hour_of_day).order_by(MessageRecord.guild_id, MessageRecord.hour_of_day).all()
     guild_hourly = {}
     for guild_id, hour, count in guild_hourly_raw:
         if guild_id not in guild_hourly:
@@ -67,16 +122,16 @@ def index():
         guild_hourly[guild_id][str(hour)] = count
 
     # Per-guild message totals
-    guild_msg_counts_raw = db.session.query(
+    guild_msg_counts_raw = msg_base.with_entities(
         MessageRecord.guild_id, func.count(MessageRecord.id).label('count')
-    ).filter(MessageRecord.guild_id.in_(accessible_ids)).group_by(MessageRecord.guild_id).all() if accessible_ids else []
+    ).group_by(MessageRecord.guild_id).all()
     guild_msg_counts = {g: c for g, c in guild_msg_counts_raw}
 
     # Message volume last 7 days
     seven_days_ago = datetime.utcnow() - timedelta(days=7)
-    daily_vol = db.session.query(
+    daily_vol = msg_base.filter(MessageRecord.created_at >= seven_days_ago).with_entities(
         func.date(MessageRecord.created_at).label('day'), func.count(MessageRecord.id).label('count')
-    ).filter(MessageRecord.created_at >= seven_days_ago).group_by(func.date(MessageRecord.created_at)).order_by(func.date(MessageRecord.created_at)).all()
+    ).group_by(func.date(MessageRecord.created_at)).order_by(func.date(MessageRecord.created_at)).all()
     daily_volume = {str(d.day): d.count for d in daily_vol}
 
     # Score source breakdown
@@ -97,10 +152,14 @@ def index():
     ).count() if accessible_ids else 0
 
     # Behavioral anomalies (last 24h)
+    anomaly_filter = BehavioralAnomaly.guild_id.in_(accessible_ids) if accessible_ids else None
     recent_anomalies = BehavioralAnomaly.query.filter(
         BehavioralAnomaly.cleared_at == None,
         BehavioralAnomaly.detected_at > datetime.utcnow() - timedelta(hours=24)
-    ).order_by(BehavioralAnomaly.severity.desc()).limit(10).all() if accessible_ids else []
+    )
+    if anomaly_filter is not None:
+        recent_anomalies = recent_anomalies.filter(anomaly_filter)
+    recent_anomalies = recent_anomalies.order_by(BehavioralAnomaly.severity.desc()).limit(10).all()
 
     # Burnout risks (#2)
     burnout_risks = BurnoutRisk.query.order_by(BurnoutRisk.score.desc()).limit(5).all() if accessible_ids else []

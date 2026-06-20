@@ -14,7 +14,7 @@
         {% if guild.owner_name %}
         <p class="text-gray-400 text-sm">Owner: <span class="text-white font-medium">{{ guild.owner_name }}</span></p>
         {% endif %}
-        <p class="text-gray-600 text-xs mt-1">Scanned: {{ guild.scanned_at.strftime('%Y-%m-%d %H:%M') if guild.scanned_at else 'Not yet' }}</p>
+        <p class="text-gray-600 text-xs mt-1">Scanned: <span class="utc-time" data-utc="{{ guild.scanned_at.isoformat() if guild.scanned_at else '' }}">{{ guild.scanned_at.strftime('%Y-%m-%d %H:%M') if guild.scanned_at else 'Not yet' }}</span></p>
       </div>
     </div>
     <div class="grid grid-cols-5 gap-4 mt-6">
@@ -159,7 +159,7 @@
             <td class="py-3 text-gray-400">#{{ ev.channel or '?' }}</td>
             <td class="py-3 text-center"><span class="text-sm font-bold text-orange-400">+{{ ev.new_members }}</span></td>
             <td class="py-3 text-gray-400 text-xs">{{ ev.joiners[:80] }}{% if ev.joiners and ev.joiners|length > 80 %}...{% endif %}</td>
-            <td class="py-3 text-right text-gray-600 text-xs">{{ ev.created_at.strftime('%d %b %H:%M') }}</td>
+            <td class="py-3 text-right text-gray-600 text-xs"><span class="utc-time" data-utc="{{ ev.created_at.isoformat() }}">{{ ev.created_at.strftime('%d %b %H:%M') }}</span></td>
           </tr>
           {% endfor %}
         </tbody>
@@ -223,7 +223,7 @@ if (gb) darkChart(gb, { type: 'doughnut', data: { labels: ['Humans', 'Bots'], da
 {% if guild_hourly_chart %}
 (function() {
   const el = document.getElementById('guildHourlyChart'); if (!el) return;
-  const gh = {{ guild_hourly_chart | tojson }};
+  const gh = shiftHourly({{ guild_hourly_chart | tojson }});
   const h = Array.from({length:24},(_,i)=>`${i}:00`), d = h.map((_,i)=>gh[i]||0), p = Math.max(...d);
   darkChart(el, { type: 'bar', data: { labels: h, datasets: [{ label: 'Messages', data: d, backgroundColor: d.map(v => v === p && p > 0 ? 'rgba(245,158,11,0.7)' : 'rgba(59,130,246,0.5)'), borderColor: d.map(v => v === p && p > 0 ? '#f59e0b' : '#3b82f6'), borderWidth: 1, borderRadius: 3 }] }, options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 12, font: { family: font } } }, y: { beginAtZero: true, ticks: { font: { family: font } } } } } });
 })();
@@ -232,7 +232,7 @@ if (gb) darkChart(gb, { type: 'doughnut', data: { labels: ['Humans', 'Bots'], da
 {% if community_hourly and staff_hourly %}
 (function() {
   const el = document.getElementById('staffingChart'); if (!el) return;
-  const ch = {{ community_hourly | tojson }}, sh = {{ staff_hourly | tojson }};
+  const ch = shiftHourly({{ community_hourly | tojson }}), sh = shiftHourly({{ staff_hourly | tojson }});
   const h = Array.from({length:24},(_,i)=>`${i}:00`);
   const staffData = h.map((_,i)=>sh[i]||0), commData = h.map((_,i)=>ch[i]||0);
   darkChart(el, { type: 'line', data: {
@@ -251,7 +251,7 @@ if (gb) darkChart(gb, { type: 'doughnut', data: { labels: ['Humans', 'Bots'], da
 {% if guild_voice_sessions > 0 %}
 (function() {
   const el = document.getElementById('guildVoiceHourlyChart'); if (!el) return;
-  const vh = {{ guild_voice_hourly | tojson }};
+  const vh = shiftHourly({{ guild_voice_hourly | tojson }});
   const h = Array.from({length:24},(_,i)=>`${i}:00`);
   darkChart(el, { type: 'bar', data: { labels: h, datasets: [{ label: 'Sessions', data: h.map((_,i)=>vh[i]||0), backgroundColor: 'rgba(16,185,129,0.5)', borderColor: '#10b981', borderWidth: 1, borderRadius: 3 }] }, options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 8, font: { size: 9, family: font } } }, y: { beginAtZero: true, ticks: { font: { size: 9, family: font } } } } } });
 })();

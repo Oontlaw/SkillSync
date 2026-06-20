@@ -3,6 +3,8 @@
 
 {% block content %}
 
+<div id="tzDebug" class="max-w-7xl mx-auto px-6 pb-2 text-xs text-gray-600"></div>
+
 <!-- Stats Row -->
 <div class="max-w-7xl mx-auto px-6 pt-8 pb-6">
   <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 glow">
@@ -251,6 +253,7 @@ const hours = Array.from({length: 24}, (_, i) => `${i}:00`);
 
 {% if guild_hourly and guild_hourly.keys()|length > 0 %}
 const guildHourly = {{ guild_hourly | tojson }};
+Object.keys(guildHourly).forEach(gid => { guildHourly[gid] = shiftHourly(guildHourly[gid]); });
 const guildNames = {{ guild_name_map | tojson }};
 const guildColors = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16'];
 darkChart(document.getElementById('compareChart'), {
@@ -282,7 +285,11 @@ darkChart(document.getElementById('distChart'), {
 });
 {% endif %}
 
-const hourlyData = {{ hourly_activity | tojson }};
+const rawHourly = {{ hourly_activity | tojson }};
+const hourlyData = shiftHourly(rawHourly);
+const pkR = Object.entries(rawHourly).sort((a,b)=>b[1]-a[1])[0];
+const pKS = Object.entries(hourlyData).sort((a,b)=>b[1]-a[1])[0];
+document.getElementById('tzDebug').textContent = 'TZ offset: ' + (-new Date().getTimezoneOffset()/60).toFixed(1) + 'h | Raw peak: ' + (pkR?.[0]||'?') + ':00 → Shifted peak: ' + (pKS?.[0]||'?') + ':00';
 darkChart(document.getElementById('hourlyChart'), {
   type: 'bar', data: { labels: hours, datasets: [{ label: 'Messages', data: hours.map((_, i) => hourlyData[i] || 0), backgroundColor: 'rgba(59,130,246,0.6)', borderColor: '#3b82f6', borderWidth: 1, borderRadius: 3 }] },
   options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 8, font: { family: font } } }, y: { beginAtZero: true, ticks: { font: { family: font } } } } }

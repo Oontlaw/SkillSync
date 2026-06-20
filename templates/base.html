@@ -200,6 +200,40 @@
     }, { threshold: 0.5 });
     counters.forEach(c => observer.observe(c));
   });
+
+  // Client-side hourly data shifter: converts UTC hourly data to local timezone
+  function shiftHourly(data) {
+    const offset = new Date().getTimezoneOffset(); // e.g. -330 for IST
+    const oh = -offset / 60; // e.g. 5.5 for IST
+    const shifted = {};
+    for (const [h, count] of Object.entries(data)) {
+      const lh = Math.floor((parseInt(h) + oh + 24) % 24);
+      shifted[lh] = (shifted[lh] || 0) + count;
+    }
+    return shifted;
+  }
+
+  // Localize all UTC timestamps to the viewer's timezone
+  function localizeTimestamps() {
+    document.querySelectorAll('.utc-time').forEach(el => {
+      const utcStr = el.dataset.utc;
+      if (!utcStr) return;
+      const d = new Date(utcStr + 'Z');
+      if (isNaN(d.getTime())) return;
+      const hasTime = utcStr.includes('T');
+      if (hasTime) {
+        el.textContent = d.toLocaleString(undefined, {
+          year: 'numeric', month: 'short', day: 'numeric',
+          hour: '2-digit', minute: '2-digit'
+        });
+      } else {
+        el.textContent = d.toLocaleDateString(undefined, {
+          year: 'numeric', month: 'short', day: 'numeric'
+        });
+      }
+    });
+  }
+  document.addEventListener('DOMContentLoaded', localizeTimestamps);
 </script>
 
 {% block scripts %}{% endblock %}

@@ -177,6 +177,13 @@ MESSAGE_BUFFER_LIMIT = 30
 presence_buffer = []
 PRESENCE_BUFFER_LIMIT = 50
 
+# Member join buffer — batch-sent to API to avoid HTTP storm during @everyone
+join_buffer = []
+JOIN_BUFFER_LIMIT = 30
+
+# Safety cap: drop oldest entries if any buffer exceeds this
+MAX_BUFFER_SIZE = 10000
+
 # Mention tracking buffer
 # { (channel_id, mentioned_id): buffer_index } for detecting reply times
 pending_mentions = {}
@@ -222,6 +229,15 @@ async def flush_mention_buffer():
     mention_buffer = []
     await api_post('/observer/mentions', batch)
     log(f'FLUSHED {len(batch)} mentions')
+
+async def flush_join_buffer():
+    """Send buffered member join records to the API."""
+    global join_buffer
+    if not join_buffer:
+        return
+    batch = join_buffer[:]
+    join_buffer = []
+    await api_post('/observer/activity', {'batch': True, 'joins': batch})
 
 @bot.event
 async def on_message(message):
@@ -334,6 +350,8 @@ async def on_message(message):
     message_buffer.append(entry)
     if len(message_buffer) >= MESSAGE_BUFFER_LIMIT:
         await flush_message_buffer()
+    elif len(message_buffer) > MAX_BUFFER_SIZE:
+        message_buffer = message_buffer[-MAX_BUFFER_SIZE:]
 
     # ── Job 4: Track mentions and reply times ──
     # Record mentions made by this message
@@ -351,6 +369,8 @@ async def on_message(message):
             'reply_time_seconds': None,
         }
         mention_buffer.append(mention_entry)
+        if len(mention_buffer) > MAX_BUFFER_SIZE:
+            mention_buffer = mention_buffer[-MAX_BUFFER_SIZE:]
         # Store timestamp + mentioner so we can detect replies even after buffer flush
         pending_mentions[(message.channel.id, mentioned.id)] = {
             'ts': now,
@@ -630,26 +650,37 @@ async def on_presence_update(before, after):
         'guild_id': str(after.guild.id),
         'timestamp': datetime.now(timezone.utc).isoformat()
     })
+    if len(presence_buffer) > MAX_BUFFER_SIZE:
+        presence_buffer = presence_buffer[-MAX_BUFFER_SIZE:]
     if len(presence_buffer) >= PRESENCE_BUFFER_LIMIT:
         await flush_presence_buffer()
 
 @bot.event
 async def on_member_join(member):
-    """Track new members joining the server, and correlate with recent @everyone pings."""
-    await api_post('/observer/activity', {
-        'discord_id': str(member.id),
-        'staff_name': member.name,
-        'action_type': 'member_join',
-        'guild': member.guild.name,
-        'joined_at': member.joined_at.isoformat() if member.joined_at else None,
-        'timestamp': datetime.now(timezone.utc).isoformat()
-    })
+    """Track new members joining the server — buffered to avoid HTTP storm during @everyone."""
+    global join_buffer
+    try:
+        join_buffer.append({
+            'discord_id': str(member.id),
+            'staff_name': member.name,
+            'action_type': 'member_join',
+            'guild': member.guild.name,
+            'joined_at': member.joined_at.isoformat() if member.joined_at else None,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        })
+        if len(join_buffer) >= JOIN_BUFFER_LIMIT:
+            await flush_join_buffer()
+        elif len(join_buffer) > MAX_BUFFER_SIZE:
+            join_buffer = join_buffer[-MAX_BUFFER_SIZE:]
 
-    # Check if this join is within 20 min of an @everyone ping
-    ping = active_pings.get(member.guild.id)
-    if ping:
-        ping['join_count'] += 1
-        ping['joiners'].append(member.name)
+        # Check if this join is within 20 min of an @everyone ping
+        ping = active_pings.get(member.guild.id)
+        if ping:
+            ping['join_count'] += 1
+            ping['joiners'].append(member.name)
+    except Exception as e:
+        log(f'ERROR in on_member_join: {e}')
+        print(f'[SkillSync] on_member_join error: {e}')
 
 
 # ─────────────────────────────────────────────
@@ -693,6 +724,8 @@ async def on_voice_state_update(member, before, after):
             voice_buffer.append(make_voice_entry(session, now))
             if len(voice_buffer) >= VOICE_BUFFER_LIMIT:
                 await flush_voice_buffer()
+            elif len(voice_buffer) > MAX_BUFFER_SIZE:
+                voice_buffer = voice_buffer[-MAX_BUFFER_SIZE:]
 
     # Joined a voice channel (or moved)
     if after.channel:
@@ -703,6 +736,8 @@ async def on_voice_state_update(member, before, after):
                 voice_buffer.append(make_voice_entry(session, now))
                 if len(voice_buffer) >= VOICE_BUFFER_LIMIT:
                     await flush_voice_buffer()
+                elif len(voice_buffer) > MAX_BUFFER_SIZE:
+                    voice_buffer = voice_buffer[-MAX_BUFFER_SIZE:]
 
         # Start new session (per-guild key)
         voice_sessions[key] = {
@@ -1035,11 +1070,12 @@ async def on_member_remove(member):
 
 @tasks.loop(seconds=30)
 async def flush_message_loop():
-    """Flush buffered messages, presence updates, and voice sessions every 30 seconds."""
+    """Flush buffered messages, presence updates, voice sessions, and joins every 30 seconds."""
     await flush_message_buffer()
     await flush_presence_buffer()
     await flush_mention_buffer()
     await flush_voice_buffer()
+    await flush_join_buffer()
 
 @tasks.loop(hours=1)
 async def check_reversed_actions():

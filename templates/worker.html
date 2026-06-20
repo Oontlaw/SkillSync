@@ -243,7 +243,7 @@
         <div class="border-b border-gray-800/40 pb-3 last:border-0 last:pb-0">
           <p class="text-xs text-gray-400">{{ log.reason }}</p>
           <div class="flex justify-between mt-1.5">
-            <span class="text-xs text-gray-600">{{ log.source }} · {{ log.created_at.strftime('%d %b %Y') }}</span>
+            <span class="text-xs text-gray-600">{{ log.source }} · <span class="utc-time" data-utc="{{ log.created_at.isoformat() }}">{{ log.created_at.strftime('%d %b %Y') }}</span></span>
             <span class="text-sm font-bold {% if log.change >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
               {% if log.change >= 0 %}+{% endif %}{{ log.change }} pts</span>
           </div>
@@ -268,7 +268,7 @@
 <script>
 {% if worker_hourly_activity %}
 (function() {
-  const wh = {{ worker_hourly_activity | tojson }};
+  const wh = shiftHourly({{ worker_hourly_activity | tojson }});
   const h = Array.from({length:24},(_,i)=>`${i}:00`);
   darkChart(document.getElementById('workerHourlyChart'), { type: 'bar', data: { labels: h, datasets: [{ label: 'Msgs', data: h.map((_,i)=>wh[i]||0), backgroundColor: 'rgba(96,165,250,0.6)', borderColor: '#60a5fa', borderWidth: 1, borderRadius: 2 }] }, options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 6, font: { family: font } } }, y: { beginAtZero: true, ticks: { font: { family: font } } } } } });
 })();
@@ -276,7 +276,7 @@
 
 {% if voice_stats and voice_stats.total_sessions > 0 %}
 (function() {
-  const vh = {{ voice_stats.hourly | tojson }};
+  const vh = shiftHourly({{ voice_stats.hourly | tojson }});
   const h = Array.from({length:24},(_,i)=>`${i}:00`);
   darkChart(document.getElementById('voiceHourlyChart'), { type: 'bar', data: { labels: h, datasets: [{ label: 'Sessions', data: h.map((_,i)=>vh[i]||0), backgroundColor: 'rgba(16,185,129,0.5)', borderColor: '#10b981', borderWidth: 1, borderRadius: 3 }] }, options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 8, font: { size: 9, family: font } } }, y: { beginAtZero: true, ticks: { font: { size: 9, family: font } } } } } });
 })();
