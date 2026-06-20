@@ -247,6 +247,7 @@ async def on_message(message):
     2. Track staff activity — who was the last active mod per guild
     3. Forward commands
     """
+    global message_buffer, mention_buffer
     guild = message.guild
     if not guild:
         return
@@ -638,6 +639,7 @@ async def on_guild_join(guild):
 @bot.event
 async def on_presence_update(before, after):
     """Buffer members coming online/offline to avoid API spam."""
+    global presence_buffer
     if before.status == after.status or not after.guild:
         return
     presence_buffer.append({
@@ -692,6 +694,7 @@ async def on_voice_state_update(member, before, after):
     """Track voice channel joins/leaves/moves for behavioral pattern recognition.
     Sessions are keyed per-guild so the same user in different servers is tracked separately.
     """
+    global voice_buffer
     if member.bot or not member.guild:
         return
     user_id = str(member.id)
