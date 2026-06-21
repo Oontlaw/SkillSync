@@ -15,18 +15,19 @@
           {% set anomaly_ok = ml_status.get('anomaly', {}).get('trained', False) %}
           {% set forecast_ok = ml_status.get('forecast', {}).get('trained', False) %}
           {% set burnout_ok = ml_status.get('burnout', {}).get('trained', False) %}
-          <span class="px-2 py-1 rounded-full {% if anomaly_ok %}bg-green-900/40 text-green-400{% else %}bg-gray-800/40 text-gray-500{% endif %}">
+          <button onclick="retrainModel('anomaly', this)" class="px-2 py-1 rounded-full cursor-pointer transition hover:brightness-125 {% if anomaly_ok %}bg-green-900/40 text-green-400{% else %}bg-gray-800/40 text-gray-500{% endif %}" title="Click to retrain">
             Anomaly {{ '✓' if anomaly_ok else '○' }}
-          </span>
-          <span class="px-2 py-1 rounded-full {% if forecast_ok %}bg-green-900/40 text-green-400{% else %}bg-gray-800/40 text-gray-500{% endif %}">
+          </button>
+          <button onclick="retrainModel('forecast', this)" class="px-2 py-1 rounded-full cursor-pointer transition hover:brightness-125 {% if forecast_ok %}bg-green-900/40 text-green-400{% else %}bg-gray-800/40 text-gray-500{% endif %}" title="Click to retrain">
             Forecast {{ '✓' if forecast_ok else '○' }}
-          </span>
-          <span class="px-2 py-1 rounded-full {% if burnout_ok %}bg-green-900/40 text-green-400{% else %}bg-gray-800/40 text-gray-500{% endif %}">
+          </button>
+          <button onclick="retrainModel('burnout', this)" class="px-2 py-1 rounded-full cursor-pointer transition hover:brightness-125 {% if burnout_ok %}bg-green-900/40 text-green-400{% else %}bg-gray-800/40 text-gray-500{% endif %}" title="Click to retrain">
             Burnout {{ '✓' if burnout_ok else '○' }}
-          </span>
+          </button>
           {% if ml_last_train %}
-          <span class="text-gray-600">Last train: {{ ml_last_train[:10] }}</span>
+          <span class="text-gray-600">Train: {{ ml_last_train[:10] }}</span>
           {% endif %}
+          <button onclick="retrainModel('all', this)" class="px-2 py-1 rounded-full bg-blue-900/40 text-blue-400 cursor-pointer transition hover:brightness-125" title="Retrain all models">🔄 All</button>
         {% endif %}
       </div>
     </div>
@@ -337,5 +338,25 @@ darkChart(document.getElementById('volumeChart'), {
   options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { font: { family: font } } }, y: { beginAtZero: true, ticks: { font: { family: font } } } } }
 });
 {% endif %}
+
+async function retrainModel(model, btn) {
+  const orig = btn.innerHTML;
+  btn.innerHTML = '⏳';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/observer/ml/retrain', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    const data = await r.json();
+    const ok = data[model]?.status === 'trained';
+    if (model === 'all') {
+      Object.keys(data).forEach(k => {
+        if (k !== 'trained_at') location.reload();
+      });
+    }
+    location.reload();
+  } catch {
+    btn.innerHTML = '❌';
+    setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 2000);
+  }
+}
 </script>
 {% endblock %}
