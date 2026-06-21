@@ -209,17 +209,18 @@ def index():
     ).count() if accessible_ids else 0
 
     # Behavioral anomalies (last 24h)
-    anomaly_filter = BehavioralAnomaly.guild_id.in_(accessible_ids) if accessible_ids else None
     recent_anomalies = BehavioralAnomaly.query.filter(
         BehavioralAnomaly.cleared_at == None,
-        BehavioralAnomaly.detected_at > datetime.utcnow() - timedelta(hours=24)
+        BehavioralAnomaly.detected_at > datetime.utcnow() - timedelta(hours=48)
     )
-    if anomaly_filter is not None:
-        recent_anomalies = recent_anomalies.filter(anomaly_filter)
+    if accessible_ids:
+        recent_anomalies = recent_anomalies.filter(
+            db.or_(BehavioralAnomaly.guild_id == None, BehavioralAnomaly.guild_id.in_(accessible_ids))
+        )
     recent_anomalies = recent_anomalies.order_by(BehavioralAnomaly.severity.desc()).limit(10).all()
 
     # Burnout risks (#2)
-    burnout_risks = BurnoutRisk.query.order_by(BurnoutRisk.score.desc()).limit(5).all() if accessible_ids else []
+    burnout_risks = BurnoutRisk.query.order_by(BurnoutRisk.score.desc()).limit(5).all()
 
     # ML model status
     ml_status = ml_engine.get_model_status()
