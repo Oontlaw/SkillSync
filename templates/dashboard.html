@@ -8,6 +8,28 @@
 <!-- Stats Row -->
 <div class="max-w-7xl mx-auto px-6 pt-8 pb-6">
   <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 glow">
+    <div class="flex items-center justify-between mb-4">
+      <div></div>
+      <div class="flex gap-3 text-xs">
+        {% if ml_status %}
+          {% set anomaly_ok = ml_status.get('anomaly', {}).get('trained', False) %}
+          {% set forecast_ok = ml_status.get('forecast', {}).get('trained', False) %}
+          {% set burnout_ok = ml_status.get('burnout', {}).get('trained', False) %}
+          <span class="px-2 py-1 rounded-full {% if anomaly_ok %}bg-green-900/40 text-green-400{% else %}bg-gray-800/40 text-gray-500{% endif %}">
+            Anomaly {{ '✓' if anomaly_ok else '○' }}
+          </span>
+          <span class="px-2 py-1 rounded-full {% if forecast_ok %}bg-green-900/40 text-green-400{% else %}bg-gray-800/40 text-gray-500{% endif %}">
+            Forecast {{ '✓' if forecast_ok else '○' }}
+          </span>
+          <span class="px-2 py-1 rounded-full {% if burnout_ok %}bg-green-900/40 text-green-400{% else %}bg-gray-800/40 text-gray-500{% endif %}">
+            Burnout {{ '✓' if burnout_ok else '○' }}
+          </span>
+          {% if ml_last_train %}
+          <span class="text-gray-600">Last train: {{ ml_last_train[:10] }}</span>
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
     <div class="grid grid-cols-2 md:grid-cols-6 gap-4">
       {% set stats = [
         ('Workers', total_workers, ''),

@@ -50,6 +50,14 @@
     <div class="relative" style="height:200px"><canvas id="staffingChart"></canvas></div>
   </div>
   {% endif %}
+
+  {% if forecast_data %}
+  <div class="bg-[#111318] rounded-2xl border border-blue-800/40 p-6 mb-8">
+    <h2 class="text-sm font-semibold text-blue-400 uppercase tracking-wider mb-4">📈 ML 24h Activity Forecast</h2>
+    <p class="text-xs text-gray-600 mb-3">Predicted messages per hour (Random Forest) vs actual from last 7 days</p>
+    <div class="relative" style="height:180px"><canvas id="forecastChart"></canvas></div>
+  </div>
+  {% endif %}
   {% endif %}
 
   {% if guild_voice_sessions > 0 %}
@@ -274,6 +282,25 @@ if (gb) darkChart(gb, { type: 'doughnut', data: { labels: ['Humans', 'Bots'], da
     datasets: [
       { label: 'Community', data: commData, borderColor: '#6b7280', backgroundColor: 'rgba(107,114,128,0.1)', fill: true, tension: 0.3, pointRadius: 2, pointHitRadius: 5 },
       { label: 'Staff', data: staffData, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.1)', fill: true, tension: 0.3, pointRadius: 3, pointHitRadius: 5 },
+    ]
+  }, options: {
+    plugins: { legend: { position: 'bottom', labels: { font: { family: font }, boxWidth: 12, padding: 8 } } },
+    scales: { x: { ticks: { maxTicksLimit: 12, font: { family: font } } }, y: { beginAtZero: true, ticks: { font: { family: font } } } }
+  } });
+})();
+{% endif %}
+
+{% if forecast_data %}
+(function() {
+  const el = document.getElementById('forecastChart'); if (!el) return;
+  const h = Array.from({length:24},(_,i)=>`${i}:00`);
+  const preds = {{ forecast_data | tojson }};
+  const actual = shiftHourly({{ guild_hourly_chart | tojson }});
+  darkChart(el, { type: 'bar', data: {
+    labels: h,
+    datasets: [
+      { label: 'Predicted', data: h.map((_,i)=>Math.round(preds[i]||0)), backgroundColor: 'rgba(59,130,246,0.5)', borderColor: '#3b82f6', borderWidth: 1, borderRadius: 3 },
+      { label: 'Actual (avg)', data: h.map((_,i)=>actual[i]||0), backgroundColor: 'rgba(16,185,129,0.3)', borderColor: '#10b981', borderWidth: 1, borderRadius: 3 },
     ]
   }, options: {
     plugins: { legend: { position: 'bottom', labels: { font: { family: font }, boxWidth: 12, padding: 8 } } },

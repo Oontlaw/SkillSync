@@ -1311,6 +1311,10 @@ async def check_reversed_actions():
     await api_post('/observer/anomalies/scan', {'trigger': 'hourly'})
     print(f'[Observer] Scanning burnout risks...')
     await api_post('/observer/burnout-scan', {'trigger': 'hourly'})
+    print(f'[Observer] ML anomaly scan...')
+    await api_post('/observer/ml/anomalies/scan', {'trigger': 'hourly'})
+    print(f'[Observer] ML burnout scan...')
+    await api_post('/observer/ml/burnout-scan', {'trigger': 'hourly'})
 
 
 # ─────────────────────────────────────────────

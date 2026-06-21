@@ -1,10 +1,13 @@
-import os
+import os, json
 import requests
 from flask import Blueprint, render_template, session, redirect, url_for, request
 from database import db, Worker, Task, ScoreLog, AdminCorrection, MessageRecord, GuildInfo, GuildRole, GuildMember, BehavioralAnomaly, MentionRecord, AutoModRule, AutoModTrigger, PingJoinEvent, VoiceActivity, BurnoutRisk
 from datetime import datetime, timedelta
 from sqlalchemy import func
 import statistics
+from ml import engine as ml_engine
+from ml import forecast as ml_forecast
+from ml import burnout as ml_burnout
 
 dashboard_bp = Blueprint('dashboard', __name__)
 
@@ -218,6 +221,17 @@ def index():
     # Burnout risks (#2)
     burnout_risks = BurnoutRisk.query.order_by(BurnoutRisk.score.desc()).limit(5).all() if accessible_ids else []
 
+    # ML model status
+    ml_status = ml_engine.get_model_status()
+    ml_last_train = None
+    summary_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ml', 'models', 'training_summary.json')
+    if os.path.exists(summary_path):
+        try:
+            with open(summary_path) as f:
+                ml_last_train = json.load(f).get('trained_at', '')
+        except Exception:
+            pass
+
     return render_template('dashboard.html',
         user=user,
         accessible_guilds=session.get('accessible_guilds', []),
@@ -247,6 +261,8 @@ def index():
         guild_msg_counts=guild_msg_counts,
         guild_name_map={g.guild_id: g.name for g in guilds},
         burnout_risks=burnout_risks,
+        ml_status=ml_status,
+        ml_last_train=ml_last_train,
     )
 
 @dashboard_bp.route('/worker/<int:worker_id>')
@@ -504,6 +520,12 @@ def guild_detail(guild_id):
     # AutoMod triggers
     automod_triggers = AutoModTrigger.query.filter_by(guild_id=guild_id).order_by(AutoModTrigger.created_at.desc()).limit(30).all()
 
+    # ML forecast for this guild
+    forecast_preds = ml_forecast.predict_next_24h(guild_id)
+    forecast_data = None
+    if forecast_preds is not None:
+        forecast_data = forecast_preds.tolist()
+
     return render_template('guild.html',
         user=session.get('user'),
         accessible_guilds=session.get('accessible_guilds', []),
@@ -514,7 +536,8 @@ def guild_detail(guild_id):
         guild_voice_users=guild_voice_users_list,
         community_hourly=community_hourly, staff_hourly=staff_hourly,
         online_count=online_count, tracked_offline=tracked_offline, tracked_chatted=tracked_chatted,
-        community_count=community_count, human_count=human_count, bot_count=bot_count)
+        community_count=community_count, human_count=human_count, bot_count=bot_count,
+        forecast_data=forecast_data)
 
 
 
