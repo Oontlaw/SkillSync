@@ -530,11 +530,9 @@ def guild_detail(guild_id):
     # Behavioral anomalies for this guild
     guild_anomalies = BehavioralAnomaly.query.filter(
         BehavioralAnomaly.cleared_at == None,
-        BehavioralAnomaly.detected_at > datetime.utcnow() - timedelta(hours=48)
-    )
-    if BehavioralAnomaly.guild_id != None:
-        guild_anomalies = guild_anomalies.filter(BehavioralAnomaly.guild_id == guild_id)
-    guild_anomalies = guild_anomalies.order_by(BehavioralAnomaly.severity.desc()).limit(10).all()
+        BehavioralAnomaly.detected_at > datetime.utcnow() - timedelta(hours=48),
+        db.or_(BehavioralAnomaly.guild_id == None, BehavioralAnomaly.guild_id == guild_id)
+    ).order_by(BehavioralAnomaly.severity.desc()).limit(10).all()
 
     return render_template('guild.html',
         user=session.get('user'),
