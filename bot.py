@@ -82,6 +82,31 @@ pending_timeouts = {}
 # Known moderation bot names to read logs from
 MOD_BOT_NAMES = ['mee6', 'dyno', 'carl-bot', 'wick', 'arcane', 'combot', 'gaius']
 
+# AutoMod alert channels: { guild_id: { channel_id: [rule_name, ...] } }
+# Populated from stored AutoModRule data on startup and after each scan.
+automod_alert_channels: dict = {}
+
+
+def build_automod_alert_channels():
+    """Fetch AutoMod rules from API and populate automod_alert_channels."""
+    global automod_alert_channels
+    try:
+        resp = requests.get(f'{SKILLSYNC_API}/observer/automod-rules',
+                           headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
+        if resp.ok:
+            rules = resp.json()
+            channels = {}
+            for rule in rules:
+                if rule.get('alert_channel_id'):
+                    gid = rule['guild_id']
+                    ch = rule['alert_channel_id']
+                    channels.setdefault(gid, {}).setdefault(ch, []).append(rule['name'])
+            automod_alert_channels = channels
+            print(f'[AutoMod] Loaded {sum(len(v) for v in channels.values())} alert channels from {len(channels)} guilds')
+    except Exception as e:
+        print(f'[AutoMod] Failed to load alert channels: {e}')
+        automod_alert_channels = {}
+
 
 # ─────────────────────────────────────────────
 # HELPERS
@@ -159,6 +184,89 @@ def extract_warn_from_embed(embed):
     }
 
 
+def extract_automod_alert(embed):
+    """
+    Parse Discord's native AutoMod alert embed from alert channels.
+    Format varies but generally contains:
+      - Title with @user and #channel
+      - Description with flagged content
+      - Fields: Rule, Channel, User
+    Returns dict with trigger data or None.
+    """
+    if not embed.description and not embed.fields:
+        return None
+
+    title = (embed.title or '') + (embed.description or '')
+    title_lower = title.lower()
+
+    # Must be an AutoMod alert — check for keywords
+    if not any(kw in title_lower for kw in ['flagged', 'blocked', 'automod', 'auto mod', 'warning']):
+        return None
+
+    rule_name = None
+    user_name = None
+    user_id = None
+    channel_name = None
+    channel_id = None
+    content_snippet = None
+    action_taken = None
+
+    # Try author name
+    if embed.author and embed.author.name:
+        if not rule_name:
+            rule_name = embed.author.name
+
+    # Parse embed fields — Discord's AutoMod uses specific field names
+    for field in embed.fields:
+        name_lower = field.name.lower()
+        value = field.value.strip()
+        if 'rule' in name_lower:
+            rule_name = value
+        elif 'user' in name_lower or 'member' in name_lower:
+            user_name = value
+        elif 'channel' in name_lower:
+            channel_name = value
+        elif 'content' in name_lower or 'message' in name_lower or 'flagged' in name_lower:
+            content_snippet = value[:300]
+        elif 'action' in name_lower:
+            action_taken = value
+
+    # Try extracting user from title: "Message from @user flagged in #channel"
+    if not user_name and title and '@' in title:
+        import re
+        m = re.search(r'@(\S+)', title)
+        if m:
+            user_name = m.group(1)
+
+    # Try extracting channel from title
+    if not channel_name and title and '#' in title:
+        import re
+        m = re.search(r'#(\S+)', title)
+        if m:
+            channel_name = m.group(1)
+
+    # Use description as content snippet if not found
+    if not content_snippet and embed.description and not embed.fields:
+        content_snippet = embed.description[:300]
+
+    if not rule_name and embed.author and embed.author.name:
+        rule_name = embed.author.name
+
+    if not rule_name:
+        return None
+
+    return {
+        'rule_name': rule_name,
+        'rule_id': None,
+        'user_name': user_name or 'Unknown',
+        'user_id': user_id,
+        'channel_name': channel_name,
+        'channel_id': channel_id,
+        'content_snippet': content_snippet,
+        'action_taken': action_taken or 'flagged',
+    }
+
+
 # ─────────────────────────────────────────────
 # STAFF ACTIVITY PROXIMITY & EMBED PARSING
 # ─────────────────────────────────────────────
@@ -180,6 +288,10 @@ PRESENCE_BUFFER_LIMIT = 50
 # Member join buffer — batch-sent to API to avoid HTTP storm during @everyone
 join_buffer = []
 JOIN_BUFFER_LIMIT = 30
+
+# Member presence buffer — real-time online/offline/activity → GuildMember upsert
+member_presence_buffer = []
+MEMBER_PRESENCE_BUFFER_LIMIT = 50
 
 # Safety cap: drop oldest entries if any buffer exceeds this
 MAX_BUFFER_SIZE = 10000
@@ -239,13 +351,26 @@ async def flush_join_buffer():
     join_buffer = []
     await api_post('/observer/activity', {'batch': True, 'joins': batch})
 
+async def flush_member_presence_buffer():
+    """Send buffered presence updates to update GuildMember online status and activity."""
+    global member_presence_buffer
+    if not member_presence_buffer:
+        return
+    batch = member_presence_buffer[:]
+    member_presence_buffer = []
+    await api_post('/observer/presence', {'updates': batch})
+    log(f'FLUSHED {len(batch)} member presence updates')
+
 @bot.event
 async def on_message(message):
     """
-    Three jobs:
+    Jobs:
     1. Parse mod bot embed responses (warns/infractions)
     2. Track staff activity — who was the last active mod per guild
     3. Forward commands
+    4. Track mentions and reply times
+    5. Detect @everyone / @here pings by staff
+    6. Parse AutoMod alert embeds from alert channels
     """
     global message_buffer, mention_buffer
     guild = message.guild
@@ -267,10 +392,23 @@ async def on_message(message):
                     'reason': warn_data['reason'],
                     'channel': message.channel.name,
                     'guild': message.guild.name,
+                    'guild_id': str(message.guild.id),
                     'raw_embed': warn_data['raw'],
                     'timestamp': datetime.now(timezone.utc).isoformat()
                 })
         return
+
+    # ── Job 6: Parse AutoMod alert embeds (before bot check; alerts come from webhooks) ──
+    guild_id_str = str(guild.id)
+    channel_id_str = str(message.channel.id)
+    if guild_id_str in automod_alert_channels and channel_id_str in automod_alert_channels[guild_id_str]:
+        if message.embeds:
+            for embed in message.embeds:
+                am_data = extract_automod_alert(embed)
+                if am_data:
+                    am_data['guild_id'] = guild_id_str
+                    print(f'[AutoMod] Trigger: {am_data["rule_name"]} -> {am_data["user_name"]} in #{am_data["channel_name"]}')
+                    await api_post('/observer/automod-trigger', am_data)
 
     if message.author.bot:
         return
@@ -328,6 +466,7 @@ async def on_message(message):
                 'staff_name': author.name,
                 'channel': message.channel.name,
                 'guild': message.guild.name,
+                'guild_id': str(guild.id),
                 'message_length': len(message.content),
                 'timestamp': now.isoformat()
             })
@@ -486,6 +625,8 @@ async def scan_guild(guild):
             if not is_staff:
                 continue
 
+        activities = [a for a in member.activities if not isinstance(a, discord.CustomActivity)]
+        primary_activity = activities[0] if activities else None
         md = {
             'member_id': str(member.id),
             'name': member.name,
@@ -496,6 +637,10 @@ async def scan_guild(guild):
             'is_staff': False,
             'role_ids': ','.join(str(r.id) for r in member.roles if not r.is_default()),
             'top_role_position': member.top_role.position if member.top_role else 0,
+            'is_online': member.status != discord.Status.offline,
+            'status': str(member.status),
+            'activity_name': primary_activity.name if primary_activity else None,
+            'activity_type': str(primary_activity.type).split('.')[-1] if primary_activity else None,
         }
         # Auto-determine staff: owner OR has any mod role
         is_staff = md['is_owner'] or any(str(r.id) in mod_role_ids for r in member.roles)
@@ -541,7 +686,9 @@ async def scan_guild(guild):
                 trigger_text = ','.join(rule.trigger.keyword_filter[:5])
             else:
                 trigger_text = str(rule.trigger)[:200]
-            action_type = str(rule.actions[0].type) if rule.actions else 'unknown'
+            action = rule.actions[0] if rule.actions else None
+            action_type = str(action.type) if action else 'unknown'
+            alert_channel_id = str(action.channel_id) if action and hasattr(action, 'channel_id') and action.channel_id else None
             automod_data.append({
                 'rule_id': str(rule.id),
                 'name': rule.name,
@@ -550,6 +697,7 @@ async def scan_guild(guild):
                 'trigger_type': trigger_type,
                 'trigger_text': trigger_text[:500],
                 'action_type': action_type,
+                'alert_channel_id': alert_channel_id,
                 'enabled': rule.enabled,
                 'exempt_roles': ','.join(str(r.id) for r in rule.exempt_roles) if rule.exempt_roles else None,
                 'exempt_channels': ','.join(str(c.id) for c in rule.exempt_channels) if rule.exempt_channels else None,
@@ -579,6 +727,8 @@ async def scan_guild(guild):
     await api_post('/observer/guild-scan', payload)
     log(f'SCAN COMPLETE: {guild.name} — {len(roles_data)} roles, {guild.member_count} members, {len(staff_member_ids)} staff, {len(automod_data)} automod rules')
     print(f'[SkillSync] Scan complete: {guild.name} — {len(staff_member_ids)} staff out of {guild.member_count} members')
+    # Refresh alert channels after scan
+    build_automod_alert_channels()
 
 
 @bot.event
@@ -621,6 +771,8 @@ async def on_ready():
     # Scan all existing guilds on startup
     for guild in bot.guilds:
         await scan_guild(guild)
+    # Load AutoMod alert channels after scan completes
+    build_automod_alert_channels()
 
 
 @bot.event
@@ -638,8 +790,9 @@ async def on_guild_join(guild):
 
 @bot.event
 async def on_presence_update(before, after):
-    """Buffer members coming online/offline to avoid API spam."""
-    global presence_buffer
+    """Buffer members coming online/offline to avoid API spam.
+    Also updates GuildMember presence for the persistent member registry."""
+    global presence_buffer, member_presence_buffer
     if before.status == after.status or not after.guild:
         return
     presence_buffer.append({
@@ -657,9 +810,30 @@ async def on_presence_update(before, after):
     if len(presence_buffer) >= PRESENCE_BUFFER_LIMIT:
         await flush_presence_buffer()
 
+    # Track GuildMember presence for persistent member registry
+    if not after.bot:
+        activities = [a for a in after.activities if not isinstance(a, discord.CustomActivity)]
+        primary = activities[0] if activities else None
+        member_presence_buffer.append({
+            'guild_id': str(after.guild.id),
+            'member_id': str(after.id),
+            'name': after.name,
+            'display_name': after.display_name,
+            'is_online': after.status != discord.Status.offline,
+            'status': str(after.status),
+            'activity_name': primary.name if primary else None,
+            'activity_type': str(primary.type).split('.')[-1] if primary else None,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        })
+        if len(member_presence_buffer) >= MEMBER_PRESENCE_BUFFER_LIMIT:
+            await flush_member_presence_buffer()
+        elif len(member_presence_buffer) > MAX_BUFFER_SIZE:
+            member_presence_buffer = member_presence_buffer[-MAX_BUFFER_SIZE:]
+
 @bot.event
 async def on_member_join(member):
-    """Track new members joining the server — buffered to avoid HTTP storm during @everyone."""
+    """Track new members joining the server — buffered to avoid HTTP storm during @everyone.
+    Also upserts GuildMember for the persistent member registry."""
     global join_buffer
     try:
         join_buffer.append({
@@ -680,6 +854,25 @@ async def on_member_join(member):
         if ping:
             ping['join_count'] += 1
             ping['joiners'].append(member.name)
+
+        # Upsert GuildMember for the new member
+        if not member.bot:
+            member_presence_buffer.append({
+                'guild_id': str(member.guild.id),
+                'member_id': str(member.id),
+                'name': member.name,
+                'display_name': member.display_name,
+                'is_online': member.status != discord.Status.offline,
+                'status': str(member.status),
+                'activity_name': None,
+                'activity_type': None,
+                'joined_at': member.joined_at.isoformat() if member.joined_at else None,
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            })
+            if len(member_presence_buffer) >= MEMBER_PRESENCE_BUFFER_LIMIT:
+                await flush_member_presence_buffer()
+            elif len(member_presence_buffer) > MAX_BUFFER_SIZE:
+                member_presence_buffer = member_presence_buffer[-MAX_BUFFER_SIZE:]
     except Exception as e:
         log(f'ERROR in on_member_join: {e}')
         print(f'[SkillSync] on_member_join error: {e}')
@@ -790,6 +983,7 @@ async def on_member_ban(guild, user):
                             'action_type': 'ban_issued',
                             'target': user.name,
                             'guild': guild.name,
+                            'guild_id': str(guild.id),
                             'flagged': True,
                             'flag_reason': f'AutoMod rule triggered by {entry_user_name} — review needed',
                             'timestamp': datetime.now(timezone.utc).isoformat()
@@ -809,6 +1003,7 @@ async def on_member_ban(guild, user):
                 'action_type': 'ban_issued',
                 'target': user.name,
                 'guild': guild.name,
+                'guild_id': str(guild.id),
                 'reason': reason,
                 'flagged': False,
                 'flag_reason': 'Could not identify moderator - bot lacks View Audit Log permission',
@@ -850,6 +1045,7 @@ async def on_member_ban(guild, user):
             'action_type': 'ban_issued',
             'target': user.name,
             'guild': guild.name,
+            'guild_id': str(guild.id),
             'reason': reason,
             'flagged': False,
             'flag_reason': None,
@@ -892,6 +1088,7 @@ async def on_member_unban(guild, user):
                 'action_type': 'ban_reversed',
                 'target': user.name,
                 'guild': ban_data['guild_name'],
+                'guild_id': str(ban_data['guild_id']),
                 'original_reason': ban_data['reason'],
                 'reversed_by': unbanner_name,
                 'hours_until_reversal': round(hours_elapsed, 2),
@@ -982,6 +1179,7 @@ async def on_member_update(before, after):
                 'action_type': 'timeout_issued',
                 'target': after.name,
                 'guild': guild.name,
+                'guild_id': str(guild.id),
                 'reason': reason,
                 'flagged': False,
                 'flag_reason': None,
@@ -1003,6 +1201,7 @@ async def on_member_update(before, after):
                     'action_type': 'timeout_reversed',
                     'target': after.name,
                     'guild': guild.name,
+                    'guild_id': str(guild.id),
                     'flagged': removed_early,
                     'flag_reason': 'Timeout lifted before natural expiry — possible overreach' if removed_early else None,
                     'timestamp': now.isoformat()
@@ -1053,6 +1252,7 @@ async def on_member_remove(member):
                         'action_type': 'kick_issued',
                         'target': member.name,
                         'guild': guild.name,
+                        'guild_id': str(guild.id),
                         'reason': entry.reason or 'No reason given',
                         'flagged': False,
                         'flag_reason': None,
@@ -1076,6 +1276,7 @@ async def flush_message_loop():
     """Flush buffered messages, presence updates, voice sessions, and joins every 30 seconds."""
     await flush_message_buffer()
     await flush_presence_buffer()
+    await flush_member_presence_buffer()
     await flush_mention_buffer()
     await flush_voice_buffer()
     await flush_join_buffer()

@@ -18,7 +18,7 @@
       </div>
     </div>
     <div class="grid grid-cols-5 gap-4 mt-6">
-      {% set hdr = [('Members', guild.member_count, 'white'), ('Online Now', guild.online_count, 'green'), ('Staff', guild.staff_count, 'blue'), ('Bots', guild.bot_count, 'gray'), ('Roles', guild.role_count, 'white')] %}
+      {% set hdr = [('Members (Discord)', guild.member_count, 'white'), ('Online Now', online_count, 'green'), ('Tracked in DB', human_count, 'blue'), ('Chatted', tracked_chatted, 'emerald'), ('Roles', guild.role_count, 'white')] %}
       {% for label, val, color in hdr %}
       <div class="bg-[#0b0d11] rounded-xl border border-gray-800/40 p-4 text-center">
         <p class="text-gray-500 text-xs uppercase tracking-wider">{{ label }}</p>
@@ -141,6 +141,34 @@
   </div>
   {% endif %}
 
+  <!-- AutoMod Triggers -->
+  {% if automod_triggers %}
+  <div class="bg-[#111318] rounded-2xl border border-yellow-800/40 p-6 mb-8">
+    <h2 class="text-sm font-semibold text-yellow-400 uppercase tracking-wider mb-5">🚨 AutoMod Triggers ({{ automod_triggers|length }} recent)</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm table-hover">
+        <thead>
+          <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
+            <th class="text-left py-3 font-medium">Rule</th><th class="text-left py-3 font-medium">User</th><th class="text-left py-3 font-medium">Channel</th><th class="text-left py-3 font-medium">Content</th><th class="text-left py-3 font-medium">Action</th><th class="text-right py-3 font-medium">When</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in automod_triggers %}
+          <tr class="border-b border-gray-800/40">
+            <td class="py-3 font-medium text-white text-sm">{{ t.rule_name }}</td>
+            <td class="py-3 text-gray-400">{{ t.user_name }}</td>
+            <td class="py-3 text-gray-400">#{{ t.channel_name or '?' }}</td>
+            <td class="py-3 text-gray-500 text-xs max-w-[200px] truncate">{{ t.content_snippet or '—' }}</td>
+            <td class="py-3"><span class="text-xs font-medium bg-yellow-900/40 text-yellow-300 px-2 py-1 rounded">{{ t.action_taken }}</span></td>
+            <td class="py-3 text-right text-gray-500 text-xs utc-time" data-utc="{{ t.created_at.isoformat() if t.created_at else '' }}">{{ t.created_at.strftime('%b %d %H:%M') if t.created_at else '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Ping → Join -->
   {% if ping_events %}
   <div class="bg-[#111318] rounded-2xl border border-orange-800/40 p-6 mb-8">
@@ -173,14 +201,16 @@
     <div class="bg-[#111318] rounded-2xl border border-blue-800/40 p-6">
       <h2 class="text-sm font-semibold text-blue-400 uppercase tracking-wider mb-5">👤 Staff ({{ staff|length }})</h2>
       {% if staff %}
-      <div class="space-y-2">
+      <div class="space-y-2 max-h-96 overflow-y-auto">
         {% for m in staff %}
-        <div class="flex justify-between items-center border-b border-gray-800/40 py-2.5 last:border-0">
-          <div>
-            <span class="text-white">{{ m.name }}</span>
-            {% if m.is_owner %}<span class="text-xs font-medium bg-yellow-900/40 text-yellow-300 px-1.5 py-0.5 rounded ml-2">Owner</span>{% endif %}
+        <div class="flex justify-between items-center border-b border-gray-800/40 py-2 last:border-0">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="inline-block w-2 h-2 rounded-full flex-shrink-0 {% if m.is_online %}bg-green-400{% else %}bg-gray-600{% endif %}" title="{{ 'Online' if m.is_online else 'Offline' }}"></span>
+            <span class="text-white truncate">{{ m.name }}</span>
+            {% if m.is_owner %}<span class="text-xs font-medium bg-yellow-900/40 text-yellow-300 px-1.5 py-0.5 rounded flex-shrink-0">Owner</span>{% endif %}
+            {% if m.activity_name %}<span class="text-xs text-gray-500 truncate hidden md:inline">{{ m.activity_name }}</span>{% endif %}
           </div>
-          <span class="text-gray-600 text-xs">{{ m.member_id }}</span>
+          <span class="text-gray-600 text-xs flex-shrink-0 ml-2">{{ m.member_id }}</span>
         </div>
         {% endfor %}
       </div>
@@ -195,8 +225,12 @@
       <div class="space-y-1 max-h-96 overflow-y-auto">
         {% for m in members[:50] %}
         <div class="flex justify-between items-center border-b border-gray-800/40 py-1.5">
-          <span class="text-gray-300 text-sm">{{ m.name }}</span>
-          <span class="text-gray-600 text-xs">{{ m.member_id }}</span>
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="inline-block w-2 h-2 rounded-full flex-shrink-0 {% if m.is_online %}bg-green-400{% else %}bg-gray-600{% endif %}" title="{{ 'Online' if m.is_online else 'Offline' }}"></span>
+            <span class="text-gray-300 text-sm truncate">{{ m.name }}</span>
+            {% if m.last_message_at %}<span class="text-xs text-emerald-600 hidden md:inline">chatted</span>{% elif m.is_online %}<span class="text-xs text-gray-600 hidden md:inline">online</span>{% else %}<span class="text-xs text-gray-700 hidden md:inline">observed</span>{% endif %}
+          </div>
+          <span class="text-gray-600 text-xs flex-shrink-0 ml-2">{{ m.member_id }}</span>
         </div>
         {% endfor %}
         {% if members|length > 50 %}<p class="text-gray-600 text-xs text-center mt-3">...and {{ members|length - 50 }} more</p>{% endif %}
@@ -212,13 +246,13 @@
 {% block scripts %}
 <script>
 const gc = document.getElementById('guildCompositionChart');
-if (gc) darkChart(gc, { type: 'doughnut', data: { labels: ['Members', 'Online', 'Offline'], datasets: [{ data: [{{ guild.member_count }}, {{ guild.online_count }}, {{ guild.member_count - guild.online_count }}], backgroundColor: ['rgba(59,130,246,0.7)', 'rgba(16,185,129,0.7)', 'rgba(75,85,99,0.5)'], borderColor: '#111318', borderWidth: 3 }] }, options: { plugins: { legend: { position: 'bottom' } } } });
+if (gc) darkChart(gc, { type: 'doughnut', data: { labels: ['Online', 'Offline', 'Observed'], datasets: [{ data: [{{ online_count }}, {{ tracked_offline }}, {{ tracked_chatted }}], backgroundColor: ['rgba(16,185,129,0.7)', 'rgba(75,85,99,0.5)', 'rgba(59,130,246,0.5)'], borderColor: '#111318', borderWidth: 3 }] }, options: { plugins: { legend: { position: 'bottom' } } } });
 
 const gs = document.getElementById('guildStaffChart');
-if (gs) darkChart(gs, { type: 'doughnut', data: { labels: ['Community', 'Staff'], datasets: [{ data: [Math.max(0, {{ guild.member_count }} - {{ guild.staff_count }}), {{ guild.staff_count }}], backgroundColor: ['rgba(75,85,99,0.6)', 'rgba(59,130,246,0.8)'], borderColor: '#111318', borderWidth: 3 }] }, options: { plugins: { legend: { position: 'bottom' } } } });
+if (gs) darkChart(gs, { type: 'doughnut', data: { labels: ['Community', 'Staff'], datasets: [{ data: [{{ community_count }}, {{ guild.staff_count }}], backgroundColor: ['rgba(75,85,99,0.6)', 'rgba(59,130,246,0.8)'], borderColor: '#111318', borderWidth: 3 }] }, options: { plugins: { legend: { position: 'bottom' } } } });
 
 const gb = document.getElementById('guildBotsChart');
-if (gb) darkChart(gb, { type: 'doughnut', data: { labels: ['Humans', 'Bots'], datasets: [{ data: [{{ guild.member_count - guild.bot_count }}, {{ guild.bot_count }}], backgroundColor: ['rgba(16,185,129,0.7)', 'rgba(139,92,246,0.7)'], borderColor: '#111318', borderWidth: 3 }] }, options: { plugins: { legend: { position: 'bottom' } } } });
+if (gb) darkChart(gb, { type: 'doughnut', data: { labels: ['Humans', 'Bots'], datasets: [{ data: [{{ human_count }}, {{ bot_count }}], backgroundColor: ['rgba(16,185,129,0.7)', 'rgba(139,92,246,0.7)'], borderColor: '#111318', borderWidth: 3 }] }, options: { plugins: { legend: { position: 'bottom' } } } });
 
 {% if guild_hourly_chart %}
 (function() {

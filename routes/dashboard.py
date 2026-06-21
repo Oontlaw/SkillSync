@@ -1,9 +1,10 @@
 import os
 import requests
 from flask import Blueprint, render_template, session, redirect, url_for, request
-from database import db, Worker, Task, ScoreLog, AdminCorrection, MessageRecord, GuildInfo, GuildRole, GuildMember, BehavioralAnomaly, MentionRecord, AutoModRule, PingJoinEvent, VoiceActivity, BurnoutRisk
+from database import db, Worker, Task, ScoreLog, AdminCorrection, MessageRecord, GuildInfo, GuildRole, GuildMember, BehavioralAnomaly, MentionRecord, AutoModRule, AutoModTrigger, PingJoinEvent, VoiceActivity, BurnoutRisk
 from datetime import datetime, timedelta
 from sqlalchemy import func
+import statistics
 
 dashboard_bp = Blueprint('dashboard', __name__)
 
@@ -76,12 +77,62 @@ def index():
             user=None, invite_url=BOT_INVITE_URL, logged_out=True)
 
     accessible_ids = get_accessible_guild_ids()
+
+    # Guild-scoped filter for ScoreLog (include legacy rows with NULL guild_id)
+    if accessible_ids:
+        scorelog_filter = db.or_(ScoreLog.guild_id.in_(accessible_ids), ScoreLog.guild_id == None)
+    else:
+        scorelog_filter = None
+
+    # Per-guild scores for leaderboard
+    per_guild_scores_query = db.session.query(
+        ScoreLog.worker_id,
+        ScoreLog.guild_id,
+        func.sum(ScoreLog.change).label('score')
+    ).group_by(ScoreLog.worker_id, ScoreLog.guild_id)
+    if scorelog_filter is not None:
+        per_guild_scores_query = per_guild_scores_query.filter(scorelog_filter)
+    per_guild_scores = per_guild_scores_query.order_by(func.sum(ScoreLog.change).desc()).all()
+
+    leaderboard_data = []
+    for pg in per_guild_scores:
+        worker = Worker.query.get(pg.worker_id)
+        guild = None
+        guild_name = 'Unknown'
+        if pg.guild_id:
+            guild = GuildInfo.query.filter_by(guild_id=pg.guild_id).first()
+            if guild:
+                guild_name = guild.name
+        if worker:
+            leaderboard_data.append({
+                'worker': worker,
+                'guild_id': pg.guild_id or '',
+                'guild_name': guild_name,
+                'score': pg.score
+            })
+
     workers = Worker.query.order_by(Worker.score.desc()).all()
     total_workers = len(workers)
     total_tasks = Task.query.count()
     total_corrections = AdminCorrection.query.count()
-    total_moderation_actions = ScoreLog.query.filter_by(source='discord').count()
-    recent_logs = ScoreLog.query.order_by(ScoreLog.created_at.desc()).limit(10).all()
+    total_moderation_actions = ScoreLog.query.filter(ScoreLog.source == 'discord')
+    if scorelog_filter is not None:
+        total_moderation_actions = total_moderation_actions.filter(scorelog_filter)
+    total_moderation_actions = total_moderation_actions.count()
+
+    recent_logs = ScoreLog.query
+    if scorelog_filter is not None:
+        recent_logs = recent_logs.filter(scorelog_filter)
+    recent_logs = recent_logs.order_by(ScoreLog.created_at.desc()).limit(10).all()
+    # Filter out orphaned logs (worker deleted)
+    recent_logs = [log for log in recent_logs if log.worker]
+    # Attach guild name to each log
+    for log in recent_logs:
+        log.guild_name = None
+        if log.guild_id:
+            g = GuildInfo.query.filter_by(guild_id=log.guild_id).first()
+            if g:
+                log.guild_name = g.name
 
     # Common guild filter for message/voice queries
     guild_filter = MessageRecord.guild_id.in_(accessible_ids) if accessible_ids else None
@@ -134,10 +185,13 @@ def index():
     ).group_by(func.date(MessageRecord.created_at)).order_by(func.date(MessageRecord.created_at)).all()
     daily_volume = {str(d.day): d.count for d in daily_vol}
 
-    # Score source breakdown
-    source_data = db.session.query(
+    # Score source breakdown (per-guild scoped)
+    source_query = db.session.query(
         ScoreLog.source, func.count(ScoreLog.id).label('count')
-    ).group_by(ScoreLog.source).all()
+    )
+    if scorelog_filter is not None:
+        source_query = source_query.filter(scorelog_filter)
+    source_data = source_query.group_by(ScoreLog.source).all()
     score_sources = {s.source: s.count for s in source_data}
 
     # Guild scan overview — only guilds the user can access AND the bot is in
@@ -169,6 +223,7 @@ def index():
         accessible_guilds=session.get('accessible_guilds', []),
         invite_url=BOT_INVITE_URL, logged_out=False,
         workers=workers,
+        leaderboard_data=leaderboard_data,
         total_workers=total_workers,
         total_tasks=total_tasks,
         total_corrections=total_corrections,
@@ -288,7 +343,6 @@ def worker_detail(worker_id):
         prior_total = 0
 
         if daily_vals:
-            import statistics
             mean = sum(daily_vals) / len(daily_vals)
             if mean > 0:
                 stdev = statistics.pstdev(daily_vals)
@@ -439,15 +493,28 @@ def guild_detail(guild_id):
             for h, c in q.group_by(MessageRecord.hour_of_day).order_by(MessageRecord.hour_of_day).all():
                 target[str(h)] = c
 
+    # Chart data using actual DB counts
+    online_count = GuildMember.query.filter_by(guild_id=guild_id, is_bot=False, is_online=True).count()
+    tracked_chatted = GuildMember.query.filter_by(guild_id=guild_id, is_bot=False).filter(GuildMember.last_message_at != None).count()
+    tracked_offline = GuildMember.query.filter_by(guild_id=guild_id, is_bot=False, is_online=False).filter(GuildMember.last_message_at == None).count()
+    community_count = GuildMember.query.filter_by(guild_id=guild_id, is_bot=False, is_staff=False).count()
+    human_count = GuildMember.query.filter_by(guild_id=guild_id, is_bot=False).count()
+    bot_count = GuildMember.query.filter_by(guild_id=guild_id, is_bot=True).count()
+
+    # AutoMod triggers
+    automod_triggers = AutoModTrigger.query.filter_by(guild_id=guild_id).order_by(AutoModTrigger.created_at.desc()).limit(30).all()
+
     return render_template('guild.html',
         user=session.get('user'),
         accessible_guilds=session.get('accessible_guilds', []),
-        guild=guild, roles=roles, staff=staff, members=non_staff, automod_rules=automod_rules,
+        guild=guild, roles=roles, staff=staff, members=non_staff, automod_rules=automod_rules, automod_triggers=automod_triggers,
         ping_events=ping_events, guild_hourly_chart=guild_hourly_chart, guild_msg_total=guild_msg_total,
         guild_voice_sessions=guild_voice_sessions, guild_voice_hours=guild_voice_hours,
         guild_voice_top_channels=guild_voice_top_channels, guild_voice_hourly=guild_voice_hourly,
         guild_voice_users=guild_voice_users_list,
-        community_hourly=community_hourly, staff_hourly=staff_hourly)
+        community_hourly=community_hourly, staff_hourly=staff_hourly,
+        online_count=online_count, tracked_offline=tracked_offline, tracked_chatted=tracked_chatted,
+        community_count=community_count, human_count=human_count, bot_count=bot_count)
 
 
 

@@ -49,6 +49,7 @@ class ScoreLog(db.Model):
     reason = db.Column(db.String(300), nullable=False)
     source = db.Column(db.String(50), default='system')  # system / admin / discord
     admin_correction = db.Column(db.Boolean, default=False)
+    guild_id = db.Column(db.String(50), nullable=True, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     def __repr__(self):
@@ -156,7 +157,7 @@ class GuildRole(db.Model):
 
 
 class GuildMember(db.Model):
-    """Stores member information per guild with staff flags."""
+    """Stores member information per guild with staff flags and presence tracking."""
     __tablename__ = 'guild_members'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -172,6 +173,12 @@ class GuildMember(db.Model):
     role_ids = db.Column(db.Text, nullable=True)
     top_role_position = db.Column(db.Integer, default=0)
     total_messages = db.Column(db.Integer, default=0)
+    is_online = db.Column(db.Boolean, default=False)
+    last_seen_online = db.Column(db.DateTime, nullable=True)
+    last_message_at = db.Column(db.DateTime, nullable=True)
+    status = db.Column(db.String(20), default='offline')
+    activity_name = db.Column(db.String(100), nullable=True)
+    activity_type = db.Column(db.String(20), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
@@ -240,6 +247,7 @@ class AutoModRule(db.Model):
     enabled = db.Column(db.Boolean, default=True)
     exempt_roles = db.Column(db.Text, nullable=True)
     exempt_channels = db.Column(db.Text, nullable=True)
+    alert_channel_id = db.Column(db.String(50), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
@@ -301,3 +309,22 @@ class BurnoutRisk(db.Model):
 
     def __repr__(self):
         return f'<BurnoutRisk {self.name} | score={self.score}>'
+
+
+class AutoModTrigger(db.Model):
+    __tablename__ = 'automod_triggers'
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
+    rule_id = db.Column(db.String(50), nullable=True)
+    rule_name = db.Column(db.String(200), nullable=True)
+    user_id = db.Column(db.String(50), nullable=True, index=True)
+    user_name = db.Column(db.String(100), nullable=True)
+    channel_id = db.Column(db.String(50), nullable=True)
+    channel_name = db.Column(db.String(100), nullable=True)
+    content_snippet = db.Column(db.Text, nullable=True)
+    action_taken = db.Column(db.String(100), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<AutoModTrigger {self.rule_name} -> {self.user_name} in #{self.channel_name}>'

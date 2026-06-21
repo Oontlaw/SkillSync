@@ -47,23 +47,30 @@ def callback():
         'redirect_uri': url_for('auth.callback', _external=True, _scheme=request.scheme),
     }
     headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-    resp = requests.post(f'{DISCORD_API}/oauth2/token', data=data, headers=headers, timeout=10)
-    if not resp.ok:
+    try:
+        resp = requests.post(f'{DISCORD_API}/oauth2/token', data=data, headers=headers, timeout=10)
+        resp.raise_for_status()
+        token_data = resp.json()
+    except Exception as e:
+        print(f'[Auth] Token exchange failed: {e}')
         return 'Failed to exchange authorization code.', 400
-    token_data = resp.json()
     access_token = token_data['access_token']
 
-    headers = {'Authorization': f'Bearer {access_token}'}
-
-    user_resp = requests.get(f'{DISCORD_API}/users/@me', headers=headers, timeout=10)
-    if not user_resp.ok:
+    try:
+        user_resp = requests.get(f'{DISCORD_API}/users/@me', headers=headers, timeout=10)
+        user_resp.raise_for_status()
+        user = user_resp.json()
+    except Exception as e:
+        print(f'[Auth] User fetch failed: {e}')
         return 'Failed to fetch user info.', 400
-    user = user_resp.json()
 
-    guilds_resp = requests.get(f'{DISCORD_API}/users/@me/guilds', headers=headers, timeout=10)
-    if not guilds_resp.ok:
+    try:
+        guilds_resp = requests.get(f'{DISCORD_API}/users/@me/guilds', headers=headers, timeout=10)
+        guilds_resp.raise_for_status()
+        guilds = guilds_resp.json()
+    except Exception as e:
+        print(f'[Auth] Guilds fetch failed: {e}')
         return 'Failed to fetch guilds.', 400
-    guilds = guilds_resp.json()
 
     # Get guilds where the bot is also present (from scanned GuildInfo table)
     bot_guild_ids = set(g.guild_id for g in GuildInfo.query.with_entities(GuildInfo.guild_id).all())

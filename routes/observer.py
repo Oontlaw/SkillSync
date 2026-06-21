@@ -5,9 +5,13 @@ import math
 from collections import defaultdict
 from functools import wraps
 from flask import Blueprint, request, jsonify
-from database import db, Worker, ScoreLog, MessageRecord, GuildInfo, GuildRole, GuildMember, GuildChannel, BehavioralAnomaly, MentionRecord, AutoModRule, PingJoinEvent, VoiceActivity, BurnoutRisk
+from database import db, Worker, ScoreLog, MessageRecord, GuildInfo, GuildRole, GuildMember, GuildChannel, BehavioralAnomaly, MentionRecord, AutoModRule, AutoModTrigger, PingJoinEvent, VoiceActivity, BurnoutRisk
 from datetime import datetime, timedelta
 from sqlalchemy import func
+from ml import engine as ml_engine
+from ml import anomaly as ml_anomaly
+from ml import burnout as ml_burnout
+from ml import forecast as ml_forecast
 
 observer_bp = Blueprint('observer', __name__)
 
@@ -104,7 +108,8 @@ def log_action():
             change=points,
             reason=f'[Discord] {action_type.replace("_", " ").title()} on {target} in {guild}',
             source='discord',
-            admin_correction=False
+            admin_correction=False,
+            guild_id=sanitize_str(data.get('guild_id'), 50),
         )
         db.session.add(log)
         db.session.commit()
@@ -171,7 +176,8 @@ def log_flag():
             change=points,
             reason=f'[Discord] FLAG: {note} | Target: {target} in {guild}',
             source='discord',
-            admin_correction=False
+            admin_correction=False,
+            guild_id=sanitize_str(data.get('guild_id'), 50),
         )
         db.session.add(log)
         db.session.commit()
@@ -211,7 +217,8 @@ def log_warn():
             change=3,
             reason=f'[Discord] Warn issued to {target_name} via {source_bot} in #{channel} | {guild}',
             source='discord',
-            admin_correction=False
+            admin_correction=False,
+            guild_id=sanitize_str(data.get('guild_id'), 50),
         )
         db.session.add(log)
         db.session.commit()
@@ -257,7 +264,8 @@ def log_activity():
                 change=1,
                 reason=f'[Discord] Active in {len(staff_activity[discord_id]["channels"])} channel(s) in {guild}',
                 source='discord',
-                admin_correction=False
+                admin_correction=False,
+                guild_id=sanitize_str(data.get('guild_id'), 50),
             )
             db.session.add(log)
             db.session.commit()
@@ -275,6 +283,30 @@ def confirm_action():
     data = request.json
     print(f'[Observer API] Confirmed: {data.get("action_type")} by {data.get("staff_name")} on {data.get("target")}')
     return jsonify({'message': 'Action confirmed as valid'}), 200
+
+
+@observer_bp.route('/observer/automod-trigger', methods=['POST'])
+@require_api_key
+def log_automod_trigger():
+    """Log an AutoMod trigger event from alert channel parsing."""
+    data = request.json
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+    trigger = AutoModTrigger(
+        guild_id=sanitize_str(data.get('guild_id'), 50),
+        rule_id=sanitize_str(data.get('rule_id'), 50),
+        rule_name=sanitize_str(data.get('rule_name'), 200),
+        user_id=sanitize_str(data.get('user_id'), 50),
+        user_name=sanitize_str(data.get('user_name'), 100),
+        channel_id=sanitize_str(data.get('channel_id'), 50),
+        channel_name=sanitize_str(data.get('channel_name'), 100),
+        content_snippet=sanitize_str(data.get('content_snippet'), 500),
+        action_taken=sanitize_str(data.get('action_taken'), 100),
+    )
+    db.session.add(trigger)
+    db.session.commit()
+    print(f'[Observer API] AutoMod trigger: {trigger.rule_name} -> {trigger.user_name} in #{trigger.channel_name}')
+    return jsonify({'message': 'AutoMod trigger logged'}), 201
 
 
 @observer_bp.route('/observer/staff-activity', methods=['GET'])
@@ -303,6 +335,7 @@ def get_staff_activity():
 def log_messages():
     """
     Receives a batch of message records from the bot.
+    Also updates GuildMember.last_message_at for each unique author.
     """
     data = request.json
     if not data:
@@ -327,6 +360,33 @@ def log_messages():
             day_of_week=msg.get('day'),
         )
         db.session.add(record)
+
+    # Update GuildMember.last_message_at for each unique author
+    # Create GuildMember row if it doesn't exist yet (common in large guilds)
+    now = datetime.utcnow()
+    seen = set()
+    for msg in messages:
+        guild_id = sanitize_str(msg.get('guild_id', ''), 50)
+        discord_id = sanitize_str(msg.get('discord_id', ''), 50)
+        if not guild_id or not discord_id:
+            continue
+        key = (guild_id, discord_id)
+        if key not in seen:
+            seen.add(key)
+            member = GuildMember.query.filter_by(guild_id=guild_id, member_id=discord_id).first()
+            if member:
+                member.last_message_at = now
+            else:
+                member = GuildMember(
+                    guild_id=guild_id,
+                    member_id=discord_id,
+                    name=sanitize_str(msg.get('name', 'Unknown'), 200),
+                    is_online=True,
+                    status='online',
+                    last_seen_online=now,
+                    last_message_at=now,
+                )
+                db.session.add(member)
 
     db.session.commit()
     return jsonify({'message': f'{len(messages)} messages logged'}), 201
@@ -504,23 +564,46 @@ def receive_guild_scan():
         )
         db.session.add(role)
 
-    # Upsert members
-    GuildMember.query.filter_by(guild_id=guild_id).delete()
+    # Upsert members — preserve existing rows, update in place
+    existing_members = {m.member_id: m for m in GuildMember.query.filter_by(guild_id=guild_id).all()}
+    scanned_ids = set()
     for m in data.get('members', []):
         if not m.get('member_id') or not m.get('name'):
             continue
-        member = GuildMember(
-            guild_id=guild_id,
-            member_id=sanitize_str(m.get('member_id', ''), 50),
-            name=sanitize_str(m.get('name', ''), 200),
-            display_name=sanitize_str(m.get('display_name'), 200),
-            joined_at=datetime.fromisoformat(m['joined_at']) if m.get('joined_at') else None,
-            is_bot=m.get('is_bot', False),
-            is_owner=m.get('is_owner', False),
-            is_staff=m.get('is_staff', False),
-            role_ids=m.get('role_ids'),
-            top_role_position=m.get('top_role_position', 0),
-        )
+        member_id = m['member_id']
+        scanned_ids.add(member_id)
+        if member_id in existing_members:
+            member = existing_members[member_id]
+            member.name = sanitize_str(m.get('name', ''), 200)
+            member.display_name = sanitize_str(m.get('display_name'), 200)
+            member.is_bot = m.get('is_bot', False)
+            member.is_owner = m.get('is_owner', False)
+            member.is_staff = m.get('is_staff', False)
+            member.role_ids = m.get('role_ids')
+            member.top_role_position = m.get('top_role_position', 0)
+            member.is_online = m.get('is_online', False)
+            member.status = m.get('status', 'offline')
+            member.activity_name = m.get('activity_name')
+            member.activity_type = m.get('activity_type')
+            if m.get('joined_at'):
+                member.joined_at = datetime.fromisoformat(m['joined_at'])
+        else:
+            member = GuildMember(
+                guild_id=guild_id,
+                member_id=member_id,
+                name=sanitize_str(m.get('name', ''), 200),
+                display_name=sanitize_str(m.get('display_name'), 200),
+                joined_at=datetime.fromisoformat(m['joined_at']) if m.get('joined_at') else None,
+                is_bot=m.get('is_bot', False),
+                is_owner=m.get('is_owner', False),
+                is_staff=m.get('is_staff', False),
+                role_ids=m.get('role_ids'),
+                top_role_position=m.get('top_role_position', 0),
+                is_online=m.get('is_online', False),
+                status=m.get('status', 'offline'),
+                activity_name=m.get('activity_name'),
+                activity_type=m.get('activity_type'),
+            )
         db.session.add(member)
 
     # Upsert channels
@@ -557,6 +640,7 @@ def receive_guild_scan():
             enabled=ar.get('enabled', True),
             exempt_roles=sanitize_str(ar.get('exempt_roles'), 500),
             exempt_channels=sanitize_str(ar.get('exempt_channels'), 500),
+            alert_channel_id=sanitize_str(ar.get('alert_channel_id'), 50),
         )
         db.session.add(rule)
 
@@ -611,6 +695,12 @@ def list_guild_members(guild_id):
         'role_ids': m.role_ids.split(',') if m.role_ids else [],
         'top_role_position': m.top_role_position,
         'total_messages': m.total_messages,
+        'is_online': m.is_online,
+        'status': m.status,
+        'activity_name': m.activity_name,
+        'activity_type': m.activity_type,
+        'last_seen_online': m.last_seen_online.isoformat() if m.last_seen_online else None,
+        'last_message_at': m.last_message_at.isoformat() if m.last_message_at else None,
     } for m in members])
 
 
@@ -641,6 +731,21 @@ def list_guild_roles(guild_id):
     } for r in roles])
 
 
+@observer_bp.route('/observer/automod-rules', methods=['GET'])
+@require_api_key
+def list_all_automod_rules():
+    """Lists all AutoMod rules across all guilds (for bot startup)."""
+    rules = AutoModRule.query.filter(AutoModRule.alert_channel_id != None).order_by(AutoModRule.guild_id, AutoModRule.name).all()
+    return jsonify([{
+        'guild_id': r.guild_id,
+        'rule_id': r.rule_id,
+        'name': r.name,
+        'alert_channel_id': r.alert_channel_id,
+        'trigger_type': r.trigger_type,
+        'action_type': r.action_type,
+    } for r in rules])
+
+
 @observer_bp.route('/observer/guilds/<guild_id>/automod', methods=['GET'])
 @require_api_key
 def list_guild_automod(guild_id):
@@ -653,6 +758,7 @@ def list_guild_automod(guild_id):
         'trigger_type': r.trigger_type,
         'trigger_text': r.trigger_text,
         'action_type': r.action_type,
+        'alert_channel_id': r.alert_channel_id,
         'enabled': r.enabled,
         'exempt_roles': r.exempt_roles.split(',') if r.exempt_roles else [],
         'exempt_channels': r.exempt_channels.split(',') if r.exempt_channels else [],
@@ -700,6 +806,67 @@ def guild_prefix(guild_id):
     return jsonify({'guild_id': guild_id, 'prefixes': prefixes})
 
 
+@observer_bp.route('/observer/presence', methods=['POST'])
+@require_api_key
+def receive_presence():
+    """
+    Receives real-time presence updates from the bot.
+    Upserts GuildMember rows with current online status, activity, and last_seen_online.
+    This is the mechanism that builds and maintains the persistent member registry.
+    """
+    data = request.json
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
+
+    updates = data.get('updates', [data])
+    now = datetime.utcnow()
+    updated = 0
+    created = 0
+
+    for p in updates:
+        guild_id = sanitize_str(p.get('guild_id'), 50)
+        member_id = sanitize_str(p.get('member_id'), 50)
+        if not guild_id or not member_id:
+            continue
+
+        member = GuildMember.query.filter_by(guild_id=guild_id, member_id=member_id).first()
+        if member:
+            member.is_online = p.get('is_online', False)
+            member.status = p.get('status', 'offline')
+            member.last_seen_online = now if p.get('is_online', False) else member.last_seen_online
+            member.activity_name = p.get('activity_name')
+            member.activity_type = p.get('activity_type')
+            if p.get('name'):
+                member.name = sanitize_str(p['name'], 200)
+            if p.get('display_name'):
+                member.display_name = sanitize_str(p['display_name'], 200)
+            if p.get('joined_at'):
+                try:
+                    member.joined_at = datetime.fromisoformat(p['joined_at'])
+                except (ValueError, TypeError):
+                    pass
+            updated += 1
+        else:
+            member = GuildMember(
+                guild_id=guild_id,
+                member_id=member_id,
+                name=sanitize_str(p.get('name', 'Unknown'), 200),
+                display_name=sanitize_str(p.get('display_name'), 200),
+                is_bot=p.get('is_bot', False),
+                is_online=p.get('is_online', False),
+                status=p.get('status', 'offline'),
+                last_seen_online=now if p.get('is_online', False) else None,
+                activity_name=p.get('activity_name'),
+                activity_type=p.get('activity_type'),
+            )
+            created += 1
+        db.session.add(member)
+
+    db.session.commit()
+    print(f'[Presence API] {updated} updated, {created} created')
+    return jsonify({'updated': updated, 'created': created}), 200
+
+
 # ─────────────────────────────────────────────
 # BEHAVIORAL ANOMALY DETECTION
 # ─────────────────────────────────────────────
@@ -728,7 +895,6 @@ def detect_anomalies_for_user(discord_id, name=None):
     hour_counts = defaultdict(int)
     for h in hours:
         hour_counts[h] += 1
-    hourly_avg = len(hours) / max(len(hour_counts), 1)
 
     # ── Recent: last 24h ──
     cutoff = now - timedelta(hours=24)
@@ -1037,3 +1203,106 @@ def scan_burnout_risks():
     db.session.commit()
     flagged = [r for r in results if r['score'] >= 25]
     return jsonify({'scanned': len(results), 'flagged': len(flagged), 'results': results})
+
+
+# ─────────────────────────────────────────────
+# ML ENGINE ENDPOINTS
+# ─────────────────────────────────────────────
+
+@observer_bp.route('/observer/ml/retrain', methods=['POST'])
+@require_api_key
+def ml_retrain():
+    """Retrain all ML models."""
+    data = request.json or {}
+    days = int(data.get('days', 30))
+    min_msgs = int(data.get('min_msgs', 10))
+    results = ml_engine.train_all(days=days, min_msgs=min_msgs)
+    return jsonify(results)
+
+
+@observer_bp.route('/observer/ml/status', methods=['GET'])
+@require_api_key
+def ml_status():
+    """Get training status of all ML models."""
+    status = ml_engine.get_model_status()
+    summary_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ml', 'models', 'training_summary.json')
+    last_train = None
+    if os.path.exists(summary_path):
+        try:
+            with open(summary_path) as f:
+                last_train = json.load(f).get('trained_at')
+        except Exception:
+            pass
+    return jsonify({'models': status, 'last_training': last_train})
+
+
+@observer_bp.route('/observer/ml/forecast/<guild_id>', methods=['GET'])
+@require_api_key
+def ml_forecast_guild(guild_id):
+    """Get 24h activity forecast for a guild."""
+    preds = ml_forecast.predict_next_24h(guild_id)
+    if preds is None:
+        return jsonify({'error': 'No forecast available for this guild'}), 404
+    return jsonify({
+        'guild_id': guild_id,
+        'forecast': preds.tolist(),
+        'hours': list(range(24)),
+    })
+
+
+@observer_bp.route('/observer/ml/anomalies/scan', methods=['POST'])
+@require_api_key
+def ml_scan_anomalies():
+    """Run ML-based anomaly detection across all users.
+    Replaces rule-based detect_anomalies_for_user with Isolation Forest."""
+    now = datetime.utcnow()
+    anomalies = ml_anomaly.scan_all()
+    total_new = 0
+    for a in anomalies:
+        existing = BehavioralAnomaly.query.filter_by(
+            discord_id=a['discord_id'], anomaly_type='ml_anomaly', cleared_at=None
+        ).filter(BehavioralAnomaly.detected_at > now - timedelta(hours=12)).first()
+        if not existing:
+            record = BehavioralAnomaly(
+                discord_id=a['discord_id'],
+                anomaly_type='ml_anomaly',
+                severity=a['severity'],
+                details=f'ML isolation forest anomaly (score: {a["anomaly_score"]})',
+            )
+            db.session.add(record)
+            total_new += 1
+    db.session.commit()
+    return jsonify({'scanned': len(anomalies), 'new_anomalies': total_new})
+
+
+@observer_bp.route('/observer/ml/burnout-scan', methods=['POST'])
+@require_api_key
+def ml_scan_burnout():
+    """Run ML-based burnout risk detection across all workers.
+    Replaces heuristic scoring with Isolation Forest on staff feature vectors."""
+    now = datetime.utcnow()
+    flagged = ml_burnout.scan_all()
+    from database import Worker, BurnoutRisk
+
+    updated = 0
+    for fb in flagged:
+        existing = BurnoutRisk.query.filter_by(worker_id=fb['worker_id']).first()
+        signals_str = ','.join(fb['signals']) if fb['signals'] else None
+        if existing:
+            existing.score = fb['burnout_score']
+            existing.anomaly_freq = 0  # Not used in ML mode
+            existing.volume_volatility = 0
+            existing.reversal_rate = 0
+            existing.voice_creep = 0
+            existing.signals = signals_str
+            existing.detected_at = now
+        else:
+            w = Worker.query.get(fb['worker_id'])
+            br = BurnoutRisk(
+                worker_id=fb['worker_id'], discord_id=fb['discord_id'], name=fb['name'],
+                score=fb['burnout_score'], signals=signals_str,
+            )
+            db.session.add(br)
+        updated += 1
+    db.session.commit()
+    return jsonify({'scanned': len(flagged), 'updated': updated, 'flagged': flagged})
