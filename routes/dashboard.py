@@ -527,6 +527,15 @@ def guild_detail(guild_id):
     if forecast_preds is not None:
         forecast_data = forecast_preds.tolist()
 
+    # Behavioral anomalies for this guild
+    guild_anomalies = BehavioralAnomaly.query.filter(
+        BehavioralAnomaly.cleared_at == None,
+        BehavioralAnomaly.detected_at > datetime.utcnow() - timedelta(hours=48)
+    )
+    if BehavioralAnomaly.guild_id != None:
+        guild_anomalies = guild_anomalies.filter(BehavioralAnomaly.guild_id == guild_id)
+    guild_anomalies = guild_anomalies.order_by(BehavioralAnomaly.severity.desc()).limit(10).all()
+
     return render_template('guild.html',
         user=session.get('user'),
         accessible_guilds=session.get('accessible_guilds', []),
@@ -538,7 +547,7 @@ def guild_detail(guild_id):
         community_hourly=community_hourly, staff_hourly=staff_hourly,
         online_count=online_count, tracked_offline=tracked_offline, tracked_chatted=tracked_chatted,
         community_count=community_count, human_count=human_count, bot_count=bot_count,
-        forecast_data=forecast_data)
+        forecast_data=forecast_data, guild_anomalies=guild_anomalies)
 
 
 

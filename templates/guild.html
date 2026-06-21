@@ -60,6 +60,24 @@
   {% endif %}
   {% endif %}
 
+  {% if guild_anomalies %}
+  <div class="bg-[#111318] rounded-2xl border border-red-900/40 p-6 mb-8">
+    <h2 class="text-sm font-semibold text-red-400 uppercase tracking-wider mb-4">🚨 Behavioral Anomalies</h2>
+    <div class="space-y-2">
+      {% for a in guild_anomalies %}
+      <div class="flex justify-between items-center py-2 border-b border-gray-800/40 last:border-0">
+        <div>
+          <span class="text-red-400 text-sm font-medium">{{ a.anomaly_type | replace('_', ' ') | title }}</span>
+          <span class="text-gray-400 text-sm ml-2">— {{ a.name or a.discord_id }}</span>
+          <p class="text-gray-600 text-xs mt-0.5">{{ a.details }}</p>
+        </div>
+        <span class="text-red-400 text-xs font-bold px-2 py-1 bg-red-900/30 rounded">{{ "%.0f"|format(a.severity) }}%</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   {% if guild_voice_sessions > 0 %}
   <div class="bg-[#111318] rounded-2xl border border-emerald-800/40 p-6 mb-8">
     <h2 class="text-sm font-semibold text-emerald-400 uppercase tracking-wider mb-5">🎙️ Voice Activity ({{ guild_voice_sessions }} sessions · {{ guild_voice_hours }}h)</h2>
