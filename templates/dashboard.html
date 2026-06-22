@@ -24,6 +24,10 @@
           <button onclick="retrainModel('burnout', this)" class="px-2 py-1 rounded-full cursor-pointer transition hover:brightness-125 {% if burnout_ok %}bg-green-900/40 text-green-400{% else %}bg-gray-800/40 text-gray-500{% endif %}" title="Click to retrain">
             Burnout {{ '✓' if burnout_ok else '○' }}
           </button>
+          {% set corrector_ok = ml_status.get('corrector', {}).get('trained', False) %}
+          <button onclick="retrainModel('corrector', this)" class="px-2 py-1 rounded-full cursor-pointer transition hover:brightness-125 {% if corrector_ok %}bg-purple-900/40 text-purple-400{% else %}bg-gray-800/40 text-gray-500{% endif %}" title="Admin correction feedback model">
+            Corrector {{ '✓' if corrector_ok else '○' }}
+          </button>
           {% if ml_last_train %}
           <span class="text-gray-600">Train: {{ ml_last_train[:10] }}</span>
           {% endif %}
@@ -119,15 +123,50 @@
         <p class="text-2xl font-bold {% if br.score >= 60 %}text-red-400{% elif br.score >= 25 %}text-yellow-400{% else %}text-green-400{% endif %} mt-1">{{ "%.0f"|format(br.score) }}</p>
         <p class="text-xs text-gray-600 mt-1">
           {% if br.signals %}
-            {% set sigs = br.signals.split(',') %}
-            {% for s in sigs %}
-              <span class="inline-block mr-1">{{ {'frequent_anomalies':'⚠️','volume_volatility':'📊','increasing_reversals':'🔄','voice_creep':'🎙️'}.get(s,'') }}</span>
-            {% endfor %}
+{% set sigs = br.signals.split(',') %}
+{% for s in sigs %}
+<span class="inline-block mr-1">{{ {'frequent_anomalies':'⚠️','volume_volatility':'📊','increasing_reversals':'🔄','voice_creep':'🎙️','frequent_corrections':'📝'}.get(s,'') }}</span>
+{% endfor %}
           {% endif %}
         </p>
       </div>
       {% endfor %}
     </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- ML Feedback Loop -->
+{% if ml_corrector_stats and ml_corrector_stats.status == 'trained' %}
+<div class="max-w-7xl mx-auto px-6 mb-6">
+  <div class="bg-[#111318] rounded-2xl border border-purple-900/40 p-6">
+    <h2 class="text-sm font-semibold text-purple-400 uppercase tracking-wider mb-4">🔄 Admin Correction Feedback Loop</h2>
+    <div class="grid grid-cols-4 gap-4">
+      <div>
+        <p class="text-gray-500 text-xs">Corrections Used</p>
+        <p class="text-xl font-bold text-white">{{ ml_corrector_stats.get('corrections_used', 0) }}</p>
+      </div>
+      <div>
+        <p class="text-gray-500 text-xs">R² Score (regression)</p>
+        <p class="text-xl font-bold text-cyan-400">{{ "%.3f"|format(ml_corrector_stats.get('r2_score', 0)) }}</p>
+      </div>
+      <div>
+        <p class="text-gray-500 text-xs">Direction Accuracy</p>
+        <p class="text-xl font-bold text-green-400">{{ "%.1f"|format(ml_corrector_stats.get('classifier_accuracy', 0) * 100) }}%</p>
+      </div>
+      <div>
+        <p class="text-gray-500 text-xs">Features</p>
+        <p class="text-xl font-bold text-gray-400">{{ ml_corrector_stats.get('n_features', 0) }}</p>
+      </div>
+    </div>
+    <p class="text-xs text-gray-600 mt-3">Model predicts correct score deltas from admin correction history — accuracy improves with each correction.</p>
+  </div>
+</div>
+{% elif ml_corrector_stats and ml_corrector_stats.status == 'skipped' %}
+<div class="max-w-7xl mx-auto px-6 mb-6">
+  <div class="bg-[#111318] rounded-2xl border border-gray-800/40 p-6">
+    <h2 class="text-sm font-semibold text-purple-400/60 uppercase tracking-wider mb-2">🔄 Admin Correction Feedback Loop</h2>
+    <p class="text-gray-600 text-xs">{{ ml_corrector_stats.get('reason', 'Waiting for more admin corrections...') }}</p>
   </div>
 </div>
 {% endif %}
@@ -151,8 +190,8 @@
           <span class="text-gray-600 text-xs ml-2">ID: {{ guild.guild_id }}</span>
         </div>
         <div class="flex gap-5 text-xs">
-          <span class="text-gray-400">{{ guild.member_count }} members</span>
-          <span class="text-green-400">{{ guild.online_count }} online</span>
+          <span class="text-gray-400">{{ guild_member_count_map.get(guild.guild_id, guild.member_count) }} tracked</span>
+          <span class="text-green-400">{{ guild_online_map.get(guild.guild_id, 0) }} online</span>
           <span class="text-blue-400">{{ guild.staff_count }} staff</span>
         </div>
       </a>

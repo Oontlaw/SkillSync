@@ -10,7 +10,7 @@ import json
 import numpy as np
 from datetime import datetime
 
-from ml import anomaly, forecast, burnout
+from ml import anomaly, forecast, burnout, corrector
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), 'models')
 
@@ -25,7 +25,13 @@ def train_all(days=30, min_msgs=10):
     except Exception as e:
         results['anomaly'] = {'status': 'error', 'error': str(e)}
 
-    # 2. Burnout risk
+    # 2. Score Corrector (admin correction feedback loop)
+    try:
+        results['corrector'] = corrector.train(days=days)
+    except Exception as e:
+        results['corrector'] = {'status': 'error', 'error': str(e)}
+
+    # 3. Burnout risk
     try:
         results['burnout'] = burnout.train(days=days)
     except Exception as e:
@@ -62,6 +68,7 @@ def get_model_status():
     for name, path in [
         ('anomaly', anomaly.ANOMALY_MODEL_PATH),
         ('burnout', burnout.BURNOUT_MODEL_PATH),
+        ('corrector', corrector.CORRECTOR_MODEL_PATH),
     ]:
         exists = os.path.exists(path)
         if exists:

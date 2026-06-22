@@ -155,12 +155,102 @@ async def handle_member_unban(guild, user):
         print(f'[Observer] Error in on_member_unban: {e}')
 
 
+def _is_mod_role(role):
+    """Check if a Discord role grants moderation powers."""
+    return any([
+        role.permissions.administrator,
+        role.permissions.ban_members,
+        role.permissions.kick_members,
+        role.permissions.manage_guild,
+        role.permissions.manage_roles,
+    ])
+
+
+async def _handle_role_change(before, after, guild):
+    """Detect staff role changes (promotion/demotion/retirement/reactivation)."""
+    if set(before.roles) == set(after.roles):
+        return
+
+    added = [r for r in after.roles if r not in before.roles]
+    removed = [r for r in before.roles if r not in after.roles]
+
+    added_mod = [r for r in added if _is_mod_role(r)]
+    removed_mod = [r for r in removed if _is_mod_role(r)]
+
+    if not added_mod and not removed_mod:
+        return
+
+    was_staff = any(_is_mod_role(r) for r in before.roles) or before.guild_permissions.administrator
+    is_staff = any(_is_mod_role(r) for r in after.roles) or after.guild_permissions.administrator
+    has_retired_role = any('retire' in r.name.lower() or 'emeritus' in r.name.lower() or 'inactive' in r.name.lower() for r in added + after.roles)
+
+    # Determine category
+    if not was_staff and is_staff:
+        category = 'promotion'
+    elif was_staff and not is_staff:
+        if has_retired_role:
+            category = 'retirement'
+        else:
+            category = 'demotion'
+    else:
+        category = 'other'
+
+    # Find who made the change via audit log
+    modifier_id = None
+    modifier_name = None
+    try:
+        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.member_role_update):
+            if entry.target and entry.target.id == after.id and entry.user:
+                modifier_id = entry.user.id
+                modifier_name = entry.user.name
+                break
+    except Exception as e:
+        log(f'ROLE CHANGE AUDIT LOG ERROR in {guild.name}: {e}')
+
+    # Log each changed mod role
+    for role in added_mod:
+        log(f'ROLE CHANGE: {after.name} GAINED mod role {role.name} ({category}) in {guild.name}')
+        await api_post('/observer/role-change', {
+            'guild_id': str(guild.id),
+            'member_id': str(after.id),
+            'member_name': after.name,
+            'change_type': 'added',
+            'role_id': str(role.id),
+            'role_name': role.name,
+            'change_category': category,
+            'was_staff_before': was_staff,
+            'is_staff_now': is_staff,
+            'modifier_id': str(modifier_id) if modifier_id else None,
+            'modifier_name': modifier_name,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        })
+
+    for role in removed_mod:
+        log(f'ROLE CHANGE: {after.name} LOST mod role {role.name} ({category}) in {guild.name}')
+        await api_post('/observer/role-change', {
+            'guild_id': str(guild.id),
+            'member_id': str(after.id),
+            'member_name': after.name,
+            'change_type': 'removed',
+            'role_id': str(role.id),
+            'role_name': role.name,
+            'change_category': category,
+            'was_staff_before': was_staff,
+            'is_staff_now': is_staff,
+            'modifier_id': str(modifier_id) if modifier_id else None,
+            'modifier_name': modifier_name,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        })
+
+
 async def handle_member_update(before, after):
-    """Detect timeout add/early removal."""
+    """Detect timeout add/early removal and staff role changes."""
     try:
         guild = after.guild
         if not guild:
             return
+
+        await _handle_role_change(before, after, guild)
 
         if before.timed_out_until is None and after.timed_out_until is not None:
             await asyncio.sleep(1)

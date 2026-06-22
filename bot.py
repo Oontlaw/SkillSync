@@ -1,3 +1,4 @@
+import os, sys
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -84,7 +85,12 @@ if __name__ == '__main__':
     bot.prefix_cache = prefix_cache
     bot.scan_guild = shared_scan_guild
     import asyncio
-    async def main():
-        await bot.add_cog(bot_commands.Moderation(bot))
-        await bot.start(DISCORD_TOKEN)
-    asyncio.run(main())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(bot.add_cog(bot_commands.Moderation(bot)))
+        loop.run_until_complete(bot.start(DISCORD_TOKEN))
+    except KeyboardInterrupt:
+        loop.run_until_complete(bot.close())
+    finally:
+        loop.close()

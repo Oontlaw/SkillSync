@@ -1,17 +1,51 @@
 import os
 import numpy as np
 import joblib
+from datetime import datetime, timedelta
 from sklearn.ensemble import IsolationForest
 from ml.features import all_user_feature_vectors, user_anomaly_feature_vector
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), 'models')
 ANOMALY_MODEL_PATH = os.path.join(MODELS_DIR, 'anomaly_iforest.joblib')
-ANOMALY_THRESHOLD = -0.3  # decision_function threshold for flagging
+ANOMALY_THRESHOLD = -0.3
+
+
+def _correction_features(discord_id, days=30):
+    """Return correction-derived signal: correction_count and net_delta.
+    These augment the base feature vector to flag workers whose scores
+    admins frequently override (potential anomaly signal)."""
+    from database import AdminCorrection, Worker, ScoreLog
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    w = Worker.query.filter_by(discord_id=discord_id).first()
+    if not w:
+        return np.array([0.0, 0.0])
+    corrections = AdminCorrection.query.filter(
+        AdminCorrection.worker_id == w.id,
+        AdminCorrection.created_at >= cutoff
+    ).all()
+    if not corrections:
+        return np.array([0.0, 0.0])
+    count = min(len(corrections) / 10, 1.0)
+    total_delta = sum(c.corrected_score_change - c.original_score_change for c in corrections)
+    net_delta = np.tanh(total_delta / 20)
+    return np.array([count, net_delta])
+
+
+def all_user_vectors_with_corrections(days=30, min_msgs=10):
+    """Build feature matrix augmented with correction signals."""
+    X, ids = all_user_feature_vectors(days=days, min_msgs=min_msgs)
+    if X.shape[0] == 0:
+        return X, ids
+    augs = []
+    for did in ids:
+        augs.append(_correction_features(did, days))
+    X_aug = np.concatenate([X, np.array(augs)], axis=1)
+    return X_aug, ids
 
 
 def train(min_msgs=10, days=30, contamination=0.05):
-    """Train Isolation Forest on per-user message behavior features."""
-    X, ids = all_user_feature_vectors(days=days, min_msgs=min_msgs)
+    """Train Isolation Forest on per-user message behavior + correction features."""
+    X, ids = all_user_vectors_with_corrections(days=days, min_msgs=min_msgs)
     if X.shape[0] < 5:
         return {'status': 'skipped', 'reason': f'Only {X.shape[0]} users with sufficient data'}
     model = IsolationForest(
@@ -58,7 +92,7 @@ def predict(discord_id, days=30):
 
 def scan_all(min_msgs=10, days=30):
     """Score all users and return list of anomalies found."""
-    X, ids = all_user_feature_vectors(days=days, min_msgs=min_msgs)
+    X, ids = all_user_vectors_with_corrections(days=days, min_msgs=min_msgs)
     if X.shape[0] < 5 or not os.path.exists(ANOMALY_MODEL_PATH):
         return []
     model = joblib.load(ANOMALY_MODEL_PATH)

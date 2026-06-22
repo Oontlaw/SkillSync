@@ -1,6 +1,6 @@
 import os, json
 from flask import Blueprint, render_template, session, redirect, url_for, request
-from database import db, Worker, Task, ScoreLog, AdminCorrection, MessageRecord, GuildInfo, GuildRole, GuildMember, BehavioralAnomaly, MentionRecord, AutoModRule, AutoModTrigger, PingJoinEvent, VoiceActivity, BurnoutRisk
+from database import db, Worker, Task, ScoreLog, AdminCorrection, MessageRecord, GuildInfo, GuildRole, GuildMember, BehavioralAnomaly, MentionRecord, AutoModRule, AutoModTrigger, PingJoinEvent, VoiceActivity, BurnoutRisk, RoleChangeLog
 from datetime import datetime, timedelta
 from sqlalchemy import func
 import statistics
@@ -175,8 +175,26 @@ def index():
     # Guild scan overview — only guilds the user can access AND the bot is in
     guilds = GuildInfo.query.filter(GuildInfo.guild_id.in_(accessible_ids)).order_by(GuildInfo.name).all() if accessible_ids else []
     total_guilds = len(guilds)
-    total_members_tracked = sum(g.member_count for g in guilds)
-    total_online_members = sum(g.online_count for g in guilds)
+    # Live counts from GuildMember (matches guild page data)
+    guild_member_count_map = dict(
+        db.session.query(
+            GuildMember.guild_id, func.count(GuildMember.id)
+        ).filter(
+            GuildMember.guild_id.in_(accessible_ids),
+            GuildMember.is_bot == False,
+        ).group_by(GuildMember.guild_id).all()
+    ) if accessible_ids else {}
+    total_members_tracked = sum(guild_member_count_map.values())
+    guild_online_map = dict(
+        db.session.query(
+            GuildMember.guild_id, func.count(GuildMember.id)
+        ).filter(
+            GuildMember.guild_id.in_(accessible_ids),
+            GuildMember.is_bot == False,
+            GuildMember.is_online == True
+        ).group_by(GuildMember.guild_id).all()
+    ) if accessible_ids else {}
+    total_online_members = sum(guild_online_map.values())
     total_staff_tracked = GuildMember.query.filter(
         GuildMember.is_staff == True,
         GuildMember.is_bot == False,
@@ -200,11 +218,14 @@ def index():
     # ML model status
     ml_status = ml_engine.get_model_status()
     ml_last_train = None
+    ml_corrector_stats = None
     summary_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ml', 'models', 'training_summary.json')
     if os.path.exists(summary_path):
         try:
             with open(summary_path) as f:
-                ml_last_train = json.load(f).get('trained_at', '')
+                summary = json.load(f)
+                ml_last_train = summary.get('trained_at', '')
+                ml_corrector_stats = summary.get('corrector')
         except Exception:
             pass
 
@@ -235,9 +256,12 @@ def index():
         guild_hourly=guild_hourly,
         guild_msg_counts=guild_msg_counts,
         guild_name_map={g.guild_id: g.name for g in guilds},
+        guild_online_map=guild_online_map,
+        guild_member_count_map=guild_member_count_map,
         burnout_risks=burnout_risks,
         ml_status=ml_status,
         ml_last_train=ml_last_train,
+        ml_corrector_stats=ml_corrector_stats,
     )
 
 @dashboard_bp.route('/worker/<int:worker_id>')
@@ -414,13 +438,20 @@ def worker_detail(worker_id):
         activity_consistency = None
         mod_quality = None
 
+    # Role change history
+    role_changes = []
+    if worker.discord_id:
+        role_changes = RoleChangeLog.query.filter_by(member_id=worker.discord_id)\
+            .order_by(RoleChangeLog.created_at.desc()).limit(20).all()
+
     return render_template('worker.html',
         user=session.get('user'),
         accessible_guilds=session.get('accessible_guilds', []),
         worker=worker, logs=logs, tasks=tasks, behavior=behavior, anomalies=anomalies, mention_stats=mention_stats,
         voice_stats=voice_stats,
         worker_hourly_activity=worker_hourly_activity, cumulative_score_data=cumulative_score_data,
-        activity_consistency=activity_consistency, mod_quality=mod_quality)
+        activity_consistency=activity_consistency, mod_quality=mod_quality,
+        role_changes=role_changes)
 
 
 @dashboard_bp.route('/guild/<guild_id>')
@@ -509,6 +540,10 @@ def guild_detail(guild_id):
         db.or_(BehavioralAnomaly.guild_id == None, BehavioralAnomaly.guild_id == guild_id)
     ).order_by(BehavioralAnomaly.severity.desc()).limit(10).all()
 
+    # Role change history for this guild
+    role_changes = RoleChangeLog.query.filter_by(guild_id=guild_id)\
+        .order_by(RoleChangeLog.created_at.desc()).limit(30).all()
+
     return render_template('guild.html',
         user=session.get('user'),
         accessible_guilds=session.get('accessible_guilds', []),
@@ -520,7 +555,8 @@ def guild_detail(guild_id):
         community_hourly=community_hourly, staff_hourly=staff_hourly,
         online_count=online_count, tracked_offline=tracked_offline, tracked_chatted=tracked_chatted,
         community_count=community_count, human_count=human_count, bot_count=bot_count,
-        forecast_data=forecast_data, guild_anomalies=guild_anomalies)
+        forecast_data=forecast_data, guild_anomalies=guild_anomalies,
+        role_changes=role_changes)
 
 
 

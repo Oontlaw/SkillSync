@@ -38,7 +38,7 @@ async def scan_guild(guild):
     print(f'[SkillSync] Scanning guild: {guild.name} ({guild.id})')
 
     owner_id = str(guild.owner_id) if guild.owner_id else None
-    owner_name = guild.owner.name if guild.owner else None
+    owner_name = guild.owner.name if guild.owner and guild.owner.name else 'Unknown'
 
     mod_role_ids = set()
     roles_data = []

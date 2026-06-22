@@ -8,8 +8,8 @@ from bot_core.state import (
     set_bot_start_time,
 )
 from bot_core.scanner import scan_guild, build_automod_alert_channels
-from bot_core.heartbeat import setup_heartbeat, heartbeat_status
-from bot_core.tasks import flush_all_buffers, check_reversed_actions, message_cleanup_loop, check_ping_joins
+from bot_core.heartbeat import setup_heartbeat
+from bot_core.tasks import flush_all_buffers, check_reversed_actions, message_cleanup_loop, check_ping_joins, set_bot
 from bot_core.logging import log
 
 
@@ -46,6 +46,11 @@ async def handle_ready(bot):
                 content_trust[g['guild_id']] = g.get('store_content', False)
     except Exception as e:
         print(f'[SkillSync] Could not fetch prefixes: {e}')
+
+    # Setup heartbeat early so loops can use it
+    set_bot_start_time(discord.utils.utcnow())
+    set_bot(bot)
+    await setup_heartbeat(bot)
 
     # Set bot presence with prefix info
     if bot.guilds:
@@ -104,11 +109,6 @@ async def handle_ready(bot):
                 print(f'[Restore] Loaded {len(state_data["pending_bans"])} bans, {len(state_data["pending_timeouts"])} timeouts')
     except Exception as e:
         print(f'[Restore] Could not fetch pending state: {e}')
-
-    # Setup heartbeat
-    set_bot_start_time(discord.utils.utcnow())
-    await setup_heartbeat(bot)
-    heartbeat_status.start(bot)
 
 
 async def handle_guild_join(bot, guild):

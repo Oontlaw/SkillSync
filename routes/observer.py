@@ -5,7 +5,7 @@ import math
 from collections import defaultdict
 from functools import wraps
 from flask import Blueprint, request, jsonify
-from database import db, Worker, ScoreLog, MessageRecord, GuildInfo, GuildRole, GuildMember, GuildChannel, BehavioralAnomaly, MentionRecord, AutoModRule, AutoModTrigger, PingJoinEvent, VoiceActivity, BurnoutRisk, PendingBan, PendingTimeout
+from database import db, Worker, ScoreLog, MessageRecord, GuildInfo, GuildRole, GuildMember, GuildChannel, BehavioralAnomaly, MentionRecord, AutoModRule, AutoModTrigger, PingJoinEvent, VoiceActivity, BurnoutRisk, PendingBan, PendingTimeout, RoleChangeLog
 from datetime import datetime, timedelta
 from sqlalchemy import func
 from ml import engine as ml_engine
@@ -14,6 +14,26 @@ from ml import burnout as ml_burnout
 from ml import forecast as ml_forecast
 
 observer_bp = Blueprint('observer', __name__)
+
+# ── Retrain-on-correction flag (file-based, survives reloader forks) ──
+_MODELS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ml', 'models')
+_RETRAIN_FLAG_FILE = os.path.join(_MODELS_DIR, '.retrain_requested')
+
+def _set_retrain_flag():
+    os.makedirs(_MODELS_DIR, exist_ok=True)
+    with open(_RETRAIN_FLAG_FILE, 'w') as f:
+        f.write(datetime.utcnow().isoformat())
+
+def consume_retrain_request():
+    if os.path.exists(_RETRAIN_FLAG_FILE):
+        try:
+            with open(_RETRAIN_FLAG_FILE) as f:
+                ts = f.read().strip()
+            os.remove(_RETRAIN_FLAG_FILE)
+            return ts
+        except Exception:
+            return None
+    return None
 
 # ── API Key Authentication ──
 API_KEY = os.getenv('API_KEY')
@@ -1303,11 +1323,13 @@ def scan_burnout_risks():
 @observer_bp.route('/observer/ml/retrain', methods=['POST'])
 @require_api_key
 def ml_retrain():
-    """Retrain all ML models."""
+    """Retrain all ML models (consumes any pending retrain request)."""
     data = request.json or {}
     days = int(data.get('days', 30))
     min_msgs = int(data.get('min_msgs', 10))
     results = ml_engine.train_all(days=days, min_msgs=min_msgs)
+    # Consume the correction-triggered retrain flag if present
+    consume_retrain_request()
     return jsonify(results)
 
 
@@ -1397,3 +1419,88 @@ def ml_scan_burnout():
         updated += 1
     db.session.commit()
     return jsonify({'scanned': len(flagged), 'updated': updated, 'flagged': flagged})
+
+
+@observer_bp.route('/observer/ml/request-retrain', methods=['POST'])
+@require_api_key
+def ml_request_retrain():
+    """Signal that a correction-feedback retrain is needed."""
+    _set_retrain_flag()
+    return jsonify({'status': 'retrain_requested', 'at': datetime.utcnow().isoformat()})
+
+
+@observer_bp.route('/observer/ml/pending-retrain', methods=['GET'])
+@require_api_key
+def ml_pending_retrain():
+    """Check if a correction-triggered retrain is pending."""
+    if os.path.exists(_RETRAIN_FLAG_FILE):
+        try:
+            with open(_RETRAIN_FLAG_FILE) as f:
+                ts = f.read().strip()
+            return jsonify({'pending': True, 'requested_at': ts})
+        except Exception:
+            pass
+    return jsonify({'pending': False})
+
+
+@observer_bp.route('/observer/role-change', methods=['POST'])
+@require_api_key
+def log_role_change():
+    """Log a staff role change (promotion/demotion/retirement) and award points."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({'error': 'No JSON payload'}), 400
+
+    ok, err = validate_payload(data, ['guild_id', 'member_id', 'member_name', 'change_type', 'role_id', 'role_name', 'change_category'])
+    if not ok:
+        return jsonify({'error': err}), 400
+
+    record = RoleChangeLog(
+        guild_id=sanitize_str(data['guild_id'], 50),
+        member_id=sanitize_str(data['member_id'], 50),
+        member_name=sanitize_str(data['member_name'], 100),
+        change_type=sanitize_str(data['change_type'], 20),
+        role_id=sanitize_str(data['role_id'], 50),
+        role_name=sanitize_str(data['role_name'], 100),
+        change_category=sanitize_str(data['change_category'], 30),
+        was_staff_before=bool(data.get('was_staff_before', False)),
+        is_staff_now=bool(data.get('is_staff_now', False)),
+        modifier_id=sanitize_str(data.get('modifier_id'), 50),
+        modifier_name=sanitize_str(data.get('modifier_name'), 100),
+    )
+    db.session.add(record)
+
+    # Award points to the modifier (staff who changed the role)
+    modifier_id = data.get('modifier_id')
+    category = data.get('change_category')
+    points_awarded = 0
+    reason = None
+
+    if modifier_id:
+        modifier = Worker.query.filter_by(discord_id=str(modifier_id)).first()
+        if modifier:
+            if category == 'promotion':
+                points_awarded = 5
+                reason = f'Promoted {data["member_name"]} to staff ({data["role_name"]})'
+            elif category == 'demotion':
+                points_awarded = 3
+                reason = f'Demoted {data["member_name"]} from staff ({data["role_name"]})'
+            elif category == 'retirement':
+                points_awarded = 2
+                reason = f'Retired {data["member_name"]} from staff ({data["role_name"]})'
+            elif category == 'other':
+                points_awarded = 1
+                reason = f'Role change for {data["member_name"]}: {data["role_name"]}'
+
+            if points_awarded and reason:
+                log = ScoreLog(
+                    worker_id=modifier.id,
+                    change=points_awarded,
+                    reason=reason,
+                    source='discord',
+                    guild_id=sanitize_str(data['guild_id'], 50),
+                )
+                db.session.add(log)
+
+    db.session.commit()
+    return jsonify({'status': 'logged', 'id': record.id, 'points_awarded': points_awarded})

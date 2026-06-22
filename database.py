@@ -359,3 +359,25 @@ class PendingTimeout(db.Model):
 
     def __repr__(self):
         return f'<PendingTimeout {self.mod_name} until {self.until}>'
+
+
+class RoleChangeLog(db.Model):
+    """Tracks staff role changes: promotions, demotions, retirement, reactivation."""
+    __tablename__ = 'role_change_log'
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
+    member_id = db.Column(db.String(50), nullable=False, index=True)
+    member_name = db.Column(db.String(100), nullable=False)
+    change_type = db.Column(db.String(20), nullable=False)  # added / removed
+    role_id = db.Column(db.String(50), nullable=False)
+    role_name = db.Column(db.String(100), nullable=False)
+    change_category = db.Column(db.String(30), nullable=False)  # promotion / demotion / retirement / reactivation / other
+    was_staff_before = db.Column(db.Boolean, default=False)
+    is_staff_now = db.Column(db.Boolean, default=False)
+    modifier_id = db.Column(db.String(50), nullable=True)
+    modifier_name = db.Column(db.String(100), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return f'<RoleChangeLog {self.member_name} {self.change_category} in {self.guild_id}>'

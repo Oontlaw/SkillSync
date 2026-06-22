@@ -62,7 +62,7 @@ member_presence_buffer = []
 pending_mentions = {}
 mention_buffer = []
 
-# ── ML retrain counter ──
+# ── ML retrain counter (weekly schedule) ──
 ml_retrain_counter = 0
 
 def set_ml_retrain_counter(val):
@@ -73,6 +73,24 @@ def inc_ml_retrain_counter():
     global ml_retrain_counter
     ml_retrain_counter += 1
     return ml_retrain_counter
+
+# ── Retrain-on-correction flag ──
+_correction_retrain_needed = False
+_correction_retrain_count = 0
+
+def request_retrain():
+    """Signal that a correction-feedback retrain is needed (called after admin correction)."""
+    global _correction_retrain_needed
+    _correction_retrain_needed = True
+
+def consume_retrain_request():
+    """Check and clear the retrain flag. Returns True if retrain was requested."""
+    global _correction_retrain_needed, _correction_retrain_count
+    if _correction_retrain_needed:
+        _correction_retrain_needed = False
+        _correction_retrain_count += 1
+        return True
+    return False
 
 
 async def flush_message_buffer():

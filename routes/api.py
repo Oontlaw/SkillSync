@@ -1,3 +1,4 @@
+import os, requests
 from functools import wraps
 from flask import Blueprint, request, jsonify, session
 from database import db, Worker, Task, ScoreLog
@@ -137,6 +138,19 @@ def correct_score():
         reason=data.get('reason', ''),
         admin_name=data.get('admin_name', 'Unknown')
     )
+
+    # Fire-and-forget: signal ML retrain (admin correction → feedback loop)
+    api_key = os.getenv('API_KEY', '')
+    try:
+        requests.post(
+            f'http://localhost:5000/api/observer/ml/request-retrain',
+            headers={'Authorization': f'Bearer {api_key}'},
+            json={'trigger': 'admin_correction'},
+            timeout=2
+        )
+    except Exception:
+        pass
+
     return jsonify(result)
 
 
