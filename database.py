@@ -328,3 +328,34 @@ class AutoModTrigger(db.Model):
 
     def __repr__(self):
         return f'<AutoModTrigger {self.rule_name} -> {self.user_name} in #{self.channel_name}>'
+
+
+class PendingBan(db.Model):
+    __tablename__ = 'pending_bans'
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
+    user_id = db.Column(db.String(50), nullable=False)
+    banner_id = db.Column(db.String(50), nullable=False)
+    banner_name = db.Column(db.String(100), nullable=False)
+    user_name = db.Column(db.String(100), nullable=False)
+    reason = db.Column(db.String(300), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<PendingBan {self.user_name} by {self.banner_name}>'
+
+
+class PendingTimeout(db.Model):
+    __tablename__ = 'pending_timeouts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
+    user_id = db.Column(db.String(50), nullable=False)
+    mod_id = db.Column(db.String(50), nullable=False)
+    mod_name = db.Column(db.String(100), nullable=False)
+    until = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<PendingTimeout {self.mod_name} until {self.until}>'

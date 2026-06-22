@@ -27,12 +27,8 @@ app.register_blueprint(observer_bp, url_prefix='/api')
 with app.app_context():
     if os.path.isdir(migrate.directory):
         from flask_migrate import upgrade
-        try:
-            upgrade()
-            print("[OK] Database migrations applied.")
-        except Exception as e:
-            print(f"[WARN] Migration failed ({e}), creating tables fresh.")
-            db.create_all()
+        upgrade()
+        print("[OK] Database migrations applied.")
     else:
         db.create_all()
         print("[OK] Database tables created.")

@@ -1,5 +1,4 @@
 import os, json
-import requests
 from flask import Blueprint, render_template, session, redirect, url_for, request
 from database import db, Worker, Task, ScoreLog, AdminCorrection, MessageRecord, GuildInfo, GuildRole, GuildMember, BehavioralAnomaly, MentionRecord, AutoModRule, AutoModTrigger, PingJoinEvent, VoiceActivity, BurnoutRisk
 from datetime import datetime, timedelta
@@ -11,7 +10,6 @@ from ml import burnout as ml_burnout
 
 dashboard_bp = Blueprint('dashboard', __name__)
 
-DISCORD_API = 'https://discord.com/api/v10'
 PERM_ADMINISTRATOR = 1 << 3
 PERM_MANAGE_GUILD = 1 << 5
 
@@ -37,32 +35,10 @@ def get_accessible_guild_ids():
 
 
 def refresh_accessible_guilds():
-    """Always re-fetch the user's guilds from Discord API and cross-reference with bot's GuildInfo.
-    Falls back to cross-referencing session guilds with GuildInfo if the API call fails."""
+    """Cross-reference session guilds with current bot GuildInfo."""
     bot_guild_ids = set(
         g.guild_id for g in GuildInfo.query.with_entities(GuildInfo.guild_id).all()
     )
-
-    token = session.get('discord_token')
-    if token:
-        try:
-            resp = requests.get(f'{DISCORD_API}/users/@me/guilds',
-                headers={'Authorization': f'Bearer {token}'}, timeout=10)
-            if resp.ok:
-                user_guilds = resp.json()
-                accessible = []
-                for g in user_guilds:
-                    perms = int(g.get('permissions', '0'))
-                    has_perm = perms & PERM_ADMINISTRATOR or perms & PERM_MANAGE_GUILD
-                    if has_perm and g['id'] in bot_guild_ids:
-                        accessible.append({'id': g['id'], 'name': g['name']})
-                session['accessible_guilds'] = accessible
-                session.modified = True
-                return
-        except Exception as e:
-            print(f'[Dashboard] Guild refresh failed: {e}')
-
-    # Fallback: cross-reference current session guilds with GuildInfo
     current = session.get('accessible_guilds', [])
     filtered = [g for g in current if g['id'] in bot_guild_ids]
     if filtered != current:
@@ -114,8 +90,7 @@ def index():
                 'score': pg.score
             })
 
-    workers = Worker.query.order_by(Worker.score.desc()).all()
-    total_workers = len(workers)
+    total_workers = Worker.query.count()
     total_tasks = Task.query.count()
     total_corrections = AdminCorrection.query.count()
     total_moderation_actions = ScoreLog.query.filter(ScoreLog.source == 'discord')
@@ -273,6 +248,7 @@ def worker_detail(worker_id):
         return redirect_resp
 
     worker = Worker.query.get_or_404(worker_id)
+    worker.score = db.session.query(func.sum(ScoreLog.change)).filter(ScoreLog.worker_id == worker_id).scalar() or 0.0
     logs = ScoreLog.query.filter_by(worker_id=worker_id).order_by(ScoreLog.created_at.desc()).all()
     tasks = Task.query.filter_by(worker_id=worker_id).order_by(Task.assigned_at.desc()).all()
 

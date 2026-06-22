@@ -57,7 +57,7 @@ def callback():
     access_token = token_data['access_token']
 
     try:
-        user_resp = requests.get(f'{DISCORD_API}/users/@me', headers=headers, timeout=10)
+        user_resp = requests.get(f'{DISCORD_API}/users/@me', headers={'Authorization': f'Bearer {access_token}'}, timeout=10)
         user_resp.raise_for_status()
         user = user_resp.json()
     except Exception as e:
@@ -65,7 +65,7 @@ def callback():
         return 'Failed to fetch user info.', 400
 
     try:
-        guilds_resp = requests.get(f'{DISCORD_API}/users/@me/guilds', headers=headers, timeout=10)
+        guilds_resp = requests.get(f'{DISCORD_API}/users/@me/guilds', headers={'Authorization': f'Bearer {access_token}'}, timeout=10)
         guilds_resp.raise_for_status()
         guilds = guilds_resp.json()
     except Exception as e:
@@ -91,7 +91,6 @@ def callback():
         'name': user.get('global_name') or user['username'],
     }
     session['accessible_guilds'] = accessible
-    session['discord_token'] = access_token
 
     return redirect(url_for('dashboard.index'))
 

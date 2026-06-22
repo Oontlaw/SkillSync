@@ -1,5 +1,6 @@
 from database import db, ScoreLog, Worker
 from datetime import datetime
+from sqlalchemy import func
 
 # --- Point values ---
 POINTS = {
@@ -12,6 +13,22 @@ POINTS = {
     'community_rule_break': -8,
     'community_moderation_action': 3,
 }
+
+
+def _compute_score(worker_id, guild_id=None):
+    """Compute total score from ScoreLog, optionally filtered by guild."""
+    q = db.session.query(func.sum(ScoreLog.change)).filter(ScoreLog.worker_id == worker_id)
+    if guild_id:
+        q = q.filter(ScoreLog.guild_id == guild_id)
+    return q.scalar() or 0.0
+
+
+def _compute_all_scores(guild_id=None):
+    """Return dict of {worker_id: score} from ScoreLog."""
+    q = db.session.query(ScoreLog.worker_id, func.sum(ScoreLog.change).label('total'))
+    if guild_id:
+        q = q.filter(ScoreLog.guild_id == guild_id)
+    return {r.worker_id: float(r.total) for r in q.group_by(ScoreLog.worker_id).all()}
 
 
 def award_points(worker_id, reason_key, source='system', custom_points=None, note=None):
@@ -27,8 +44,6 @@ def award_points(worker_id, reason_key, source='system', custom_points=None, not
     points = custom_points if custom_points is not None else POINTS.get(reason_key, 0)
     reason_text = note or reason_key.replace('_', ' ').title()
 
-    worker.score += points
-
     log = ScoreLog(
         worker_id=worker_id,
         change=points,
@@ -42,7 +57,7 @@ def award_points(worker_id, reason_key, source='system', custom_points=None, not
     return {
         'worker': worker.name,
         'change': points,
-        'new_score': worker.score,
+        'new_score': _compute_score(worker_id),
         'reason': reason_text
     }
 
@@ -58,11 +73,8 @@ def admin_correction(worker_id, original_change, corrected_change, reason, admin
     if not worker:
         return {'error': 'Worker not found'}
 
-    # Reverse original change and apply corrected one
     difference = corrected_change - original_change
-    worker.score += difference
 
-    # Log the correction
     log = ScoreLog(
         worker_id=worker_id,
         change=difference,
@@ -86,14 +98,22 @@ def admin_correction(worker_id, original_change, corrected_change, reason, admin
     return {
         'worker': worker.name,
         'adjustment': difference,
-        'new_score': worker.score,
+        'new_score': _compute_score(worker_id),
         'corrected_by': admin_name
     }
 
 
-def get_leaderboard(limit=10):
-    """Return top workers by score."""
-    return Worker.query.order_by(Worker.score.desc()).limit(limit).all()
+def get_leaderboard(limit=10, guild_id=None):
+    """Return top workers by score computed from ScoreLog."""
+    scores = _compute_all_scores(guild_id=guild_id)
+    sorted_workers = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:limit]
+    result = []
+    for wid, total in sorted_workers:
+        w = Worker.query.get(wid)
+        if w:
+            w.score = total  # set computed on the fly
+            result.append(w)
+    return result
 
 
 def get_worker_history(worker_id):

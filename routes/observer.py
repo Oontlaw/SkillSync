@@ -102,7 +102,6 @@ def log_action():
     points = points_map.get(action_type, 0)
 
     if worker and points:
-        worker.score += points
         log = ScoreLog(
             worker_id=worker.id,
             change=points,
@@ -112,6 +111,30 @@ def log_action():
             guild_id=sanitize_str(data.get('guild_id'), 50),
         )
         db.session.add(log)
+
+        # Persist pending state for reversal tracking
+        gid = sanitize_str(data.get('guild_id'), 50)
+        if action_type == 'ban_issued' and discord_id and gid:
+            existing = PendingBan.query.filter_by(guild_id=gid).first()
+            if not existing:
+                db.session.add(PendingBan(
+                    guild_id=gid,
+                    user_id=sanitize_str(data.get('target_id', ''), 50),
+                    banner_id=discord_id,
+                    banner_name=staff_name,
+                    user_name=target or 'Unknown',
+                    reason=reason,
+                ))
+        elif action_type == 'timeout_issued' and discord_id and gid:
+            db.session.add(PendingTimeout(
+                guild_id=gid,
+                user_id=sanitize_str(data.get('target_id', ''), 50),
+                mod_id=discord_id,
+                mod_name=staff_name,
+                until=datetime.utcnow() + timedelta(hours=1) if data.get('duration_minutes') else None,
+            ))
+        elif action_type == 'ban_confirmed':
+            PendingBan.query.filter_by(guild_id=gid).delete()
         db.session.commit()
 
     print(f'[Observer API] Action logged: {action_type} by {staff_name} on {target}')
@@ -165,11 +188,17 @@ def log_flag():
             'timeout_reversed': -8,
         }
         points = deduction_map.get(action_type, -5)
-        worker.score += points
 
         note = flag_reason
         if hours:
             note += f' ({hours:.1f} hours later)'
+
+        # Clean up pending state on reversal
+        gid = sanitize_str(data.get('guild_id'), 50)
+        if action_type == 'ban_reversed' and gid:
+            PendingBan.query.filter_by(guild_id=gid).delete()
+        elif action_type == 'timeout_reversed' and gid:
+            PendingTimeout.query.filter_by(guild_id=gid).delete()
 
         log = ScoreLog(
             worker_id=worker.id,
@@ -177,7 +206,7 @@ def log_flag():
             reason=f'[Discord] FLAG: {note} | Target: {target} in {guild}',
             source='discord',
             admin_correction=False,
-            guild_id=sanitize_str(data.get('guild_id'), 50),
+            guild_id=gid,
         )
         db.session.add(log)
         db.session.commit()
@@ -211,7 +240,6 @@ def log_warn():
     ).first() if mod_name else None
 
     if worker:
-        worker.score += 3
         log = ScoreLog(
             worker_id=worker.id,
             change=3,
@@ -258,7 +286,6 @@ def log_activity():
     if count % 20 == 0:
         worker = Worker.query.filter_by(discord_id=discord_id).first()
         if worker:
-            worker.score += 1
             log = ScoreLog(
                 worker_id=worker.id,
                 change=1,
@@ -326,6 +353,33 @@ def get_staff_activity():
     return jsonify(summary)
 
 
+@observer_bp.route('/observer/pending-state', methods=['GET'])
+@require_api_key
+def get_pending_state():
+    """Return all pending bans and timeouts for bot startup recovery."""
+    bans = PendingBan.query.all()
+    timeouts = PendingTimeout.query.all()
+    return jsonify({
+        'pending_bans': [{
+            'guild_id': b.guild_id,
+            'user_id': b.user_id,
+            'banner_id': b.banner_id,
+            'banner_name': b.banner_name,
+            'user_name': b.user_name,
+            'reason': b.reason,
+            'timestamp': b.created_at.isoformat() if b.created_at else None
+        } for b in bans],
+        'pending_timeouts': [{
+            'guild_id': t.guild_id,
+            'user_id': t.user_id,
+            'mod_id': t.mod_id,
+            'mod_name': t.mod_name,
+            'until': t.until.isoformat() if t.until else None,
+            'timestamp': t.created_at.isoformat() if t.created_at else None
+        } for t in timeouts]
+    })
+
+
 # ─────────────────────────────────────────────
 # BEHAVIORAL MESSAGE LOGGING (Community Engine)
 # ─────────────────────────────────────────────
@@ -343,19 +397,29 @@ def log_messages():
 
     messages = data if isinstance(data, list) else [data]
 
+    # Determine which guilds allow content storage
+    guild_ids = set(sanitize_str(m.get('guild_id', ''), 50) for m in messages if m.get('guild_id'))
+    content_ok = set()
+    if guild_ids:
+        rows = GuildInfo.query.with_entities(GuildInfo.guild_id, GuildInfo.store_content).filter(GuildInfo.guild_id.in_(guild_ids)).all()
+        content_ok = {r.guild_id for r in rows if r.store_content}
+
     for msg in messages:
         ok, err = validate_payload(msg, ['discord_id'])
         if not ok:
             continue
 
+        gid = sanitize_str(msg.get('guild_id', ''), 50)
+        content = sanitize_str(msg.get('content'), 2000) if msg.get('content') and gid in content_ok else None
+
         record = MessageRecord(
             discord_id=sanitize_str(msg['discord_id'], 50),
             name=sanitize_str(msg.get('name', 'Unknown'), 100),
-            guild_id=sanitize_str(msg.get('guild_id', ''), 50),
+            guild_id=gid,
             channel_name=sanitize_str(msg.get('channel', 'unknown'), 100),
             message_length=msg.get('length', 0),
             is_public_channel=msg.get('is_public', True),
-            message_content=sanitize_str(msg.get('content'), 2000) if msg.get('content') else None,
+            message_content=content,
             hour_of_day=msg.get('hour'),
             day_of_week=msg.get('day'),
         )

@@ -6,6 +6,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 import bot_commands
+from database import PendingBan, PendingTimeout
 
 # File-based logging (persists across process deaths)
 LOG_FILE = os.path.join(os.environ.get('TEMP', 'C:\\Temp'), 'skillsync_bot.log')
@@ -812,6 +813,38 @@ async def on_ready():
         await scan_guild(guild)
     # Load AutoMod alert channels after scan completes
     build_automod_alert_channels()
+    # Reload pending state from API for restart resilience
+    try:
+        resp = await asyncio.to_thread(requests.get, f'{SKILLSYNC_API}/observer/pending-state',
+                                       headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
+        if resp.ok:
+            state = resp.json()
+            for b in state.get('pending_bans', []):
+                key = (int(b['guild_id']), int(b['user_id'])) if b['guild_id'] and b['user_id'] else None
+                if key:
+                    pending_bans[key] = {
+                        'banner_id': b['banner_id'],
+                        'banner_name': b['banner_name'],
+                        'user_name': b['user_name'],
+                        'guild_id': int(b['guild_id']),
+                        'guild_name': '',
+                        'reason': b.get('reason'),
+                        'timestamp': datetime.fromisoformat(b['timestamp']) if b.get('timestamp') else datetime.now(timezone.utc),
+                    }
+            for t in state.get('pending_timeouts', []):
+                key = (int(t['guild_id']), int(t['user_id'])) if t['guild_id'] and t['user_id'] else None
+                if key:
+                    pending_timeouts[key] = {
+                        'mod_id': t['mod_id'],
+                        'mod_name': t['mod_name'],
+                        'until': datetime.fromisoformat(t['until']) if t.get('until') else None,
+                        'timestamp': datetime.fromisoformat(t['timestamp']) if t.get('timestamp') else datetime.now(timezone.utc),
+                    }
+            if state.get('pending_bans') or state.get('pending_timeouts'):
+                log(f'Restored {len(state["pending_bans"])} pending bans, {len(state["pending_timeouts"])} pending timeouts from DB')
+                print(f'[Restore] Loaded {len(state["pending_bans"])} bans, {len(state["pending_timeouts"])} timeouts')
+    except Exception as e:
+        print(f'[Restore] Could not fetch pending state: {e}')
     # Setup heartbeat
     bot_start_time = discord.utils.utcnow()
     await setup_heartbeat()

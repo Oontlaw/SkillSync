@@ -22,9 +22,12 @@ def login_required(f):
 @login_required
 def get_workers():
     workers = Worker.query.all()
+    from database import ScoreLog
+    from sqlalchemy import func
+    scores = dict(db.session.query(ScoreLog.worker_id, func.sum(ScoreLog.change)).group_by(ScoreLog.worker_id).all())
     return jsonify([{
         'id': w.id, 'name': w.name, 'email': w.email,
-        'score': w.score, 'role': w.role, 'discord_id': w.discord_id
+        'score': float(scores.get(w.id, 0)), 'role': w.role, 'discord_id': w.discord_id
     } for w in workers])
 
 
