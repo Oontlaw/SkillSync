@@ -60,7 +60,7 @@ VOICE_BUFFER_LIMIT = 30
 # ── Heartbeat state ──
 heartbeat_channel_id = None
 bot_start_time = None
-HEARTBEAT_INTERVAL_MINUTES = 10
+HEARTBEAT_INTERVAL_MINUTES = 5
 
 # ── Active @everyone/@here pings: { guild_id: {...} } ──
 # Tracks moderator pings within the 20-min observation window.
@@ -846,6 +846,7 @@ async def on_ready():
     except Exception as e:
         print(f'[Restore] Could not fetch pending state: {e}')
     # Setup heartbeat
+    global bot_start_time
     bot_start_time = discord.utils.utcnow()
     await setup_heartbeat()
     heartbeat_loop.start()
@@ -1443,43 +1444,46 @@ async def check_ping_joins():
 
 @tasks.loop(minutes=HEARTBEAT_INTERVAL_MINUTES)
 async def heartbeat_loop():
-    """Post bot status to heartbeat channel every 10 minutes. First run delayed to avoid 0 uptime."""
+    """Post bot status to heartbeat channel every 5 minutes."""
+    try:
+        global heartbeat_channel_id
+        if not heartbeat_channel_id:
+            return
+        channel = bot.get_channel(heartbeat_channel_id)
+        if not channel:
+            log(f'Heartbeat channel {heartbeat_channel_id} not found')
+            heartbeat_channel_id = None
+            return
+        uptime = datetime.now(timezone.utc) - bot_start_time if bot_start_time else timedelta()
+        hours, remainder = divmod(int(uptime.total_seconds()), 3600)
+        minutes = remainder // 60
+        msg_count = "?"
+        member_count = "?"
+        try:
+            resp = await asyncio.to_thread(requests.get, f'{SKILLSYNC_API}/observer/staff-activity',
+                                           headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
+            if resp.ok:
+                data = resp.json()
+                msg_count = str(data.get('total_messages', '?'))
+                member_count = str(data.get('total_members', '?'))
+        except Exception as e:
+            print(f'[Heartbeat] Failed to fetch stats: {e}')
+        names = ', '.join(g.name for g in bot.guilds)
+        await channel.send(
+            f'🟢 **Bot Alive** | Uptime: `{hours}h {minutes}m` | '
+            f'Servers: `{len(bot.guilds)}` | '
+            f'Messages: `{msg_count}` | '
+            f'Members: `{member_count}` | '
+            f'``{names}``'
+        )
+        log(f'Heartbeat posted to #{channel.name}')
+    except Exception as e:
+        log(f'Heartbeat error: {e}')
+        print(f'[Heartbeat] Error: {e}')
 
 @heartbeat_loop.before_loop
 async def before_heartbeat():
     await asyncio.sleep(60)
-    global heartbeat_channel_id
-    if not heartbeat_channel_id:
-        return
-    channel = bot.get_channel(heartbeat_channel_id)
-    if not channel:
-        log(f'Heartbeat channel {heartbeat_channel_id} not found')
-        heartbeat_channel_id = None
-        return
-    uptime = datetime.now(timezone.utc) - bot_start_time if bot_start_time else timedelta()
-    hours, remainder = divmod(int(uptime.total_seconds()), 3600)
-    minutes = remainder // 60
-    # Fetch stats from API
-    msg_count = "?"
-    member_count = "?"
-    try:
-        resp = await asyncio.to_thread(requests.get, f'{SKILLSYNC_API}/observer/staff-activity',
-                                       headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
-        if resp.ok:
-            data = resp.json()
-            msg_count = str(data.get('total_messages', '?'))
-            member_count = str(data.get('total_members', '?'))
-    except Exception as e:
-        print(f'[Heartbeat] Failed to fetch stats: {e}')
-    names = ', '.join(g.name for g in bot.guilds)
-    await channel.send(
-        f'🟢 **Bot Alive** | Uptime: `{hours}h {minutes}m` | '
-        f'Servers: `{len(bot.guilds)}` | '
-        f'Messages: `{msg_count}` | '
-        f'Members: `{member_count}` | '
-        f'``{names}``'
-    )
-    log(f'Heartbeat posted to #{channel.name}')
 
 
 if __name__ == '__main__':
