@@ -24,7 +24,10 @@ def _redirect_uri():
 @auth_bp.route('/login')
 def login():
     state = secrets.token_hex(16)
-    session['oauth_state'] = state
+    states = session.get('oauth_states', [])
+    states.append(state)
+    session['oauth_states'] = states[-10:]
+    session.modified = True
     uri = _redirect_uri()
     return redirect(
         f'{DISCORD_API}/oauth2/authorize?client_id={CLIENT_ID}'
@@ -37,9 +40,12 @@ def login():
 @auth_bp.route('/callback')
 def callback():
     returned_state = request.args.get('state')
-    stored_state = session.pop('oauth_state', None)
-    if not returned_state or returned_state != stored_state:
+    stored_states = session.get('oauth_states', [])
+    if not returned_state or returned_state not in stored_states:
         return 'Invalid state parameter. Possible CSRF attack.', 403
+    stored_states = [s for s in stored_states if s != returned_state]
+    session['oauth_states'] = stored_states
+    session.modified = True
 
     code = request.args.get('code')
     if not code:
