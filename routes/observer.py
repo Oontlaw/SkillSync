@@ -17,6 +17,8 @@ observer_bp = Blueprint('observer', __name__)
 
 # ── API Key Authentication ──
 API_KEY = os.getenv('API_KEY')
+if not API_KEY:
+    raise RuntimeError('API_KEY environment variable is not set — all requests would be rejected')
 
 def require_api_key(f):
     """Requires Bearer token matching API_KEY env var."""
@@ -115,7 +117,8 @@ def log_action():
         # Persist pending state for reversal tracking
         gid = sanitize_str(data.get('guild_id'), 50)
         if action_type == 'ban_issued' and discord_id and gid:
-            existing = PendingBan.query.filter_by(guild_id=gid).first()
+            target_id = sanitize_str(data.get('target_id', ''), 50)
+            existing = PendingBan.query.filter_by(guild_id=gid, user_id=target_id).first()
             if not existing:
                 db.session.add(PendingBan(
                     guild_id=gid,
@@ -126,15 +129,16 @@ def log_action():
                     reason=reason,
                 ))
         elif action_type == 'timeout_issued' and discord_id and gid:
+            duration_minutes = int(data.get('duration_minutes', 60))
             db.session.add(PendingTimeout(
                 guild_id=gid,
                 user_id=sanitize_str(data.get('target_id', ''), 50),
                 mod_id=discord_id,
                 mod_name=staff_name,
-                until=datetime.utcnow() + timedelta(hours=1) if data.get('duration_minutes') else None,
+                until=datetime.utcnow() + timedelta(minutes=duration_minutes) if data.get('duration_minutes') else None,
             ))
         elif action_type == 'ban_confirmed':
-            PendingBan.query.filter_by(guild_id=gid).delete()
+            PendingBan.query.filter_by(guild_id=gid, user_id=sanitize_str(data.get('target_id', ''), 50)).delete()
         db.session.commit()
 
     print(f'[Observer API] Action logged: {action_type} by {staff_name} on {target}')
@@ -305,9 +309,16 @@ def log_activity():
 def confirm_action():
     """
     Confirms a ban stood for 48+ hours (valid moderation action).
-    Already awarded points at ban_issued — this just logs confirmation.
+    Removes the matching PendingBan row from the database.
     """
-    data = request.json
+    data = request.json or {}
+    guild_id = sanitize_str(data.get('guild_id'), 50)
+    target_id = sanitize_str(data.get('target_id'), 50)
+    if guild_id and target_id:
+        deleted = PendingBan.query.filter_by(guild_id=guild_id, user_id=target_id).delete()
+        db.session.commit()
+        if deleted:
+            print(f'[Observer API] PendingBan deleted: {target_id} in {guild_id}')
     print(f'[Observer API] Confirmed: {data.get("action_type")} by {data.get("staff_name")} on {data.get("target")}')
     return jsonify({'message': 'Action confirmed as valid'}), 200
 
@@ -315,19 +326,25 @@ def confirm_action():
 @observer_bp.route('/observer/automod-trigger', methods=['POST'])
 @require_api_key
 def log_automod_trigger():
-    """Log an AutoMod trigger event from alert channel parsing."""
+    """Log an AutoMod trigger event from alert channel parsing.
+    Content snippet is only stored if the guild has store_content enabled."""
     data = request.json
     if not data:
         return jsonify({'error': 'No data provided'}), 400
+
+    gid = sanitize_str(data.get('guild_id'), 50)
+    guild = GuildInfo.query.filter_by(guild_id=gid).first() if gid else None
+    store_ok = guild is not None and guild.store_content
+
     trigger = AutoModTrigger(
-        guild_id=sanitize_str(data.get('guild_id'), 50),
+        guild_id=gid,
         rule_id=sanitize_str(data.get('rule_id'), 50),
         rule_name=sanitize_str(data.get('rule_name'), 200),
         user_id=sanitize_str(data.get('user_id'), 50),
         user_name=sanitize_str(data.get('user_name'), 100),
         channel_id=sanitize_str(data.get('channel_id'), 50),
         channel_name=sanitize_str(data.get('channel_name'), 100),
-        content_snippet=sanitize_str(data.get('content_snippet'), 500),
+        content_snippet=sanitize_str(data.get('content_snippet'), 500) if store_ok else None,
         action_taken=sanitize_str(data.get('action_taken'), 100),
     )
     db.session.add(trigger)
@@ -410,7 +427,7 @@ def log_messages():
             continue
 
         gid = sanitize_str(msg.get('guild_id', ''), 50)
-        content = sanitize_str(msg.get('content'), 2000) if msg.get('content') and gid in content_ok else None
+        content = sanitize_str(msg.get('content'), 2000) if msg.get('content') and gid in content_ok and msg.get('is_public', True) else None
 
         record = MessageRecord(
             discord_id=sanitize_str(msg['discord_id'], 50),
@@ -544,17 +561,22 @@ def user_analytics(discord_id):
 @observer_bp.route('/observer/analytics', methods=['GET'])
 @require_api_key
 def all_analytics():
-    """Returns overall behavioral analytics across all users."""
-    total_messages = MessageRecord.query.count()
-    unique_users = db.session.query(MessageRecord.discord_id).distinct().count()
+    """Returns overall behavioral analytics, optionally filtered by guild_id."""
+    guild_ids = request.args.getlist('guild_id')
+    base = MessageRecord.query
+    if guild_ids:
+        base = base.filter(MessageRecord.guild_id.in_(guild_ids))
 
-    top_users = db.session.query(
+    total_messages = base.count()
+    unique_users = base.with_entities(MessageRecord.discord_id).distinct().count()
+
+    top_users = base.with_entities(
         MessageRecord.discord_id,
         MessageRecord.name,
         func.count(MessageRecord.id).label('count')
     ).group_by(MessageRecord.discord_id, MessageRecord.name).order_by(func.count(MessageRecord.id).desc()).limit(10).all()
 
-    hourly_all = db.session.query(
+    hourly_all = base.with_entities(
         MessageRecord.hour_of_day,
         func.count(MessageRecord.id).label('count')
     ).group_by(MessageRecord.hour_of_day).order_by(MessageRecord.hour_of_day).all()
@@ -944,24 +966,29 @@ def detect_anomalies_for_user(discord_id, name=None):
     if len(all_msgs) < 10:
         return []
 
-    # ── Baseline: all messages ──
-    lengths = [m.message_length for m in all_msgs if m.message_length]
-    hours = [m.hour_of_day for m in all_msgs if m.hour_of_day is not None]
+    # ── Baseline: messages older than 24h ──
+    cutoff = now - timedelta(hours=24)
+    baseline_msgs = [m for m in all_msgs if m.created_at < cutoff]
+    lengths = [m.message_length for m in baseline_msgs if m.message_length]
+    hours = [m.hour_of_day for m in baseline_msgs if m.hour_of_day is not None]
 
     baseline_avg_len = sum(lengths) / len(lengths) if lengths else 0
     baseline_std_len = math.sqrt(sum((x - baseline_avg_len) ** 2 for x in lengths) / len(lengths)) if len(lengths) > 1 else 0
     active_hours = set(hours)
 
     # Daily baseline
-    days_span = max(1, (all_msgs[-1].created_at - all_msgs[0].created_at).days or 1)
-    daily_avg = len(all_msgs) / days_span
+    if baseline_msgs:
+        days_span = max(1, (baseline_msgs[-1].created_at - baseline_msgs[0].created_at).days or 1)
+        daily_avg = len(baseline_msgs) / days_span
+    else:
+        days_span = 1
+        daily_avg = 0
     # Approximate daily std from count variance across hours
     hour_counts = defaultdict(int)
     for h in hours:
         hour_counts[h] += 1
 
     # ── Recent: last 24h ──
-    cutoff = now - timedelta(hours=24)
     recent = [m for m in all_msgs if m.created_at >= cutoff]
     if not recent:
         return []
@@ -1361,7 +1388,7 @@ def ml_scan_burnout():
             existing.signals = signals_str
             existing.detected_at = now
         else:
-            w = Worker.query.get(fb['worker_id'])
+            w = db.session.get(Worker, fb['worker_id'])
             br = BurnoutRisk(
                 worker_id=fb['worker_id'], discord_id=fb['discord_id'], name=fb['name'],
                 score=fb['burnout_score'], signals=signals_str,

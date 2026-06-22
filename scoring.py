@@ -37,7 +37,7 @@ def award_points(worker_id, reason_key, source='system', custom_points=None, not
     reason_key: key from POINTS dict
     custom_points: override the default points value
     """
-    worker = Worker.query.get(worker_id)
+    worker = db.session.get(Worker, worker_id)
     if not worker:
         return {'error': 'Worker not found'}
 
@@ -70,11 +70,11 @@ def correct_case(case_id, new_change, reason, admin_name):
     """
     from database import AdminCorrection
 
-    log = ScoreLog.query.get(case_id)
+    log = db.session.get(ScoreLog, case_id)
     if not log:
         return {'error': f'ScoreLog case {case_id} not found'}
 
-    worker = Worker.query.get(log.worker_id)
+    worker = db.session.get(Worker, log.worker_id)
     original = log.change
     log.change = new_change
 
@@ -104,7 +104,7 @@ def get_leaderboard(limit=10, guild_id=None):
     sorted_workers = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:limit]
     result = []
     for wid, total in sorted_workers:
-        w = Worker.query.get(wid)
+        w = db.session.get(Worker, wid)
         if w:
             w.score = total  # set computed on the fly
             result.append(w)

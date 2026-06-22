@@ -13,7 +13,7 @@ dashboard_bp = Blueprint('dashboard', __name__)
 PERM_ADMINISTRATOR = 1 << 3
 PERM_MANAGE_GUILD = 1 << 5
 
-CLIENT_ID = '1513743115364597790'
+CLIENT_ID = os.getenv('DISCORD_CLIENT_ID', '1513743115364597790')
 BOT_PERMISSIONS = 1099780156550
 BOT_INVITE_URL = f'https://discord.com/api/oauth2/authorize?client_id={CLIENT_ID}&permissions={BOT_PERMISSIONS}&scope=bot%20applications.commands'
 
@@ -75,7 +75,7 @@ def index():
 
     leaderboard_data = []
     for pg in per_guild_scores:
-        worker = Worker.query.get(pg.worker_id)
+        worker = db.session.get(Worker, pg.worker_id)
         guild = None
         guild_name = 'Unknown'
         if pg.guild_id:
