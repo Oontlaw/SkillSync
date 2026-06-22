@@ -212,7 +212,6 @@ def index():
         user=user,
         accessible_guilds=session.get('accessible_guilds', []),
         invite_url=BOT_INVITE_URL, logged_out=False,
-        workers=workers,
         leaderboard_data=leaderboard_data,
         total_workers=total_workers,
         total_tasks=total_tasks,

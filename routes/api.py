@@ -1,7 +1,7 @@
 from functools import wraps
 from flask import Blueprint, request, jsonify, session
 from database import db, Worker, Task, ScoreLog
-from scoring import award_points, admin_correction, get_leaderboard, get_worker_history
+from scoring import award_points, correct_case, get_leaderboard, get_worker_history
 from datetime import datetime
 
 api_bp = Blueprint('api', __name__)
@@ -129,12 +129,13 @@ def correct_score():
     data = request.json
     if not data:
         return jsonify({'error': 'No JSON body'}), 400
-    result = admin_correction(
-        worker_id=data['worker_id'],
-        original_change=data['original_change'],
-        corrected_change=data['corrected_change'],
-        reason=data['reason'],
-        admin_name=data['admin_name']
+    if 'case_id' not in data or 'new_change' not in data:
+        return jsonify({'error': 'case_id and new_change are required'}), 400
+    result = correct_case(
+        case_id=data['case_id'],
+        new_change=data['new_change'],
+        reason=data.get('reason', ''),
+        admin_name=data.get('admin_name', 'Unknown')
     )
     return jsonify(result)
 

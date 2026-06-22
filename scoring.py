@@ -62,43 +62,38 @@ def award_points(worker_id, reason_key, source='system', custom_points=None, not
     }
 
 
-def admin_correction(worker_id, original_change, corrected_change, reason, admin_name):
+def correct_case(case_id, new_change, reason, admin_name):
     """
-    Admin overrides a score decision.
-    Stores correction as training data for future model improvement.
+    Admin corrects a specific ScoreLog entry (case) by its ID.
+    Updates the case's change value directly and records the correction.
+    The total score is always SUM(ScoreLog.change) per guild — no arbitrary additions.
     """
     from database import AdminCorrection
 
-    worker = Worker.query.get(worker_id)
-    if not worker:
-        return {'error': 'Worker not found'}
+    log = ScoreLog.query.get(case_id)
+    if not log:
+        return {'error': f'ScoreLog case {case_id} not found'}
 
-    difference = corrected_change - original_change
-
-    log = ScoreLog(
-        worker_id=worker_id,
-        change=difference,
-        reason=f'Admin correction by {admin_name}: {reason}',
-        source='admin',
-        admin_correction=True
-    )
+    worker = Worker.query.get(log.worker_id)
+    original = log.change
+    log.change = new_change
 
     correction = AdminCorrection(
-        worker_id=worker_id,
-        original_score_change=original_change,
-        corrected_score_change=corrected_change,
+        worker_id=log.worker_id,
+        original_score_change=original,
+        corrected_score_change=new_change,
         reason=reason,
         corrected_by=admin_name
     )
-
-    db.session.add(log)
     db.session.add(correction)
     db.session.commit()
 
     return {
-        'worker': worker.name,
-        'adjustment': difference,
-        'new_score': _compute_score(worker_id),
+        'worker': worker.name if worker else 'Unknown',
+        'case_id': case_id,
+        'original': original,
+        'new_change': new_change,
+        'new_score': _compute_score(log.worker_id),
         'corrected_by': admin_name
     }
 
