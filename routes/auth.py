@@ -1,5 +1,6 @@
 import os
 import secrets
+import time
 import requests
 from flask import Blueprint, redirect, request, session, url_for
 from database import db, GuildInfo
@@ -13,6 +14,9 @@ DISCORD_API = 'https://discord.com/api/v10'
 PERM_ADMINISTRATOR = 1 << 3
 PERM_MANAGE_GUILD = 1 << 5
 
+# Server-side pending states (survives cross-hostname callbacks)
+_pending_states = {}
+
 
 def _redirect_uri():
     uri = os.getenv('DISCORD_REDIRECT_URI')
@@ -24,10 +28,12 @@ def _redirect_uri():
 @auth_bp.route('/login')
 def login():
     state = secrets.token_hex(16)
-    states = session.get('oauth_states', [])
-    states.append(state)
-    session['oauth_states'] = states[-10:]
-    session.modified = True
+    _pending_states[state] = time.time()
+    # Prune expired states (>10 min)
+    now = time.time()
+    expired = [s for s, ts in list(_pending_states.items()) if now - ts > 600]
+    for s in expired:
+        _pending_states.pop(s, None)
     uri = _redirect_uri()
     return redirect(
         f'{DISCORD_API}/oauth2/authorize?client_id={CLIENT_ID}'
@@ -40,12 +46,9 @@ def login():
 @auth_bp.route('/callback')
 def callback():
     returned_state = request.args.get('state')
-    stored_states = session.get('oauth_states', [])
-    if not returned_state or returned_state not in stored_states:
+    if not returned_state or returned_state not in _pending_states:
         return 'Invalid state parameter. Possible CSRF attack.', 403
-    stored_states = [s for s in stored_states if s != returned_state]
-    session['oauth_states'] = stored_states
-    session.modified = True
+    _pending_states.pop(returned_state, None)
 
     code = request.args.get('code')
     if not code:
