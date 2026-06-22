@@ -8,21 +8,27 @@ auth_bp = Blueprint('auth', __name__)
 
 CLIENT_ID = os.getenv('DISCORD_CLIENT_ID')
 CLIENT_SECRET = os.getenv('DISCORD_CLIENT_SECRET')
-
 DISCORD_API = 'https://discord.com/api/v10'
 
 PERM_ADMINISTRATOR = 1 << 3
 PERM_MANAGE_GUILD = 1 << 5
 
 
+def _redirect_uri():
+    uri = os.getenv('DISCORD_REDIRECT_URI')
+    if uri:
+        return uri
+    return request.host_url.rstrip('/') + url_for('auth.callback')
+
+
 @auth_bp.route('/login')
 def login():
     state = secrets.token_hex(16)
     session['oauth_state'] = state
-    redirect_uri = url_for('auth.callback', _external=True, _scheme=request.scheme)
+    uri = _redirect_uri()
     return redirect(
         f'{DISCORD_API}/oauth2/authorize?client_id={CLIENT_ID}'
-        f'&redirect_uri={redirect_uri}'
+        f'&redirect_uri={uri}'
         f'&response_type=code&scope=identify%20guilds'
         f'&state={state}'
     )
@@ -39,12 +45,13 @@ def callback():
     if not code:
         return 'No authorization code received.', 400
 
+    uri = _redirect_uri()
     data = {
         'client_id': CLIENT_ID,
         'client_secret': CLIENT_SECRET,
         'grant_type': 'authorization_code',
         'code': code,
-        'redirect_uri': url_for('auth.callback', _external=True, _scheme=request.scheme),
+        'redirect_uri': uri,
     }
     headers = {'Content-Type': 'application/x-www-form-urlencoded'}
     try:
