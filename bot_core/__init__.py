@@ -21,7 +21,7 @@ from bot_core.privacy import is_channel_public, is_mod_bot
 from bot_core.parsers import extract_warn_from_embed, extract_automod_alert
 from bot_core.scanner import scan_guild, build_automod_alert_channels
 from bot_core.heartbeat import setup_heartbeat
-from bot_core.tasks import check_reversed_actions, message_cleanup_loop, check_ping_joins, flush_all_buffers, set_bot
+from bot_core.tasks import check_reversed_actions, message_cleanup_loop, check_ping_joins, flush_all_buffers, jira_poll_loop, set_bot
 from bot_core.events_ready import handle_ready, handle_guild_join
 from bot_core.events_messages import handle_message
 from bot_core.events_moderation import handle_member_ban, handle_member_unban, handle_member_update, handle_member_remove

@@ -33,8 +33,13 @@ class Task(db.Model):
     assigned_at = db.Column(db.DateTime, default=datetime.utcnow)
     due_at = db.Column(db.DateTime, nullable=True)
     completed_at = db.Column(db.DateTime, nullable=True)
-    extra_contribution = db.Column(db.Boolean, default=False)  # did worker go beyond task?
+    extra_contribution = db.Column(db.Boolean, default=False)
     extra_notes = db.Column(db.Text, nullable=True)
+    # Work Engine fields
+    source = db.Column(db.String(30), nullable=True)  # jira / trello / webhook
+    external_id = db.Column(db.String(100), nullable=True, index=True)
+    external_url = db.Column(db.String(500), nullable=True)
+    priority = db.Column(db.String(20), default='medium')  # low / medium / high / critical
 
     def __repr__(self):
         return f'<Task {self.title} | {self.status}>'

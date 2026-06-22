@@ -31,7 +31,8 @@ def require_auth():
 def get_accessible_guild_ids():
     """Return list of guild IDs the logged-in user can access (only those the bot is also in)."""
     refresh_accessible_guilds()
-    return [g['id'] for g in session.get('accessible_guilds', [])]
+    current = session.get('accessible_guilds', [])
+    return [g['id'] for g in current if isinstance(g, dict)]
 
 
 def refresh_accessible_guilds():
@@ -40,7 +41,7 @@ def refresh_accessible_guilds():
         g.guild_id for g in GuildInfo.query.with_entities(GuildInfo.guild_id).all()
     )
     current = session.get('accessible_guilds', [])
-    filtered = [g for g in current if g['id'] in bot_guild_ids]
+    filtered = [g for g in current if isinstance(g, dict) and g.get('id') in bot_guild_ids]
     if filtered != current:
         session['accessible_guilds'] = filtered
         session.modified = True
@@ -93,6 +94,13 @@ def index():
     total_workers = Worker.query.count()
     total_tasks = Task.query.count()
     total_corrections = AdminCorrection.query.count()
+    # Work Engine stats
+    work_external_tasks = Task.query.filter(Task.source != None).count()
+    work_sources = db.session.query(Task.source).filter(Task.source != None).distinct().count()
+    work_recent_syncs = Task.query.filter(Task.source != None).order_by(Task.assigned_at.desc()).limit(10).all()
+    for t in work_recent_syncs:
+        w = db.session.get(Worker, t.worker_id)
+        t.worker_name = w.name if w else 'Unknown'
     total_moderation_actions = ScoreLog.query.filter(ScoreLog.source == 'discord')
     if scorelog_filter is not None:
         total_moderation_actions = total_moderation_actions.filter(scorelog_filter)
@@ -262,6 +270,9 @@ def index():
         ml_status=ml_status,
         ml_last_train=ml_last_train,
         ml_corrector_stats=ml_corrector_stats,
+        work_external_tasks=work_external_tasks,
+        work_sources=work_sources,
+        work_recent_syncs=work_recent_syncs,
     )
 
 @dashboard_bp.route('/worker/<int:worker_id>')

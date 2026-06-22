@@ -14,26 +14,23 @@ DISCORD_API = 'https://discord.com/api/v10'
 PERM_ADMINISTRATOR = 1 << 3
 PERM_MANAGE_GUILD = 1 << 5
 
-# Server-side pending states (survives cross-hostname callbacks)
-_pending_states = {}
+# Server-side pending states (removed in favor of session-based state)
+# _pending_states = {}
 
 
 def _redirect_uri():
     uri = os.getenv('DISCORD_REDIRECT_URI')
     if uri:
         return uri
-    return request.host_url.rstrip('/') + url_for('auth.callback')
+    uri = request.host_url.rstrip('/') + url_for('auth.callback')
+    print(f'[Auth] Generated Redirect URI: {uri}')
+    return uri
 
 
 @auth_bp.route('/login')
 def login():
     state = secrets.token_hex(16)
-    _pending_states[state] = time.time()
-    # Prune expired states (>10 min)
-    now = time.time()
-    expired = [s for s, ts in list(_pending_states.items()) if now - ts > 600]
-    for s in expired:
-        _pending_states.pop(s, None)
+    session['oauth_state'] = state
     uri = _redirect_uri()
     return redirect(
         f'{DISCORD_API}/oauth2/authorize?client_id={CLIENT_ID}'
@@ -46,9 +43,9 @@ def login():
 @auth_bp.route('/callback')
 def callback():
     returned_state = request.args.get('state')
-    if not returned_state or returned_state not in _pending_states:
+    saved_state = session.pop('oauth_state', None)
+    if not returned_state or returned_state != saved_state:
         return 'Invalid state parameter. Possible CSRF attack.', 403
-    _pending_states.pop(returned_state, None)
 
     code = request.args.get('code')
     if not code:

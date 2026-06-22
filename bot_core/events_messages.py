@@ -21,6 +21,8 @@ async def handle_message(bot, message):
     5. Detect @everyone / @here pings by staff
     6. Parse AutoMod alert embeds from alert channels
     """
+    from bot_core.state import message_buffer
+    log(f'DEBUG: handle_message called for {message.author.name}. Buffer: {len(message_buffer)}')
     guild = message.guild
     if not guild:
         return
@@ -115,7 +117,6 @@ async def handle_message(bot, message):
             })
 
     # ── Job 3: Buffer human messages for behavioral analysis ──
-    trusted = content_trust.get(str(guild.id), False)
     is_public = is_channel_public(message.channel, guild)
     entry = {
         'discord_id': str(author.id),
@@ -127,7 +128,7 @@ async def handle_message(bot, message):
         'hour': now.hour,
         'day': now.weekday(),
     }
-    if trusted and is_public:
+    if is_public:
         entry['content'] = message.content
     message_buffer.append(entry)
     if len(message_buffer) >= MESSAGE_BUFFER_LIMIT:
@@ -159,6 +160,9 @@ async def handle_message(bot, message):
         }
 
     if not message.author.bot:
+        # DEBUG: Log buffer size
+        from bot_core.state import message_buffer
+        log(f'BUFFER SIZE: {len(message_buffer)}')
         pending_key = (message.channel.id, author.id)
         if pending_key in pending_mentions:
             data = pending_mentions.pop(pending_key)

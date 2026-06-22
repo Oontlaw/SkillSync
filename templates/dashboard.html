@@ -41,8 +41,8 @@
         ('Tasks', total_tasks, ''),
         ('Messages Tracked', total_messages_logged, ''),
         ('Mod Actions', total_moderation_actions, ''),
-        ('Voice Sessions', total_voice_sessions, ''),
-        ('Voice Hours', total_voice_hours, 'h'),
+        ('External Tasks', work_external_tasks, ''),
+        ('Work Sources', work_sources, ''),
       ] %}
       {% for label, val, suffix in stats %}
       <div>
@@ -167,6 +167,42 @@
   <div class="bg-[#111318] rounded-2xl border border-gray-800/40 p-6">
     <h2 class="text-sm font-semibold text-purple-400/60 uppercase tracking-wider mb-2">🔄 Admin Correction Feedback Loop</h2>
     <p class="text-gray-600 text-xs">{{ ml_corrector_stats.get('reason', 'Waiting for more admin corrections...') }}</p>
+  </div>
+</div>
+{% endif %}
+
+<!-- Work Engine -->
+{% if work_recent_syncs %}
+<div class="max-w-7xl mx-auto px-6 mb-6">
+  <div class="bg-[#111318] rounded-2xl border border-indigo-900/40 p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-sm font-semibold text-indigo-400 uppercase tracking-wider">🔗 Work Engine</h2>
+      <span class="text-xs text-gray-600">{{ work_sources }} source{% if work_sources != '1' %}s{% endif %} · {{ work_external_tasks }} external tasks</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-xs">
+        <thead>
+          <tr class="text-gray-600 uppercase tracking-wider border-b border-gray-800/60">
+            <th class="text-left py-2 pr-2">Task</th>
+            <th class="text-left py-2 px-2">Source</th>
+            <th class="text-left py-2 px-2">Status</th>
+            <th class="text-left py-2 px-2">Worker</th>
+            <th class="text-right py-2 pl-2">Points</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in work_recent_syncs %}
+          <tr class="border-b border-gray-800/30">
+            <td class="py-2 pr-2 text-white">{{ t.title[:50] }}</td>
+            <td class="py-2 px-2"><span class="px-1.5 py-0.5 rounded text-[10px] font-medium {% if t.source == 'jira' %}bg-blue-900/40 text-blue-400{% else %}bg-purple-900/40 text-purple-400{% endif %}">{{ t.source }}</span></td>
+            <td class="py-2 px-2"><span class="px-1.5 py-0.5 rounded text-[10px] font-medium {% if t.status == 'completed' %}bg-green-900/40 text-green-400{% elif t.status == 'missed' %}bg-red-900/40 text-red-400{% else %}bg-yellow-900/40 text-yellow-400{% endif %}">{{ t.status }}</span></td>
+            <td class="py-2 px-2 text-gray-400">{{ t.worker_name }}</td>
+            <td class="py-2 pl-2 text-right {% if t.points_awarded and t.points_awarded > 0 %}text-green-400{% elif t.points_awarded and t.points_awarded < 0 %}text-red-400{% else %}text-gray-500{% endif %}">{{ "+" if t.points_awarded and t.points_awarded > 0 }}{{ t.points_awarded or 0 }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 {% endif %}

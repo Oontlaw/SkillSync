@@ -2,6 +2,9 @@ import asyncio
 import requests
 from discord.ext import tasks
 from datetime import datetime, timezone, timedelta
+from work_engine.connector_jira import is_configured, poll_issues, map_issue_to_task
+from database import db, Worker, Task
+from scoring import award_points
 from bot_core.config import (
     BAN_WATCH_HOURS, MESSAGE_RETENTION_DAYS, PING_WATCH_MINUTES,
     HEARTBEAT_INTERVAL_MINUTES, SKILLSYNC_API, API_KEY, HEARTBEAT_GUILD_ID,
@@ -169,3 +172,62 @@ async def check_ping_joins():
                 'joiners': ','.join(data['joiners'][:50]),
                 'timestamp': data['timestamp'].isoformat(),
             })
+
+
+@tasks.loop(hours=1)
+async def jira_poll_loop():
+    """Poll Jira for updated issues and sync to internal tasks."""
+    if not is_configured():
+        return
+    print(f'[WorkEngine] Polling Jira...')
+    issues = poll_issues(days_back=7)
+    if not issues:
+        return
+    synced = 0
+    for issue in issues:
+        assignee_email = issue.get('assignee_email', '')
+        assignee_account = issue.get('assignee_account_id', '')
+        if not assignee_email and not assignee_account:
+            continue
+        worker = Worker.query.filter_by(discord_id=assignee_account).first()
+        if not worker and assignee_email:
+            worker = Worker.query.filter_by(email=assignee_email).first()
+        if not worker:
+            continue
+        task_data = map_issue_to_task(issue, worker.id)
+        existing = Task.query.filter_by(external_id=issue['key'], source='jira').first()
+        if existing:
+            old_status = existing.status
+            existing.title = task_data['title']
+            existing.description = task_data.get('description', '')
+            existing.priority = task_data.get('priority', 'medium')
+            existing.status = task_data.get('status', 'pending')
+            if task_data.get('due_at'):
+                existing.due_at = datetime.fromisoformat(task_data['due_at']) if isinstance(task_data['due_at'], str) else task_data['due_at']
+            if old_status != existing.status and existing.status in ('completed', 'missed'):
+                if existing.status == 'completed':
+                    due = existing.due_at
+                    now = datetime.utcnow()
+                    key = 'task_completed_on_time' if not due or now <= due else 'task_completed_late'
+                else:
+                    key = 'task_missed'
+                note = f'Task {key.replace("task_", "").replace("_", " ")}: {existing.title}'
+                result = award_points(worker.id, key, source='jira', note=note)
+                existing.points_awarded = result.get('change', 0)
+        else:
+            task = Task(
+                worker_id=worker.id,
+                title=task_data['title'],
+                description=task_data.get('description', ''),
+                status=task_data.get('status', 'pending'),
+                source='jira',
+                external_id=issue['key'],
+                external_url=task_data.get('external_url', ''),
+                priority=task_data.get('priority', 'medium'),
+            )
+            if task_data.get('due_at'):
+                task.due_at = datetime.fromisoformat(task_data['due_at']) if isinstance(task_data['due_at'], str) else task_data['due_at']
+            db.session.add(task)
+        synced += 1
+    db.session.commit()
+    print(f'[WorkEngine] Synced {synced} issues from Jira')

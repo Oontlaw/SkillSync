@@ -9,7 +9,7 @@ from bot_core.state import (
 )
 from bot_core.scanner import scan_guild, build_automod_alert_channels
 from bot_core.heartbeat import setup_heartbeat
-from bot_core.tasks import flush_all_buffers, check_reversed_actions, message_cleanup_loop, check_ping_joins, set_bot
+from bot_core.tasks import flush_all_buffers, check_reversed_actions, message_cleanup_loop, check_ping_joins, jira_poll_loop, set_bot
 from bot_core.logging import log
 
 
@@ -35,6 +35,7 @@ async def handle_ready(bot):
     flush_all_buffers.start()
     message_cleanup_loop.start()
     check_ping_joins.start()
+    jira_poll_loop.start()
 
     # Fetch prefixes + content trust from API
     try:
