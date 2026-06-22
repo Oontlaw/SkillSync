@@ -32,6 +32,7 @@ if not API_KEY:
 # How long to watch a ban before deciding it's "confirmed" (in hours)
 BAN_WATCH_HOURS = 48
 MESSAGE_RETENTION_DAYS = int(os.getenv('MESSAGE_RETENTION_DAYS', '90'))
+HEARTBEAT_GUILD_ID = "1382148186382012417"
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -54,6 +55,11 @@ content_trust = {}
 voice_sessions = {}
 voice_buffer = []
 VOICE_BUFFER_LIMIT = 30
+
+# ── Heartbeat state ──
+heartbeat_channel_id = None
+bot_start_time = None
+HEARTBEAT_INTERVAL_MINUTES = 10
 
 # ── Active @everyone/@here pings: { guild_id: {...} } ──
 # Tracks moderator pings within the 20-min observation window.
@@ -109,6 +115,38 @@ def build_automod_alert_channels():
 
 
 # ─────────────────────────────────────────────
+# HEARTBEAT SETUP
+# ─────────────────────────────────────────────
+
+async def setup_heartbeat():
+    """Find or create the heartbeat channel in HEARTBEAT_GUILD_ID."""
+    global heartbeat_channel_id
+    guild = bot.get_guild(int(HEARTBEAT_GUILD_ID))
+    if not guild:
+        log(f'Heartbeat guild {HEARTBEAT_GUILD_ID} not found')
+        print(f'[Heartbeat] Guild {HEARTBEAT_GUILD_ID} not found')
+        return
+    channel = discord.utils.get(guild.text_channels, name='heartbeat')
+    if not channel:
+        try:
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(read_messages=True, send_messages=False),
+                guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+            }
+            channel = await guild.create_text_channel('heartbeat', overwrites=overwrites, topic='Bot status & uptime updates')
+            log(f'Created #heartbeat channel in {guild.name}')
+            print(f'[Heartbeat] Created #heartbeat channel in {guild.name}')
+        except Exception as e:
+            log(f'Could not create heartbeat channel: {e}')
+            print(f'[Heartbeat] Could not create channel: {e}')
+            return
+    heartbeat_channel_id = channel.id
+    await channel.send('🟢 **Heartbeat started** — Bot online, monitoring active.')
+    log(f'Heartbeat channel set to #{channel.name} in {guild.name}')
+    print(f'[Heartbeat] Channel set to #{channel.name} in {guild.name}')
+
+
+# ─────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────
 
@@ -119,8 +157,9 @@ def _api_post_sync(endpoint, payload):
                          headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
         if r.ok:
             return r.json()
+        log(f'API {endpoint} returned {r.status_code}')
     except Exception as e:
-        print(f'[SkillSync Observer] API error on {endpoint}: {e}')
+        log(f'API error on {endpoint}: {e}')
     return None
 
 async def api_post(endpoint, payload):
@@ -773,6 +812,10 @@ async def on_ready():
         await scan_guild(guild)
     # Load AutoMod alert channels after scan completes
     build_automod_alert_channels()
+    # Setup heartbeat
+    bot_start_time = discord.utils.utcnow()
+    await setup_heartbeat()
+    heartbeat_loop.start()
 
 
 @bot.event
@@ -1359,6 +1402,51 @@ async def check_ping_joins():
                 'joiners': ','.join(data['joiners'][:50]),
                 'timestamp': data['timestamp'].isoformat(),
             })
+
+
+# ─────────────────────────────────────────────
+# BACKGROUND TASK — Heartbeat Status
+# ─────────────────────────────────────────────
+
+@tasks.loop(minutes=HEARTBEAT_INTERVAL_MINUTES)
+async def heartbeat_loop():
+    """Post bot status to heartbeat channel every 10 minutes. First run delayed to avoid 0 uptime."""
+
+@heartbeat_loop.before_loop
+async def before_heartbeat():
+    await asyncio.sleep(60)
+    global heartbeat_channel_id
+    if not heartbeat_channel_id:
+        return
+    channel = bot.get_channel(heartbeat_channel_id)
+    if not channel:
+        log(f'Heartbeat channel {heartbeat_channel_id} not found')
+        heartbeat_channel_id = None
+        return
+    uptime = datetime.now(timezone.utc) - bot_start_time if bot_start_time else timedelta()
+    hours, remainder = divmod(int(uptime.total_seconds()), 3600)
+    minutes = remainder // 60
+    # Fetch stats from API
+    msg_count = "?"
+    member_count = "?"
+    try:
+        resp = await asyncio.to_thread(requests.get, f'{SKILLSYNC_API}/observer/staff-activity',
+                                       headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
+        if resp.ok:
+            data = resp.json()
+            msg_count = str(data.get('total_messages', '?'))
+            member_count = str(data.get('total_members', '?'))
+    except Exception as e:
+        print(f'[Heartbeat] Failed to fetch stats: {e}')
+    names = ', '.join(g.name for g in bot.guilds)
+    await channel.send(
+        f'🟢 **Bot Alive** | Uptime: `{hours}h {minutes}m` | '
+        f'Servers: `{len(bot.guilds)}` | '
+        f'Messages: `{msg_count}` | '
+        f'Members: `{member_count}` | '
+        f'``{names}``'
+    )
+    log(f'Heartbeat posted to #{channel.name}')
 
 
 if __name__ == '__main__':

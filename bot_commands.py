@@ -8,6 +8,13 @@ from datetime import datetime, timedelta, timezone
 
 SKILLSYNC_API = os.getenv('SKILLSYNC_API', 'http://localhost:5000/api')
 API_KEY = os.getenv('API_KEY')
+LOG_FILE = os.path.join(os.environ.get('TEMP', 'C:\\Temp'), 'skillsync_bot.log')
+def log(msg):
+    try:
+        with open(LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(f'[{datetime.now().strftime("%H:%M:%S")}] {msg}\n')
+    except Exception:
+        pass
 
 async def api_post(endpoint, payload):
     try:
@@ -15,8 +22,9 @@ async def api_post(endpoint, payload):
             requests.post, f'{SKILLSYNC_API}{endpoint}', json=payload,
             headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5
         )
+        log(f'API OK {endpoint}')
     except Exception as e:
-        print(f'[SkillSync] API error in bot_commands: {e}')
+        log(f'API error in bot_commands on {endpoint}: {e}')
 
 
 class Moderation(commands.Cog):
