@@ -42,22 +42,27 @@ def _build_training_data(days=365):
     if len(corrections) < MIN_CORRECTIONS:
         return None, None, None, None, len(corrections)
 
-    # Precompute per-worker stats
+    # Cache to avoid repeated DB hits per worker
+    _worker_cache = {}
+    def _get_worker(wid):
+        if wid not in _worker_cache:
+            _worker_cache[wid] = db.session.get(Worker, wid)
+        return _worker_cache[wid]
+
     worker_stats = {}
     for c in corrections:
         wid = c.worker_id
         if wid not in worker_stats:
+            _w = _get_worker(wid)
             anomalies = BehavioralAnomaly.query.filter(
-                BehavioralAnomaly.discord_id == Worker.query.get(wid).discord_id
-                if Worker.query.get(wid) and Worker.query.get(wid).discord_id else None,
+                BehavioralAnomaly.discord_id == _w.discord_id,
                 BehavioralAnomaly.detected_at >= cutoff_30
-            ).count() if Worker.query.get(wid) and Worker.query.get(wid).discord_id else 0
+            ).count() if _w and _w.discord_id else 0
 
             msgs = MessageRecord.query.filter(
-                MessageRecord.discord_id == Worker.query.get(wid).discord_id
-                if Worker.query.get(wid) and Worker.query.get(wid).discord_id else None,
+                MessageRecord.discord_id == _w.discord_id,
                 MessageRecord.created_at >= cutoff_30
-            ).count() if Worker.query.get(wid) and Worker.query.get(wid).discord_id else 0
+            ).count() if _w and _w.discord_id else 0
 
             total_actions = ScoreLog.query.filter(
                 ScoreLog.worker_id == wid
@@ -155,7 +160,7 @@ def predict(original_change, worker_id=None, worker_stats=None):
     if worker_stats is not None:
         vec = np.array(worker_stats).reshape(1, -1)
     elif worker_id is not None:
-        from database import AdminCorrection, ScoreLog, BehavioralAnomaly, MessageRecord, Worker
+        from database import db, AdminCorrection, ScoreLog, BehavioralAnomaly, MessageRecord, Worker
         from scoring import _compute_score
         cutoff_30 = datetime.utcnow() - timedelta(days=30)
 
