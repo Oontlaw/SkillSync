@@ -4,27 +4,42 @@ import requests
 import os
 import typing
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
+from typing import Optional, Dict, Any
 
 SKILLSYNC_API = os.getenv('SKILLSYNC_API', 'http://localhost:5000/api')
 API_KEY = os.getenv('API_KEY')
 LOG_FILE = os.path.join(os.environ.get('TEMP', 'C:\\Temp'), 'skillsync_bot.log')
-def log(msg):
+
+def log(msg: str, level: str = "INFO") -> None:
+    """Structured logging with timestamps and levels."""
     try:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with open(LOG_FILE, 'a', encoding='utf-8') as f:
-            f.write(f'[{datetime.now().strftime("%H:%M:%S")}] {msg}\n')
+            f.write(f'[{timestamp}] [{level}] {msg}\n')
     except Exception:
         pass
 
-async def api_post(endpoint, payload):
+async def api_post(endpoint: str, payload: Dict[str, Any]) -> Optional[requests.Response]:
+    """API POST with proper error handling and returns response."""
     try:
-        await asyncio.to_thread(
+        response = await asyncio.to_thread(
             requests.post, f'{SKILLSYNC_API}{endpoint}', json=payload,
-            headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5
+            headers={'Authorization': f'Bearer {API_KEY}'}, timeout=10
         )
-        log(f'API OK {endpoint}')
+        response.raise_for_status()
+        log(f'API OK {endpoint} - Status: {response.status_code}')
+        return response
+    except requests.exceptions.Timeout:
+        log(f'API timeout on {endpoint}: Request timed out after 10 seconds', "ERROR")
+    except requests.exceptions.HTTPError as e:
+        log(f'API HTTP error on {endpoint}: {e.response.status_code} - {e.response.text}', "ERROR")
+    except requests.exceptions.ConnectionError:
+        log(f'API connection error on {endpoint}: Could not reach server', "ERROR")
     except Exception as e:
-        log(f'API error in bot_commands on {endpoint}: {e}')
+        log(f'API error in bot_commands on {endpoint}: {e}', "ERROR")
+    return None
 
 
 class Moderation(commands.Cog):
@@ -38,13 +53,20 @@ class Moderation(commands.Cog):
     async def cog_command_error(self, ctx, error):
         """Catch-all error handler for unhandled command errors."""
         if isinstance(error, commands.MissingRequiredArgument):
-            await ctx.send(f'Missing: `{error.param.name}` → try `{ctx.prefix}{ctx.command.name} {ctx.command.signature}`')
+            await ctx.send(f'❌ Missing: `{error.param.name}` → try `{ctx.prefix}{ctx.command.name} {ctx.command.signature}`')
         elif isinstance(error, commands.BadArgument):
-            await ctx.send(f'Invalid argument: {error}')
+            await ctx.send(f'❌ Invalid argument: {error}')
         elif isinstance(error, commands.CommandNotFound):
             pass
+        elif isinstance(error, commands.CommandOnCooldown):
+            await ctx.send(f'⏱️ This command is on cooldown! Try again in {error.retry_after:.1f} seconds.')
+        elif isinstance(error, commands.MissingPermissions):
+            await ctx.send('❌ You don\'t have permission to use this command.')
+        elif isinstance(error, commands.BotMissingPermissions):
+            await ctx.send(f'❌ I don\'t have permission to do that: {", ".join(error.missing_permissions)}')
         else:
-            await ctx.send(f'Error: {error}')
+            log(f'Unhandled command error: {type(error).__name__}: {error}', "ERROR")
+            await ctx.send(f'❌ An unexpected error occurred. Please try again later.')
 
     def can_moderate(self, ctx, target):
         """Check if the invoker has permission to act on target (role hierarchy)."""

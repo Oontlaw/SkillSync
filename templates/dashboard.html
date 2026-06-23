@@ -25,8 +25,12 @@
             Burnout {{ '✓' if burnout_ok else '○' }}
           </button>
           {% set corrector_ok = ml_status.get('corrector', {}).get('trained', False) %}
+          {% set federated_ok = ml_status.get('federated', {}).get('trained', False) %}
           <button onclick="retrainModel('corrector', this)" class="px-2 py-1 rounded-full cursor-pointer transition hover:brightness-125 {% if corrector_ok %}bg-purple-900/40 text-purple-400{% else %}bg-gray-800/40 text-gray-500{% endif %}" title="Admin correction feedback model">
             Corrector {{ '✓' if corrector_ok else '○' }}
+          </button>
+          <button onclick="retrainModel('federated', this)" class="px-2 py-1 rounded-full cursor-pointer transition hover:brightness-125 {% if federated_ok %}bg-cyan-900/40 text-cyan-400{% else %}bg-gray-800/40 text-gray-500{% endif %}" title="Federated Learning (FedAvg)">
+            FedAvg {{ '✓' if federated_ok else '○' }}
           </button>
           {% if ml_last_train %}
           <span class="text-gray-600">Train: {{ ml_last_train[:10] }}</span>
@@ -111,6 +115,42 @@
   {% endif %}
 </div>
 
+<!-- Behavioral Anomalies -->
+{% if anomalies %}
+<div class="max-w-7xl mx-auto px-6 mb-6">
+  <div class="bg-[#111318] rounded-2xl border border-red-900/40 p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-sm font-semibold text-red-400 uppercase tracking-wider">🚨 Behavioral Anomalies</h2>
+      <span class="text-xs text-gray-600">Last 48h</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-xs">
+        <thead>
+          <tr class="text-gray-600 uppercase tracking-wider border-b border-gray-800/60">
+            <th class="text-left py-2">User</th>
+            <th class="text-left py-2 px-2">Type</th>
+            <th class="text-center py-2 px-2">Severity</th>
+            <th class="text-right py-2 pl-2">Detected</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in anomalies %}
+          <tr class="border-b border-gray-800/30">
+            <td class="py-2 text-white">{{ a.discord_id[:12] if a.discord_id else 'N/A' }}</td>
+            <td class="py-2 px-2"><span class="px-1.5 py-0.5 rounded text-[10px] font-medium {% if a.anomaly_type == 'ml_anomaly' %}bg-purple-900/40 text-purple-400{% else %}bg-yellow-900/40 text-yellow-400{% endif %}">{{ a.anomaly_type }}</span></td>
+            <td class="py-2 px-2 text-center">
+              <span class="font-bold {% if a.severity >= 60 %}text-red-400{% elif a.severity >= 25 %}text-yellow-400{% else %}text-green-400{% endif %}">{{ a.severity }}</span>
+            </td>
+            <td class="py-2 pl-2 text-right text-gray-400">{{ a.detected_at.strftime('%H:%M %b %d') if a.detected_at else 'N/A' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <!-- Burnout Risks (#2) -->
 {% if burnout_risks %}
 <div class="max-w-7xl mx-auto px-6 mb-6">
@@ -135,6 +175,167 @@
   </div>
 </div>
 {% endif %}
+
+<!-- Federated Learning -->
+{% if ml_status and ml_status.get('federated', {}).get('trained') %}
+{% set fed = ml_status['federated'] %}
+<div class="max-w-7xl mx-auto px-6 mb-6">
+  <div class="bg-[#111318] rounded-2xl border border-cyan-900/40 p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-sm font-semibold text-cyan-400 uppercase tracking-wider">🌐 Federated Learning (FedAvg)</h2>
+      <span class="text-xs text-gray-600">{{ fed.get('rounds', 0) }} round{% if fed.rounds != 1 %}s{% endif %} · {{ fed.get('clients', [])|length }} guilds</span>
+    </div>
+    {% if fed.get('clients') %}
+    <div class="grid grid-cols-4 gap-4 mb-4">
+      <div>
+        <p class="text-gray-500 text-xs">Global Accuracy</p>
+        <p class="text-xl font-bold text-cyan-400">{{ "%.1f"|format(fed.get('mean_global_accuracy', 0) * 100) }}%</p>
+      </div>
+      <div>
+        <p class="text-gray-500 text-xs">Local Accuracy (avg)</p>
+        <p class="text-xl font-bold text-green-400">{{ "%.1f"|format(fed.get('mean_local_accuracy', 0) * 100) }}%</p>
+      </div>
+      <div>
+        <p class="text-gray-500 text-xs">Accuracy Gap</p>
+        <p class="text-xl font-bold {% if fed.get('accuracy_gap', 0) > 0.03 %}text-yellow-400{% else %}text-green-400{% endif %}">{{ "%.1f"|format(fed.get('accuracy_gap', 0) * 100) }}%</p>
+      </div>
+      <div>
+        <p class="text-gray-500 text-xs">vs Baseline</p>
+        <p class="text-xl font-bold {% if fed.get('global_vs_baseline', 0) > 0 %}text-green-400{% else %}text-gray-400{% endif %}">{{ "%.1f"|format(fed.get('global_vs_baseline', 0) * 100) }}%</p>
+      </div>
+    </div>
+    {% if fed.get('history', [])|length > 1 %}
+    <div class="relative mb-4" style="height:120px"><canvas id="fedChart"></canvas></div>
+    {% endif %}
+    <div class="overflow-x-auto">
+      <table class="w-full text-xs">
+        <thead>
+          <tr class="text-gray-600 uppercase tracking-wider border-b border-gray-800/60">
+            <th class="text-left py-2">Guild</th>
+            <th class="text-right py-2 px-2">Train</th>
+            <th class="text-right py-2 px-2">Test</th>
+            <th class="text-right py-2 px-2">Local</th>
+            <th class="text-right py-2 px-2">Global</th>
+            <th class="text-right py-2 pl-2">Baseline</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in fed['clients'] %}
+          <tr class="border-b border-gray-800/30">
+            <td class="py-2 text-white">{{ c.guild_id[:12] if c.guild_id else 'N/A' }}</td>
+            <td class="py-2 px-2 text-right text-gray-400">{{ c.get('train_count', '') }}</td>
+            <td class="py-2 px-2 text-right text-gray-400">{{ c.get('test_count', '') }}</td>
+            <td class="py-2 px-2 text-right {% if c.local_accuracy >= 0.7 %}text-green-400{% elif c.local_accuracy >= 0.5 %}text-yellow-400{% else %}text-red-400{% endif %}">{{ "%.1f"|format(c.local_accuracy * 100) }}%</td>
+            <td class="py-2 px-2 text-right {% if c.global_accuracy >= 0.7 %}text-green-400{% elif c.global_accuracy >= 0.5 %}text-yellow-400{% else %}text-red-400{% endif %}">{{ "%.1f"|format(c.global_accuracy * 100) }}%</td>
+            <td class="py-2 pl-2 text-right text-gray-500">{{ "%.1f"|format(c.get('baseline_accuracy', 0) * 100) }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-gray-600 text-xs">Client details unavailable.</p>
+    {% endif %}
+    <p class="text-xs text-gray-600 mt-3">Local LogisticRegression trained per guild, coefficients averaged via FedAvg weighted by message count. Task: predict off-hours messages (10PM–6AM).</p>
+  </div>
+</div>
+{% elif ml_status and ml_status.get('federated', {}).get('trained') == false %}
+<div class="max-w-7xl mx-auto px-6 mb-6">
+  <div class="bg-[#111318] rounded-2xl border border-gray-800/40 p-6">
+    <h2 class="text-sm font-semibold text-cyan-400/60 uppercase tracking-wider mb-2">🌐 Federated Learning</h2>
+    <p class="text-gray-600 text-xs">Needs 2+ guilds with 10+ messages each. Run <code class="text-gray-400 bg-gray-800 px-1 rounded">POST /observer/ml/federated/train</code> to start.</p>
+  </div>
+</div>
+{% endif %}
+
+<!-- Training History -->
+{% if ml_status and ml_status.training_history %}
+<div class="max-w-7xl mx-auto px-6 mb-6">
+  <div class="bg-[#111318] rounded-2xl border border-gray-800/40 p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">📚 Training History</h2>
+      <span class="text-xs text-gray-600">Last {{ ml_status.training_history|length }} runs</span>
+    </div>
+    <div class="overflow-x-auto max-h-96 overflow-y-auto">
+      <table class="w-full text-xs">
+        <thead class="sticky top-0 bg-[#111318]">
+          <tr class="text-gray-600 uppercase tracking-wider border-b border-gray-800/60">
+            <th class="text-left py-2">Date</th>
+            <th class="text-center py-2 px-2">Anomaly</th>
+            <th class="text-center py-2 px-2">Burnout</th>
+            <th class="text-center py-2 px-2">Corrector</th>
+            <th class="text-center py-2 px-2">Forecast</th>
+            <th class="text-center py-2 px-2">Federated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for run in ml_status.training_history|reverse %}
+          <tr class="border-b border-gray-800/30">
+            <td class="py-2 text-gray-400">{{ run.trained_at[:19] if run.trained_at else 'N/A' }}</td>
+            <td class="py-2 px-2 text-center">
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-medium {% if run.anomaly and run.anomaly.status == 'trained' %}bg-green-900/40 text-green-400{% elif run.anomaly and run.anomaly.status == 'error' %}bg-red-900/40 text-red-400{% else %}bg-gray-800/40 text-gray-500{% endif %}">
+                {{ run.anomaly.status if run.anomaly else 'N/A' }}
+              </span>
+            </td>
+            <td class="py-2 px-2 text-center">
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-medium {% if run.burnout and run.burnout.status == 'trained' %}bg-green-900/40 text-green-400{% elif run.burnout and run.burnout.status == 'error' %}bg-red-900/40 text-red-400{% else %}bg-gray-800/40 text-gray-500{% endif %}">
+                {{ run.burnout.status if run.burnout else 'N/A' }}
+              </span>
+            </td>
+            <td class="py-2 px-2 text-center">
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-medium {% if run.corrector and run.corrector.status == 'trained' %}bg-green-900/40 text-green-400{% elif run.corrector and run.corrector.status == 'error' %}bg-red-900/40 text-red-400{% elif run.corrector and run.corrector.status == 'skipped' %}bg-yellow-900/40 text-yellow-400{% else %}bg-gray-800/40 text-gray-500{% endif %}">
+                {{ run.corrector.status if run.corrector else 'N/A' }}
+              </span>
+            </td>
+            <td class="py-2 px-2 text-center">
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-medium {% if run.forecast and run.forecast.guilds %}bg-blue-900/40 text-blue-400{% elif run.forecast and run.forecast.status == 'error' %}bg-red-900/40 text-red-400{% else %}bg-gray-800/40 text-gray-500{% endif %}">
+                {{ run.forecast.guilds if run.forecast and run.forecast.guilds else 'N/A' }} guilds
+              </span>
+            </td>
+            <td class="py-2 px-2 text-center">
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-medium {% if run.federated and run.federated.trained %}bg-cyan-900/40 text-cyan-400{% elif run.federated and run.federated.status == 'error' %}bg-red-900/40 text-red-400{% else %}bg-gray-800/40 text-gray-500{% endif %}">
+                {{ run.federated.rounds if run.federated and run.federated.rounds else 'N/A' }} rounds
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Growth Analytics -->
+<div class="max-w-7xl mx-auto px-6 mb-6">
+  <div class="bg-[#111318] rounded-2xl border border-emerald-900/40 p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-sm font-semibold text-emerald-400 uppercase tracking-wider">📈 Server Growth Analytics</h2>
+      <span class="text-xs text-gray-600">Last 7 days</span>
+    </div>
+    
+    <div class="grid grid-cols-3 gap-4 mb-6">
+      <div>
+        <p class="text-gray-500 text-xs">Total Joins</p>
+        <p class="text-2xl font-bold text-green-400">+{{ total_joins_7d }}</p>
+      </div>
+      <div>
+        <p class="text-gray-500 text-xs">Total Leaves</p>
+        <p class="text-2xl font-bold text-red-400">-{{ total_leaves_7d }}</p>
+      </div>
+      <div>
+        <p class="text-gray-500 text-xs">Net Growth</p>
+        {% set net_growth = total_joins_7d - total_leaves_7d %}
+        <p class="text-2xl font-bold {% if net_growth >= 0 %}text-green-400{% else %}text-red-400{% endif %}">{{ net_growth | string | replace("-", "-") }}{% if net_growth >= 0 %}+{% endif %}</p>
+      </div>
+    </div>
+
+    <div class="h-40 bg-[#0f1116] rounded-xl p-4">
+      <canvas id="growthChart"></canvas>
+    </div>
+    <p class="text-xs text-gray-600 mt-3">Hourly join/leave patterns for growth prediction (ML-ready data).</p>
+  </div>
+</div>
 
 <!-- ML Feedback Loop -->
 {% if ml_corrector_stats and ml_corrector_stats.status == 'trained' %}
@@ -393,14 +594,85 @@ darkChart(document.getElementById('volumeChart'), {
 });
 {% endif %}
 
+{% if ml_status and ml_status.get('federated', {}).get('history', [])|length > 1 %}
+{% set fed_history = ml_status['federated']['history'] %}
+const fedHistory = {{ fed_history | tojson }};
+const fedRounds = fedHistory.map(h => h.round);
+const fedGlobal = fedHistory.map(h => (h.mean_global_accuracy || 0) * 100);
+const fedLocal = fedHistory.map(h => (h.mean_local_accuracy || 0) * 100);
+const fedBaseline = fedHistory.map(h => (h.baseline_accuracy || 0) * 100);
+darkChart(document.getElementById('fedChart'), {
+  type: 'line', data: {
+    labels: fedRounds,
+    datasets: [
+      { label: 'Global Acc', data: fedGlobal, borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,0.1)', fill: false, tension: 0.3, pointRadius: 4 },
+      { label: 'Local Acc', data: fedLocal, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', fill: false, tension: 0.3, pointRadius: 4 },
+      { label: 'Baseline', data: fedBaseline, borderColor: '#6b7280', backgroundColor: 'rgba(107,114,128,0.05)', fill: false, tension: 0, pointRadius: 3, borderDash: [4, 4] },
+    ]
+  },
+  options: {
+    plugins: { legend: { position: 'bottom', labels: { font: { family: font }, boxWidth: 10, padding: 6 } } },
+    scales: { x: { title: { display: true, text: 'Round', color: '#9ca3af', font: { family: font } }, ticks: { font: { family: font } } }, y: { beginAtZero: true, max: 100, ticks: { font: { family: font }, callback: v => v + '%' } } }
+  }
+});
+{% endif %}
+
+// Growth Chart (Hourly joins/leaves)
+const hourlyJoins7d = {{ hourly_joins_7d | tojson }};
+const hourlyLeaves7d = {{ hourly_leaves_7d | tojson }};
+darkChart(document.getElementById('growthChart'), {
+  type: 'line',
+  data: {
+    labels: hours,
+    datasets: [
+      {
+        label: 'Joins',
+        data: hours.map((_, h) => hourlyJoins7d[h] || 0),
+        borderColor: '#22c55e',
+        backgroundColor: 'rgba(34,197,94,0.1)',
+        fill: true,
+        tension: 0.3,
+        pointRadius: 3,
+        pointBackgroundColor: '#22c55e'
+      },
+      {
+        label: 'Leaves',
+        data: hours.map((_, h) => hourlyLeaves7d[h] || 0),
+        borderColor: '#ef4444',
+        backgroundColor: 'rgba(239,68,68,0.1)',
+        fill: true,
+        tension: 0.3,
+        pointRadius: 3,
+        pointBackgroundColor: '#ef4444'
+      }
+    ]
+  },
+  options: {
+    plugins: {
+      legend: { position: 'bottom', labels: { font: { family: font }, boxWidth: 10, padding: 6 } }
+    },
+    scales: {
+      x: { ticks: { maxTicksLimit: 12, font: { family: font } } },
+      y: { beginAtZero: true, ticks: { font: { family: font } } }
+    }
+  }
+});
+
 async function retrainModel(model, btn) {
   const orig = btn.innerHTML;
   btn.innerHTML = '⏳';
   btn.disabled = true;
   try {
-    const r = await fetch('/api/observer/ml/retrain', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    let url, payload;
+    if (model === 'federated') {
+      url = '/api/observer/ml/federated/train';
+      payload = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) };
+    } else {
+      url = '/api/observer/ml/retrain';
+      payload = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) };
+    }
+    const r = await fetch(url, payload);
     const data = await r.json();
-    const ok = data[model]?.status === 'trained';
     if (model === 'all') {
       Object.keys(data).forEach(k => {
         if (k !== 'trained_at') location.reload();

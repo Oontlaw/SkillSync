@@ -7,7 +7,7 @@ from ml.features import all_user_feature_vectors, user_anomaly_feature_vector
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), 'models')
 ANOMALY_MODEL_PATH = os.path.join(MODELS_DIR, 'anomaly_iforest.joblib')
-ANOMALY_THRESHOLD = -0.3
+ANOMALY_THRESHOLD = -0.15
 
 
 def _correction_features(discord_id, days=30):
@@ -43,7 +43,7 @@ def all_user_vectors_with_corrections(days=30, min_msgs=10):
     return X_aug, ids
 
 
-def train(min_msgs=10, days=30, contamination=0.05):
+def train(min_msgs=10, days=30, contamination=0.1):
     """Train Isolation Forest on per-user message behavior + correction features."""
     X, ids = all_user_vectors_with_corrections(days=days, min_msgs=min_msgs)
     if X.shape[0] < 5:

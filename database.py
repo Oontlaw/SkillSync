@@ -386,3 +386,22 @@ class RoleChangeLog(db.Model):
 
     def __repr__(self):
         return f'<RoleChangeLog {self.member_name} {self.change_category} in {self.guild_id}>'
+
+
+class MemberJoinLeave(db.Model):
+    """Tracks member join and leave events for pattern recognition and ML growth prediction."""
+    __tablename__ = 'member_join_leave'
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
+    member_id = db.Column(db.String(50), nullable=False, index=True)
+    member_name = db.Column(db.String(100), nullable=False)
+    is_bot = db.Column(db.Boolean, default=False)
+    event_type = db.Column(db.String(10), nullable=False, index=True)  # 'join' or 'leave'
+    leave_reason = db.Column(db.String(50), nullable=True)  # 'kick', 'ban', 'leave', 'unknown'
+    hour_of_day = db.Column(db.Integer, nullable=True)
+    day_of_week = db.Column(db.Integer, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return f'<MemberJoinLeave {self.member_name} {self.event_type} in {self.guild_id}>'

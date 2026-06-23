@@ -1,8 +1,9 @@
 import os, json
 from flask import Blueprint, render_template, session, redirect, url_for, request
-from database import db, Worker, Task, ScoreLog, AdminCorrection, MessageRecord, GuildInfo, GuildRole, GuildMember, BehavioralAnomaly, MentionRecord, AutoModRule, AutoModTrigger, PingJoinEvent, VoiceActivity, BurnoutRisk, RoleChangeLog
+from database import db, Worker, Task, ScoreLog, AdminCorrection, MessageRecord, GuildInfo, GuildRole, GuildMember, GuildChannel, BehavioralAnomaly, MentionRecord, AutoModRule, AutoModTrigger, PingJoinEvent, VoiceActivity, BurnoutRisk, RoleChangeLog, MemberJoinLeave
 from datetime import datetime, timedelta
 from sqlalchemy import func
+from sqlalchemy.orm import selectinload
 import statistics
 from ml import engine as ml_engine
 from ml import forecast as ml_forecast
@@ -64,23 +65,28 @@ def index():
     else:
         scorelog_filter = None
 
-    # Per-guild scores for leaderboard
+    # Per-guild scores for leaderboard (use eager loading for workers and guild info)
     per_guild_scores_query = db.session.query(
         ScoreLog.worker_id,
         ScoreLog.guild_id,
         func.sum(ScoreLog.change).label('score')
-    ).group_by(ScoreLog.worker_id, ScoreLog.guild_id)
+    )
     if scorelog_filter is not None:
         per_guild_scores_query = per_guild_scores_query.filter(scorelog_filter)
-    per_guild_scores = per_guild_scores_query.order_by(func.sum(ScoreLog.change).desc()).all()
+    per_guild_scores = per_guild_scores_query.group_by(ScoreLog.worker_id, ScoreLog.guild_id).order_by(func.sum(ScoreLog.change).desc()).all()
+
+    # Batch fetch all workers and guild infos to avoid N+1 queries
+    worker_ids = {pg.worker_id for pg in per_guild_scores}
+    guild_ids = {pg.guild_id for pg in per_guild_scores if pg.guild_id}
+    workers = {w.id: w for w in Worker.query.filter(Worker.id.in_(worker_ids)).all()}
+    guild_info_map = {g.guild_id: g for g in GuildInfo.query.filter(GuildInfo.guild_id.in_(guild_ids)).all()}
 
     leaderboard_data = []
     for pg in per_guild_scores:
-        worker = db.session.get(Worker, pg.worker_id)
-        guild = None
+        worker = workers.get(pg.worker_id)
         guild_name = 'Unknown'
         if pg.guild_id:
-            guild = GuildInfo.query.filter_by(guild_id=pg.guild_id).first()
+            guild = guild_info_map.get(pg.guild_id)
             if guild:
                 guild_name = guild.name
         if worker:
@@ -97,26 +103,28 @@ def index():
     # Work Engine stats
     work_external_tasks = Task.query.filter(Task.source != None).count()
     work_sources = db.session.query(Task.source).filter(Task.source != None).distinct().count()
-    work_recent_syncs = Task.query.filter(Task.source != None).order_by(Task.assigned_at.desc()).limit(10).all()
+    work_recent_syncs = Task.query.filter(Task.source != None).order_by(Task.assigned_at.desc()).limit(10).options(selectinload(Task.worker)).all()
     for t in work_recent_syncs:
-        w = db.session.get(Worker, t.worker_id)
-        t.worker_name = w.name if w else 'Unknown'
+        t.worker_name = t.worker.name if t.worker else 'Unknown'
     total_moderation_actions = ScoreLog.query.filter(ScoreLog.source == 'discord')
     if scorelog_filter is not None:
         total_moderation_actions = total_moderation_actions.filter(scorelog_filter)
     total_moderation_actions = total_moderation_actions.count()
 
-    recent_logs = ScoreLog.query
+    # Recent logs with eager loading and guild info
+    recent_logs_query = ScoreLog.query
     if scorelog_filter is not None:
-        recent_logs = recent_logs.filter(scorelog_filter)
-    recent_logs = recent_logs.order_by(ScoreLog.created_at.desc()).limit(10).all()
+        recent_logs_query = recent_logs_query.filter(scorelog_filter)
+    recent_logs = recent_logs_query.order_by(ScoreLog.created_at.desc()).limit(10).options(selectinload(ScoreLog.worker)).all()
     # Filter out orphaned logs (worker deleted)
     recent_logs = [log for log in recent_logs if log.worker]
-    # Attach guild name to each log
+    # Attach guild name to each log using batch fetched guilds
+    log_guild_ids = {log.guild_id for log in recent_logs if log.guild_id}
+    log_guild_info_map = {g.guild_id: g for g in GuildInfo.query.filter(GuildInfo.guild_id.in_(log_guild_ids)).all()}
     for log in recent_logs:
         log.guild_name = None
         if log.guild_id:
-            g = GuildInfo.query.filter_by(guild_id=log.guild_id).first()
+            g = log_guild_info_map.get(log.guild_id)
             if g:
                 log.guild_name = g.name
 
@@ -223,6 +231,53 @@ def index():
     # Burnout risks (#2)
     burnout_risks = BurnoutRisk.query.order_by(BurnoutRisk.score.desc()).limit(5).all()
 
+    # Join/Leave stats for growth analysis
+    cutoff = datetime.utcnow() - timedelta(days=7)
+    join_leave_query = MemberJoinLeave.query.filter(MemberJoinLeave.created_at >= cutoff)
+    if accessible_ids:
+        join_leave_query = join_leave_query.filter(MemberJoinLeave.guild_id.in_(accessible_ids))
+    
+    total_joins_7d = join_leave_query.filter(MemberJoinLeave.event_type == 'join').count()
+    total_leaves_7d = join_leave_query.filter(MemberJoinLeave.event_type == 'leave').count()
+    
+    # Hourly join/leave breakdown for last 7 days
+    hourly_joins_7d = {str(h):0 for h in range(24)}
+    hourly_leaves_7d = {str(h):0 for h in range(24)}
+    for h, c in db.session.query(MemberJoinLeave.hour_of_day, func.count(MemberJoinLeave.id)).filter(
+        MemberJoinLeave.created_at >= cutoff,
+        MemberJoinLeave.event_type == 'join'
+    ).filter(MemberJoinLeave.hour_of_day != None).group_by(MemberJoinLeave.hour_of_day).all():
+        if accessible_ids:
+            # Wait, let's adjust the query to filter guilds properly
+            # Let's redo it with guild filter
+            continue
+    # Okay let's properly build the hourly queries with guild filters
+    hourly_joins_data = db.session.query(
+        MemberJoinLeave.hour_of_day, func.count(MemberJoinLeave.id)
+    ).filter(
+        MemberJoinLeave.created_at >= cutoff,
+        MemberJoinLeave.event_type == 'join',
+        MemberJoinLeave.hour_of_day != None
+    )
+    if accessible_ids:
+        hourly_joins_data = hourly_joins_data.filter(MemberJoinLeave.guild_id.in_(accessible_ids))
+    hourly_joins_data = hourly_joins_data.group_by(MemberJoinLeave.hour_of_day).all()
+    for h, c in hourly_joins_data:
+        hourly_joins_7d[str(h)] = c
+        
+    hourly_leaves_data = db.session.query(
+        MemberJoinLeave.hour_of_day, func.count(MemberJoinLeave.id)
+    ).filter(
+        MemberJoinLeave.created_at >= cutoff,
+        MemberJoinLeave.event_type == 'leave',
+        MemberJoinLeave.hour_of_day != None
+    )
+    if accessible_ids:
+        hourly_leaves_data = hourly_leaves_data.filter(MemberJoinLeave.guild_id.in_(accessible_ids))
+    hourly_leaves_data = hourly_leaves_data.group_by(MemberJoinLeave.hour_of_day).all()
+    for h, c in hourly_leaves_data:
+        hourly_leaves_7d[str(h)] = c
+
     # ML model status
     ml_status = ml_engine.get_model_status()
     ml_last_train = None
@@ -273,6 +328,10 @@ def index():
         work_external_tasks=work_external_tasks,
         work_sources=work_sources,
         work_recent_syncs=work_recent_syncs,
+        total_joins_7d=total_joins_7d,
+        total_leaves_7d=total_leaves_7d,
+        hourly_joins_7d=hourly_joins_7d,
+        hourly_leaves_7d=hourly_leaves_7d,
     )
 
 @dashboard_bp.route('/worker/<int:worker_id>')
@@ -291,6 +350,10 @@ def worker_detail(worker_id):
     anomalies = []
     worker_hourly_activity = None
     cumulative_score_data = None
+    mention_stats = None
+    voice_stats = None
+    activity_consistency = None
+    mod_quality = None
     if worker.discord_id:
         stats = MessageRecord.query.filter_by(discord_id=worker.discord_id)
         total = stats.count()
@@ -443,11 +506,6 @@ def worker_detail(worker_id):
             'reversal_rate': reversal_rate,
             'quality_score': q_score,
         }
-    else:
-        mention_stats = None
-        voice_stats = None
-        activity_consistency = None
-        mod_quality = None
 
     # Role change history
     role_changes = []

@@ -14,7 +14,7 @@ from bot_core.state import (  # re-exported for other modules
     flush_message_buffer, flush_presence_buffer,
     flush_voice_buffer, flush_mention_buffer,
     flush_join_buffer, flush_member_presence_buffer,
-    flush_online_count,
+    flush_online_count, flush_join_leave_buffer,
 )
 from bot_core.api_client import api_post
 from bot_core.logging import log
@@ -39,6 +39,7 @@ async def flush_all_buffers():
     await flush_mention_buffer()
     await flush_voice_buffer()
     await flush_join_buffer()
+    await flush_join_leave_buffer()
     await flush_online_count()
     await _maybe_heartbeat()
 

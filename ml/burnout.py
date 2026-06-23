@@ -6,7 +6,7 @@ from ml.features import staff_feature_vectors
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), 'models')
 BURNOUT_MODEL_PATH = os.path.join(MODELS_DIR, 'burnout_iforest.joblib')
-BURNOUT_THRESHOLD = -0.2
+BURNOUT_THRESHOLD = 0.0
 
 
 def _correction_rate(worker_id, days=30):

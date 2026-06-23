@@ -5,13 +5,14 @@ import math
 from collections import defaultdict
 from functools import wraps
 from flask import Blueprint, request, jsonify
-from database import db, Worker, ScoreLog, MessageRecord, GuildInfo, GuildRole, GuildMember, GuildChannel, BehavioralAnomaly, MentionRecord, AutoModRule, AutoModTrigger, PingJoinEvent, VoiceActivity, BurnoutRisk, PendingBan, PendingTimeout, RoleChangeLog
+from database import db, Worker, ScoreLog, MessageRecord, GuildInfo, GuildRole, GuildMember, GuildChannel, BehavioralAnomaly, MentionRecord, AutoModRule, AutoModTrigger, PingJoinEvent, VoiceActivity, BurnoutRisk, PendingBan, PendingTimeout, RoleChangeLog, MemberJoinLeave
 from datetime import datetime, timedelta
 from sqlalchemy import func
 from ml import engine as ml_engine
 from ml import anomaly as ml_anomaly
 from ml import burnout as ml_burnout
 from ml import forecast as ml_forecast
+from ml import federated as ml_federated
 
 observer_bp = Blueprint('observer', __name__)
 
@@ -64,6 +65,24 @@ def sanitize_str(value, max_length=200):
     if value is None:
         return None
     return str(value).strip()[:max_length]
+
+
+def paginate_query(query, page=1, per_page=20):
+    """Paginate a SQLAlchemy query and return results with metadata."""
+    page = max(1, int(page))
+    per_page = max(1, min(100, int(per_page)))
+    total = query.count()
+    total_pages = math.ceil(total / per_page) if total > 0 else 1
+    items = query.offset((page - 1) * per_page).limit(per_page).all()
+    return {
+        'items': items,
+        'page': page,
+        'per_page': per_page,
+        'total': total,
+        'total_pages': total_pages,
+        'has_next': page < total_pages,
+        'has_prev': page > 1
+    }
 
 
 VALID_ACTIONS = {
@@ -575,6 +594,94 @@ def user_analytics(discord_id):
         'last_seen': str(stats.last_seen or ''),
         'hourly_activity': {str(h.hour_of_day): h.count for h in hourly},
         'channels': {c.channel_name: c.count for c in channels},
+    })
+
+
+@observer_bp.route('/observer/messages', methods=['GET'])
+@require_api_key
+def get_messages():
+    """Paginated endpoint to get message records."""
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+    guild_id = request.args.get('guild_id')
+    discord_id = request.args.get('discord_id')
+    
+    query = MessageRecord.query.order_by(MessageRecord.created_at.desc())
+    
+    if guild_id:
+        query = query.filter(MessageRecord.guild_id == guild_id)
+    if discord_id:
+        query = query.filter(MessageRecord.discord_id == discord_id)
+    
+    paginated = paginate_query(query, page, per_page)
+    
+    return jsonify({
+        'page': paginated['page'],
+        'per_page': paginated['per_page'],
+        'total': paginated['total'],
+        'total_pages': paginated['total_pages'],
+        'has_next': paginated['has_next'],
+        'has_prev': paginated['has_prev'],
+        'items': [{
+            'id': m.id,
+            'discord_id': m.discord_id,
+            'name': m.name,
+            'guild_id': m.guild_id,
+            'channel_name': m.channel_name,
+            'is_public_channel': m.is_public_channel,
+            'message_length': m.message_length,
+            'message_content': m.message_content,
+            'hour_of_day': m.hour_of_day,
+            'day_of_week': m.day_of_week,
+            'created_at': m.created_at.isoformat() if m.created_at else None
+        } for m in paginated['items']]
+    })
+
+
+@observer_bp.route('/observer/guilds/<guild_id>/members', methods=['GET'])
+@require_api_key
+def get_guild_members(guild_id):
+    """Paginated endpoint to get guild members with filters."""
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+    is_staff = request.args.get('is_staff')
+    is_bot = request.args.get('is_bot')
+    is_online = request.args.get('is_online')
+    
+    query = GuildMember.query.filter(GuildMember.guild_id == guild_id).order_by(GuildMember.top_role_position.desc(), GuildMember.name)
+    
+    if is_staff is not None:
+        query = query.filter(GuildMember.is_staff == (is_staff.lower() == 'true'))
+    if is_bot is not None:
+        query = query.filter(GuildMember.is_bot == (is_bot.lower() == 'true'))
+    if is_online is not None:
+        query = query.filter(GuildMember.is_online == (is_online.lower() == 'true'))
+    
+    paginated = paginate_query(query, page, per_page)
+    
+    return jsonify({
+        'page': paginated['page'],
+        'per_page': paginated['per_page'],
+        'total': paginated['total'],
+        'total_pages': paginated['total_pages'],
+        'has_next': paginated['has_next'],
+        'has_prev': paginated['has_prev'],
+        'items': [{
+            'id': m.id,
+            'guild_id': m.guild_id,
+            'member_id': m.member_id,
+            'name': m.name,
+            'display_name': m.display_name,
+            'is_bot': m.is_bot,
+            'is_owner': m.is_owner,
+            'is_staff': m.is_staff,
+            'is_online': m.is_online,
+            'status': m.status,
+            'activity_name': m.activity_name,
+            'last_seen_online': m.last_seen_online.isoformat() if m.last_seen_online else None,
+            'last_message_at': m.last_message_at.isoformat() if m.last_message_at else None,
+            'created_at': m.created_at.isoformat() if m.created_at else None
+        } for m in paginated['items']]
     })
 
 
@@ -1490,6 +1597,23 @@ def ml_pending_retrain():
     return jsonify({'pending': False})
 
 
+@observer_bp.route('/observer/ml/federated/train', methods=['POST'])
+@require_api_key
+def ml_federated_train():
+    """Run one round of FedAvg over guild-partitioned message data."""
+    data = request.json or {}
+    days = int(data.get('days', 30))
+    result = ml_federated.train_federated(days=days)
+    return jsonify(result)
+
+
+@observer_bp.route('/observer/ml/federated', methods=['GET'])
+@require_api_key
+def ml_federated_status():
+    """Get federated learning training status and history."""
+    return jsonify(ml_federated.get_status())
+
+
 @observer_bp.route('/observer/role-change', methods=['POST'])
 @require_api_key
 def log_role_change():
@@ -1551,3 +1675,140 @@ def log_role_change():
 
     db.session.commit()
     return jsonify({'status': 'logged', 'id': record.id, 'points_awarded': points_awarded})
+
+
+@observer_bp.route('/observer/join-leave', methods=['POST'])
+@require_api_key
+def log_join_leave():
+    """Log member join and leave events for pattern recognition and ML growth prediction."""
+    data = request.json or {}
+    events = data.get('events', [data])
+    
+    for event in events:
+        try:
+            event_type = event.get('event_type')
+            if event_type not in ['join', 'leave']:
+                continue
+                
+            record = MemberJoinLeave(
+                guild_id=sanitize_str(event.get('guild_id'), 50),
+                member_id=sanitize_str(event.get('member_id'), 50),
+                member_name=sanitize_str(event.get('member_name'), 100),
+                is_bot=bool(event.get('is_bot', False)),
+                event_type=event_type,
+                leave_reason=sanitize_str(event.get('leave_reason'), 50),
+                hour_of_day=event.get('hour_of_day'),
+                day_of_week=event.get('day_of_week'),
+            )
+            db.session.add(record)
+        except Exception as e:
+            log(f'Error storing join-leave event: {e}')
+            continue
+    
+    db.session.commit()
+    print(f'[Observer API] Stored {len(events)} join/leave events')
+    return jsonify({'message': f'Stored {len(events)} join/leave events'}), 201
+
+
+@observer_bp.route('/observer/join-leave', methods=['GET'])
+@require_api_key
+def get_join_leave():
+    """Get paginated join/leave events with filters."""
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+    guild_id = request.args.get('guild_id')
+    event_type = request.args.get('event_type')
+    member_id = request.args.get('member_id')
+    
+    query = MemberJoinLeave.query.order_by(MemberJoinLeave.created_at.desc())
+    
+    if guild_id:
+        query = query.filter(MemberJoinLeave.guild_id == guild_id)
+    if event_type:
+        query = query.filter(MemberJoinLeave.event_type == event_type)
+    if member_id:
+        query = query.filter(MemberJoinLeave.member_id == member_id)
+    
+    paginated = paginate_query(query, page, per_page)
+    
+    return jsonify({
+        'page': paginated['page'],
+        'per_page': paginated['per_page'],
+        'total': paginated['total'],
+        'total_pages': paginated['total_pages'],
+        'has_next': paginated['has_next'],
+        'has_prev': paginated['has_prev'],
+        'items': [{
+            'id': e.id,
+            'guild_id': e.guild_id,
+            'member_id': e.member_id,
+            'member_name': e.member_name,
+            'is_bot': e.is_bot,
+            'event_type': e.event_type,
+            'leave_reason': e.leave_reason,
+            'hour_of_day': e.hour_of_day,
+            'day_of_week': e.day_of_week,
+            'created_at': e.created_at.isoformat() if e.created_at else None
+        } for e in paginated['items']]
+    })
+
+
+@observer_bp.route('/observer/join-leave/stats', methods=['GET'])
+@require_api_key
+def get_join_leave_stats():
+    """Get join/leave statistics for guild growth analysis."""
+    guild_id = request.args.get('guild_id')
+    days = int(request.args.get('days', 7))
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    
+    base_query = MemberJoinLeave.query.filter(MemberJoinLeave.created_at >= cutoff)
+    if guild_id:
+        base_query = base_query.filter(MemberJoinLeave.guild_id == guild_id)
+    
+    total_joins = base_query.filter(MemberJoinLeave.event_type == 'join').count()
+    total_leaves = base_query.filter(MemberJoinLeave.event_type == 'leave').count()
+    
+    # Hourly breakdown
+    hourly_joins = db.session.query(
+        MemberJoinLeave.hour_of_day, func.count(MemberJoinLeave.id)
+    ).filter(
+        MemberJoinLeave.created_at >= cutoff,
+        MemberJoinLeave.event_type == 'join'
+    )
+    if guild_id:
+        hourly_joins = hourly_joins.filter(MemberJoinLeave.guild_id == guild_id)
+    hourly_joins = hourly_joins.group_by(MemberJoinLeave.hour_of_day).all()
+    
+    hourly_leaves = db.session.query(
+        MemberJoinLeave.hour_of_day, func.count(MemberJoinLeave.id)
+    ).filter(
+        MemberJoinLeave.created_at >= cutoff,
+        MemberJoinLeave.event_type == 'leave'
+    )
+    if guild_id:
+        hourly_leaves = hourly_leaves.filter(MemberJoinLeave.guild_id == guild_id)
+    hourly_leaves = hourly_leaves.group_by(MemberJoinLeave.hour_of_day).all()
+    
+    # Leave reasons
+    leave_reasons = db.session.query(
+        MemberJoinLeave.leave_reason, func.count(MemberJoinLeave.id)
+    ).filter(
+        MemberJoinLeave.created_at >= cutoff,
+        MemberJoinLeave.event_type == 'leave',
+        MemberJoinLeave.leave_reason != None
+    )
+    if guild_id:
+        leave_reasons = leave_reasons.filter(MemberJoinLeave.guild_id == guild_id)
+    leave_reasons = leave_reasons.group_by(MemberJoinLeave.leave_reason).all()
+    
+    return jsonify({
+        'guild_id': guild_id,
+        'days': days,
+        'total_joins': total_joins,
+        'total_leaves': total_leaves,
+        'net_growth': total_joins - total_leaves,
+        'hourly_joins': {str(h): c for h, c in hourly_joins},
+        'hourly_leaves': {str(h): c for h, c in hourly_leaves},
+        'leave_reasons': {r: c for r, c in leave_reasons},
+    })
+

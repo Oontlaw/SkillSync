@@ -3,7 +3,7 @@ from bot_core.api_client import api_post
 from bot_core.logging import log
 from bot_core.config import (
     MAX_BUFFER_SIZE, MESSAGE_BUFFER_LIMIT, PRESENCE_BUFFER_LIMIT,
-    JOIN_BUFFER_LIMIT, MEMBER_PRESENCE_BUFFER_LIMIT,
+    JOIN_BUFFER_LIMIT, JOIN_LEAVE_BUFFER_LIMIT, MEMBER_PRESENCE_BUFFER_LIMIT,
     MENTION_BUFFER_LIMIT, VOICE_BUFFER_LIMIT,
 )
 
@@ -68,6 +68,9 @@ presence_buffer = []
 
 # ── Member join buffer ──
 join_buffer = []
+
+# ── Member join/leave buffer ──
+join_leave_buffer = []
 
 # ── Member presence buffer ──
 member_presence_buffer = []
@@ -181,3 +184,14 @@ async def flush_online_count():
         payload[guild_id] = len(members)
     await api_post('/observer/online-count', payload)
     log(f'FLUSHED online counts for {len(payload)} guilds: {payload}')
+
+
+async def flush_join_leave_buffer():
+    """Send buffered member join/leave records to the API."""
+    global join_leave_buffer
+    if not join_leave_buffer:
+        return
+    batch = join_leave_buffer[:]
+    join_leave_buffer = []
+    await api_post('/observer/join-leave', {'batch': True, 'events': batch})
+    log(f'FLUSHED {len(batch)} join/leave events')

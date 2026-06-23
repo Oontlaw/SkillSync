@@ -1,10 +1,11 @@
 import asyncio
 import discord
 from datetime import datetime, timedelta, timezone
-from bot_core.config import BAN_WATCH_HOURS
+from bot_core.config import BAN_WATCH_HOURS, JOIN_LEAVE_BUFFER_LIMIT, MAX_BUFFER_SIZE
 from bot_core.state import (
-    pending_bans, pending_timeouts, last_staff_activity, track_offline,
+    pending_bans, pending_timeouts, last_staff_activity, track_offline, join_leave_buffer,
 )
+from bot_core.tasks import flush_join_leave_buffer
 from bot_core.privacy import is_mod_bot
 from bot_core.api_client import api_post
 from bot_core.logging import log
@@ -345,16 +346,19 @@ async def handle_member_update(before, after):
 
 
 async def handle_member_remove(member):
-    """Detect kicks via audit log."""
+    """Detect kicks via audit log and track all leave events."""
     try:
         if member.guild:
             track_offline(str(member.guild.id), member.id)
         await asyncio.sleep(1)
         guild = member.guild
 
+        leave_reason = 'leave'  # default is voluntary leave
+
         try:
             async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.kick):
                 if entry.target and entry.target.id == member.id:
+                    leave_reason = 'kick'
                     kicker_id = entry.user.id if entry.user else None
                     kicker_name = entry.user.name if entry.user else 'Unknown'
 
@@ -369,7 +373,6 @@ async def handle_member_remove(member):
                         else:
                             log(f'No recent staff activity for guild={guild.id} -- skipping kick')
                             print(f'[Observer] Kick by mod bot {entry.user.name} -- skipping (no staff nearby)')
-                            return
                     else:
                         print(f'[Observer] Kick: {member.name} by {kicker_name}')
 
@@ -386,9 +389,32 @@ async def handle_member_remove(member):
                         'flag_reason': None,
                         'timestamp': datetime.now(timezone.utc).isoformat()
                     })
-                    return
+                    break
+            async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.ban):
+                if entry.target and entry.target.id == member.id:
+                    leave_reason = 'ban'
+                    break
         except Exception as e:
-            log(f'KICK AUDIT LOG ERROR in {guild.name}: {e}')
-            print(f'[Observer] Could not read audit log for kick in {guild.name}: {e}')
+            log(f'KICK/BAN AUDIT LOG ERROR in {guild.name}: {e}')
+            print(f'[Observer] Could not read audit log for kick/ban in {guild.name}: {e}')
+
+        # Add leave event to buffer
+        now = datetime.now(timezone.utc)
+        join_leave_buffer.append({
+            'guild_id': str(guild.id),
+            'member_id': str(member.id),
+            'member_name': member.name,
+            'is_bot': member.bot,
+            'event_type': 'leave',
+            'leave_reason': leave_reason,
+            'hour_of_day': now.hour,
+            'day_of_week': now.weekday(),
+            'timestamp': now.isoformat()
+        })
+        if len(join_leave_buffer) >= JOIN_LEAVE_BUFFER_LIMIT:
+            await flush_join_leave_buffer()
+        elif len(join_leave_buffer) > MAX_BUFFER_SIZE:
+            join_leave_buffer[:] = join_leave_buffer[-MAX_BUFFER_SIZE:]
+
     except Exception as e:
         print(f'[Observer] Error in on_member_remove: {e}')

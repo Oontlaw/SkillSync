@@ -2,16 +2,16 @@ import discord
 from datetime import datetime, timezone
 from bot_core.config import (
     MAX_BUFFER_SIZE, PRESENCE_BUFFER_LIMIT,
-    JOIN_BUFFER_LIMIT, MEMBER_PRESENCE_BUFFER_LIMIT,
+    JOIN_BUFFER_LIMIT, JOIN_LEAVE_BUFFER_LIMIT, MEMBER_PRESENCE_BUFFER_LIMIT,
     VOICE_BUFFER_LIMIT,
 )
 from bot_core.state import (
-    presence_buffer, member_presence_buffer, join_buffer,
+    presence_buffer, member_presence_buffer, join_buffer, join_leave_buffer,
     voice_sessions, voice_buffer, active_pings,
     track_online, track_offline,
 )
 from bot_core.tasks import flush_presence_buffer, flush_member_presence_buffer
-from bot_core.tasks import flush_join_buffer, flush_voice_buffer
+from bot_core.tasks import flush_join_buffer, flush_voice_buffer, flush_join_leave_buffer
 from bot_core.logging import log
 
 
@@ -77,6 +77,24 @@ async def handle_member_join(member):
             await flush_join_buffer()
         elif len(join_buffer) > MAX_BUFFER_SIZE:
             join_buffer[:] = join_buffer[-MAX_BUFFER_SIZE:]
+
+        # Add to join/leave buffer
+        now = datetime.now(timezone.utc)
+        join_leave_buffer.append({
+            'guild_id': str(member.guild.id),
+            'member_id': str(member.id),
+            'member_name': member.name,
+            'is_bot': member.bot,
+            'event_type': 'join',
+            'leave_reason': None,
+            'hour_of_day': now.hour,
+            'day_of_week': now.weekday(),
+            'timestamp': now.isoformat()
+        })
+        if len(join_leave_buffer) >= JOIN_LEAVE_BUFFER_LIMIT:
+            await flush_join_leave_buffer()
+        elif len(join_leave_buffer) > MAX_BUFFER_SIZE:
+            join_leave_buffer[:] = join_leave_buffer[-MAX_BUFFER_SIZE:]
 
         ping = active_pings.get(member.guild.id)
         if ping:

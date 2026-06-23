@@ -1,6 +1,7 @@
 from database import db, ScoreLog, Worker
 from datetime import datetime
 from sqlalchemy import func
+from typing import Dict, Any, Optional, List
 
 # --- Point values ---
 POINTS = {
@@ -15,7 +16,7 @@ POINTS = {
 }
 
 
-def _compute_score(worker_id, guild_id=None):
+def _compute_score(worker_id: int, guild_id: Optional[str] = None) -> float:
     """Compute total score from ScoreLog, optionally filtered by guild."""
     q = db.session.query(func.sum(ScoreLog.change)).filter(ScoreLog.worker_id == worker_id)
     if guild_id:
@@ -23,7 +24,7 @@ def _compute_score(worker_id, guild_id=None):
     return q.scalar() or 0.0
 
 
-def _compute_all_scores(guild_id=None):
+def _compute_all_scores(guild_id: Optional[str] = None) -> Dict[int, float]:
     """Return dict of {worker_id: score} from ScoreLog."""
     q = db.session.query(ScoreLog.worker_id, func.sum(ScoreLog.change).label('total'))
     if guild_id:
@@ -31,11 +32,25 @@ def _compute_all_scores(guild_id=None):
     return {r.worker_id: float(r.total) for r in q.group_by(ScoreLog.worker_id).all()}
 
 
-def award_points(worker_id, reason_key, source='system', custom_points=None, note=None):
+def award_points(
+    worker_id: int,
+    reason_key: str,
+    source: str = 'system',
+    custom_points: Optional[float] = None,
+    note: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Award or deduct points from a worker.
-    reason_key: key from POINTS dict
-    custom_points: override the default points value
+    
+    Args:
+        worker_id: ID of the worker to award points to
+        reason_key: key from POINTS dict
+        source: Source of the points (e.g., 'system', 'discord')
+        custom_points: override the default points value from POINTS
+        note: Custom note for the reason instead of using reason_key
+    
+    Returns:
+        Dict with worker name, points change, new score, and reason
     """
     worker = db.session.get(Worker, worker_id)
     if not worker:
@@ -62,11 +77,25 @@ def award_points(worker_id, reason_key, source='system', custom_points=None, not
     }
 
 
-def correct_case(case_id, new_change, reason, admin_name):
+def correct_case(
+    case_id: int,
+    new_change: float,
+    reason: str,
+    admin_name: str
+) -> Dict[str, Any]:
     """
     Admin corrects a specific ScoreLog entry (case) by its ID.
     Updates the case's change value directly and records the correction.
     The total score is always SUM(ScoreLog.change) per guild — no arbitrary additions.
+    
+    Args:
+        case_id: ID of the ScoreLog entry to correct
+        new_change: New points change value for the entry
+        reason: Reason for the correction
+        admin_name: Name of the admin making the correction
+    
+    Returns:
+        Dict with worker name, case ID, original and new values, new score, and corrector
     """
     from database import AdminCorrection
 
@@ -98,7 +127,7 @@ def correct_case(case_id, new_change, reason, admin_name):
     }
 
 
-def get_leaderboard(limit=10, guild_id=None):
+def get_leaderboard(limit: int = 10, guild_id: Optional[str] = None) -> List[Worker]:
     """Return top workers by score computed from ScoreLog."""
     scores = _compute_all_scores(guild_id=guild_id)
     sorted_workers = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:limit]
@@ -111,6 +140,6 @@ def get_leaderboard(limit=10, guild_id=None):
     return result
 
 
-def get_worker_history(worker_id):
+def get_worker_history(worker_id: int) -> List[ScoreLog]:
     """Return full score log for a worker."""
     return ScoreLog.query.filter_by(worker_id=worker_id).order_by(ScoreLog.created_at.desc()).all()

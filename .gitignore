@@ -56,7 +56,7 @@ Thumbs.db
 ml/models/
 *.joblib
 
-AGENTS.md
+AGENTS*.md
 DOCS.md
 SYNOPSIS.md
 
