@@ -3,7 +3,7 @@ import discord
 import requests
 from bot_core.config import SKILLSYNC_API, API_KEY
 from bot_core.api_client import api_post
-from bot_core.state import prefix_cache, set_automod_alert_channels
+from bot_core.state import prefix_cache, set_automod_alert_channels, track_online, track_offline
 from bot_core.logging import log
 
 
@@ -100,10 +100,12 @@ async def scan_guild(guild):
         members_data.append(md)
         if is_staff and not member.bot:
             staff_member_ids.append(str(member.id))
-        if member.bot:
-            bot_count += 1
-        if member.status != discord.Status.offline:
+        is_online = member.status != discord.Status.offline
+        if is_online:
             online_count += 1
+            track_online(str(guild.id), member.id)
+        else:
+            track_offline(str(guild.id), member.id)
 
     channels_data = []
     for channel in guild.channels:

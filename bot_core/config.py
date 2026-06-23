@@ -36,3 +36,4 @@ intents.members = True
 intents.moderation = True
 intents.guilds = True
 intents.presences = True
+intents.voice_states = True

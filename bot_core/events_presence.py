@@ -8,6 +8,7 @@ from bot_core.config import (
 from bot_core.state import (
     presence_buffer, member_presence_buffer, join_buffer,
     voice_sessions, voice_buffer, active_pings,
+    track_online, track_offline,
 )
 from bot_core.tasks import flush_presence_buffer, flush_member_presence_buffer
 from bot_core.tasks import flush_join_buffer, flush_voice_buffer
@@ -19,6 +20,12 @@ async def handle_presence_update(before, after):
     Also updates GuildMember presence for the persistent member registry."""
     if before.status == after.status or not after.guild:
         return
+
+    guild_id = str(after.guild.id)
+    if after.status != discord.Status.offline and before.status == discord.Status.offline:
+        track_online(guild_id, after.id)
+    elif after.status == discord.Status.offline and before.status != discord.Status.offline:
+        track_offline(guild_id, after.id)
     presence_buffer.append({
         'discord_id': str(after.id),
         'staff_name': after.name,
@@ -57,6 +64,7 @@ async def handle_presence_update(before, after):
 async def handle_member_join(member):
     """Track new members joining — buffered. Also checks @everyone ping window."""
     try:
+        track_online(str(member.guild.id), member.id)
         join_buffer.append({
             'discord_id': str(member.id),
             'staff_name': member.name,
@@ -99,6 +107,7 @@ async def handle_member_join(member):
 
 async def handle_voice_state_update(member, before, after):
     """Track voice channel joins/leaves/moves for behavioral pattern recognition."""
+    log(f'VOICE_EVENT: member={member.name} guild={member.guild.name if member.guild else "NO_GUILD"} before={before.channel.name if before.channel else "None"} after={after.channel.name if after.channel else "None"}')
     if member.bot or not member.guild:
         return
     user_id = str(member.id)

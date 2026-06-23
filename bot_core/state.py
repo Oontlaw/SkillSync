@@ -46,6 +46,20 @@ def set_automod_alert_channels(channels):
 # ── Staff activity proximity ──
 last_staff_activity = {}
 
+# ── Live online member set per guild: { guild_id: set(member_id) } ──
+# Tracked via presence events; seeded from scan.
+# Flushed to API as a simple count to update GuildInfo.online_count.
+online_members = {}  # dict[str, set[int]]
+
+def track_online(guild_id: str, member_id: int):
+    online_members.setdefault(guild_id, set()).add(member_id)
+
+def track_offline(guild_id: str, member_id: int):
+    online_members.get(guild_id, set()).discard(member_id)
+
+def seed_online_set(guild_id: str, member_ids: list):
+    online_members[guild_id] = set(member_ids)
+
 # ── Behavioral message buffer ──
 message_buffer = []
 
@@ -156,3 +170,14 @@ async def flush_member_presence_buffer():
     member_presence_buffer = []
     await api_post('/observer/presence', {'updates': batch})
     log(f'FLUSHED {len(batch)} member presence updates')
+
+
+async def flush_online_count():
+    """Send live online member counts to API."""
+    if not online_members:
+        return
+    payload = {}
+    for guild_id, members in list(online_members.items()):
+        payload[guild_id] = len(members)
+    await api_post('/observer/online-count', payload)
+    log(f'FLUSHED online counts for {len(payload)} guilds: {payload}')

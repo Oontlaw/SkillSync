@@ -528,7 +528,8 @@ def guild_detail(guild_id):
                 target[str(h)] = c
 
     # Chart data using actual DB counts
-    online_count = GuildMember.query.filter_by(guild_id=guild_id, is_bot=False, is_online=True).count()
+    guild_info = GuildInfo.query.filter_by(guild_id=guild_id).first()
+    online_count = guild_info.online_count if guild_info else GuildMember.query.filter_by(guild_id=guild_id, is_bot=False, is_online=True).count()
     tracked_chatted = GuildMember.query.filter_by(guild_id=guild_id, is_bot=False).filter(GuildMember.last_message_at != None).count()
     tracked_offline = GuildMember.query.filter_by(guild_id=guild_id, is_bot=False, is_online=False).filter(GuildMember.last_message_at == None).count()
     community_count = GuildMember.query.filter_by(guild_id=guild_id, is_bot=False, is_staff=False).count()

@@ -2,9 +2,9 @@
 title SkillSync Starter
 echo Starting SkillSync Services...
 
-:: Start Flask
+:: Start Flask (production mode — no debugger, Secure cookies)
 echo [1/3] Starting Flask Server...
-start /b cmd /c "set FLASK_ENV=development && .\.venv\Scripts\python.exe app.py"
+start /b cmd /c ".\.venv\Scripts\python.exe app.py"
 
 :: Start Bot
 echo [2/3] Starting Discord Bot...

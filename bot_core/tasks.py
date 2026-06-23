@@ -14,9 +14,11 @@ from bot_core.state import (  # re-exported for other modules
     flush_message_buffer, flush_presence_buffer,
     flush_voice_buffer, flush_mention_buffer,
     flush_join_buffer, flush_member_presence_buffer,
+    flush_online_count,
 )
 from bot_core.api_client import api_post
 from bot_core.logging import log
+from bot_core.scanner import scan_guild
 
 
 _bot = None
@@ -37,6 +39,7 @@ async def flush_all_buffers():
     await flush_mention_buffer()
     await flush_voice_buffer()
     await flush_join_buffer()
+    await flush_online_count()
     await _maybe_heartbeat()
 
 
@@ -231,3 +234,18 @@ async def jira_poll_loop():
         synced += 1
     db.session.commit()
     print(f'[WorkEngine] Synced {synced} issues from Jira')
+
+
+@tasks.loop(hours=6)
+async def rescan_guilds_loop():
+    """Re-scan all guilds every 6 hours to refresh online counts, members, and staff lists."""
+    if not _bot:
+        return
+    print(f'[Rescan] Starting periodic guild re-scan for {len(_bot.guilds)} guild(s)...')
+    for guild in _bot.guilds:
+        try:
+            await scan_guild(guild)
+            print(f'[Rescan] Re-scanned {guild.name} ({guild.id})')
+        except Exception as e:
+            print(f'[Rescan] Error scanning {guild.name}: {e}')
+    print(f'[Rescan] Periodic guild re-scan complete')

@@ -3,7 +3,7 @@ import discord
 from datetime import datetime, timedelta, timezone
 from bot_core.config import BAN_WATCH_HOURS
 from bot_core.state import (
-    pending_bans, pending_timeouts, last_staff_activity,
+    pending_bans, pending_timeouts, last_staff_activity, track_offline,
 )
 from bot_core.privacy import is_mod_bot
 from bot_core.api_client import api_post
@@ -13,6 +13,7 @@ from bot_core.logging import log
 async def handle_member_ban(guild, user):
     """Detect bans via audit log, attribute to staff, store in pending_bans."""
     try:
+        track_offline(str(guild.id), user.id)
         log(f'on_member_ban FIRED: user={user.name} (id={user.id}) in guild={guild.name}')
         await asyncio.sleep(1)
 
@@ -344,6 +345,8 @@ async def handle_member_update(before, after):
 async def handle_member_remove(member):
     """Detect kicks via audit log."""
     try:
+        if member.guild:
+            track_offline(str(member.guild.id), member.id)
         await asyncio.sleep(1)
         guild = member.guild
 

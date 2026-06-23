@@ -7,6 +7,9 @@ class Config:
     SECRET_KEY = os.getenv('SECRET_KEY')
     if not SECRET_KEY:
         raise RuntimeError('SECRET_KEY environment variable is required. Generate one with: python -c "import secrets; print(secrets.token_hex(32))"')
+    if SECRET_KEY == 'skillsync-super-secret-key':
+        import warnings
+        warnings.warn('SECRET_KEY is set to the default placeholder! Generate a unique key for production: python -c "import secrets; print(secrets.token_hex(32))"')
     SQLALCHEMY_DATABASE_URI = os.getenv(
         'DATABASE_URL',
         'sqlite:///skillsync.db'

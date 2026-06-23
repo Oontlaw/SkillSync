@@ -973,6 +973,53 @@ def receive_presence():
     return jsonify({'updated': updated, 'created': created}), 200
 
 
+@observer_bp.route('/observer/seed-online', methods=['GET'])
+@require_api_key
+def seed_online():
+    """
+    Returns online member IDs per guild for seeding the bot's online_members set.
+    Only includes members seen online in the last 30 minutes to avoid stale counts.
+    Response: { guild_id: [member_id_int, ...], ... }
+    """
+    cutoff = datetime.utcnow() - timedelta(minutes=30)
+    guilds = GuildInfo.query.all()
+    result = {}
+    for g in guilds:
+        members = GuildMember.query.filter(
+            GuildMember.guild_id == g.guild_id,
+            GuildMember.is_online == True,
+            GuildMember.last_seen_online >= cutoff
+        ).all()
+        if members:
+            result[g.guild_id] = [int(m.member_id) for m in members]
+    print(f'[SeedOnline] Returned online members for {len(result)} guilds (last 30min)')
+    return jsonify(result), 200
+
+
+@observer_bp.route('/observer/online-count', methods=['POST'])
+@require_api_key
+def receive_online_count():
+    """
+    Receives live online member counts per guild from the bot's presence tracking.
+    Updates GuildInfo.online_count in DB for dashboard display.
+    Payload: { guild_id: count, ... }
+    """
+    data = request.json
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
+    updated = 0
+    for guild_id_str, count in data.items():
+        if not isinstance(count, int):
+            continue
+        guild = GuildInfo.query.filter_by(guild_id=sanitize_str(guild_id_str, 50)).first()
+        if guild:
+            guild.online_count = count
+            updated += 1
+    db.session.commit()
+    print(f'[OnlineCount] Updated {updated} guilds')
+    return jsonify({'updated': updated}), 200
+
+
 # ─────────────────────────────────────────────
 # BEHAVIORAL ANOMALY DETECTION
 # ─────────────────────────────────────────────
