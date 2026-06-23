@@ -31,12 +31,18 @@ async def handle_ready(bot):
     print(f'[SkillSync] Ping watch window: {PING_WATCH_MINUTES} min')
 
     # Start background tasks
-    check_reversed_actions.start()
-    flush_all_buffers.start()
-    message_cleanup_loop.start()
-    check_ping_joins.start()
-    jira_poll_loop.start()
-    rescan_guilds_loop.start()
+    if not check_reversed_actions.is_running():
+        check_reversed_actions.start()
+    if not flush_all_buffers.is_running():
+        flush_all_buffers.start()
+    if not message_cleanup_loop.is_running():
+        message_cleanup_loop.start()
+    if not check_ping_joins.is_running():
+        check_ping_joins.start()
+    if not jira_poll_loop.is_running():
+        jira_poll_loop.start()
+    if not rescan_guilds_loop.is_running():
+        rescan_guilds_loop.start()
 
     # Fetch prefixes + content trust from API
     try:

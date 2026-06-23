@@ -305,7 +305,8 @@ async def handle_member_update(before, after):
                 'timestamp': datetime.now(timezone.utc)
             }
 
-            print(f'[Observer] Timeout: {after.name} by {mod_name}')
+            duration_minutes = int((after.timed_out_until - datetime.now(timezone.utc)).total_seconds() / 60) if after.timed_out_until else None
+            print(f'[Observer] Timeout: {after.name} by {mod_name} ({duration_minutes} min)')
             await api_post('/observer/action', {
                 'discord_id': str(mod_id),
                 'staff_name': mod_name,
@@ -314,6 +315,7 @@ async def handle_member_update(before, after):
                 'target_id': str(after.id),
                 'guild': guild.name,
                 'guild_id': str(guild.id),
+                'duration_minutes': duration_minutes,
                 'reason': reason,
                 'flagged': False,
                 'flag_reason': None,

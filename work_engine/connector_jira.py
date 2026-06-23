@@ -6,7 +6,7 @@ JIRA_URL = os.getenv('JIRA_URL', '')
 JIRA_EMAIL = os.getenv('JIRA_EMAIL', '')
 JIRA_API_TOKEN = os.getenv('JIRA_API_TOKEN', '')
 JIRA_PROJECT = os.getenv('JIRA_PROJECT', '')
-JIRA_JQL = os.getenv('JIRA_JQL', f'project={JIRA_PROJECT}')
+JIRA_JQL = os.getenv('JIRA_JQL') or (f'project={JIRA_PROJECT}' if JIRA_PROJECT else '')
 
 STATUS_MAP = {
     'Done': 'completed',

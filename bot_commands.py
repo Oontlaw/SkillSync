@@ -159,13 +159,16 @@ class Moderation(commands.Cog):
             await ctx.send(f'Banned {target.name}. Reason: {reason}')
         except discord.Forbidden:
             await ctx.send('I don\'t have permission to ban that user.')
+            return
         except discord.HTTPException as e:
             await ctx.send(f'Failed to ban: {e}')
+            return
         await api_post('/observer/action', {
             'discord_id': str(ctx.author.id),
             'staff_name': ctx.author.name,
             'action_type': 'ban_issued',
             'target': target.name,
+            'target_id': str(target.id),
             'guild': ctx.guild.name,
             'guild_id': str(ctx.guild.id),
             'reason': reason,
@@ -195,13 +198,16 @@ class Moderation(commands.Cog):
             await ctx.send(f'Kicked {target.name}. Reason: {reason}')
         except discord.Forbidden:
             await ctx.send('I don\'t have permission to kick that user.')
+            return
         except discord.HTTPException as e:
             await ctx.send(f'Failed to kick: {e}')
+            return
         await api_post('/observer/action', {
             'discord_id': str(ctx.author.id),
             'staff_name': ctx.author.name,
             'action_type': 'kick_issued',
             'target': target.name,
+            'target_id': str(target.id),
             'guild': ctx.guild.name,
             'guild_id': str(ctx.guild.id),
             'reason': reason,
@@ -233,15 +239,19 @@ class Moderation(commands.Cog):
             await ctx.send(f'Timed out {target.name} for {minutes} min. Reason: {reason}')
         except discord.Forbidden:
             await ctx.send('I don\'t have permission to timeout that user.')
+            return
         except discord.HTTPException as e:
             await ctx.send(f'Failed to timeout: {e}')
+            return
         await api_post('/observer/action', {
             'discord_id': str(ctx.author.id),
             'staff_name': ctx.author.name,
             'action_type': 'timeout_issued',
             'target': target.name,
+            'target_id': str(target.id),
             'guild': ctx.guild.name,
             'guild_id': str(ctx.guild.id),
+            'duration_minutes': minutes,
             'reason': reason,
             'flagged': False,
             'flag_reason': None,
@@ -267,6 +277,7 @@ class Moderation(commands.Cog):
             'staff_name': ctx.author.name,
             'action_type': 'warn_issued',
             'target': target.name,
+            'target_id': str(target.id),
             'guild': ctx.guild.name,
             'guild_id': str(ctx.guild.id),
             'reason': reason,
