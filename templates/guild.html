@@ -2,12 +2,14 @@
 {% block title %}{{ guild.name }} – SkillSync{% endblock %}
 
 {% block content %}
-<div class="p-6">
-  <!-- Header -->
-  <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 mb-8 glow">
+<div class="p-6 max-w-7xl mx-auto">
+  <!-- 1. GUILD HEADER -->
+  <div class="bg-[#111318] rounded-2xl border border-gray-800/40 p-6 mb-8 glow">
     <div class="flex justify-between items-start">
       <div>
-        <h1 class="text-2xl font-bold text-white">{{ guild.name }}</h1>
+        <h1 class="text-2xl font-bold text-white flex items-center gap-2">
+          <span class="text-blue-500">🛡️</span> {{ guild.name }}
+        </h1>
         <p class="text-gray-500 text-sm mt-1">Guild ID: {{ guild.guild_id }}</p>
       </div>
       <div class="text-right">
@@ -17,278 +19,225 @@
         <p class="text-gray-600 text-xs mt-1">Scanned: <span class="utc-time" data-utc="{{ guild.scanned_at.isoformat() if guild.scanned_at else '' }}">{{ guild.scanned_at.strftime('%Y-%m-%d %H:%M') if guild.scanned_at else 'Not yet' }}</span></p>
       </div>
     </div>
-    <div class="grid grid-cols-6 gap-4 mt-6">
-      {% set hdr = [('Members (Discord)', guild.member_count, 'white'), ('Online Now', online_count, 'green'), ('Tracked in DB', human_count, 'blue'), ('Chatted', tracked_chatted, 'emerald'), ('Messages', guild_msg_total, 'yellow'), ('Roles', guild.role_count, 'white')] %}
+    <div class="grid grid-cols-2 md:grid-cols-6 gap-4 mt-6">
+      {% set hdr = [('Members', guild.member_count, 'white'), ('Online', online_count, 'green'), ('Tracked', human_count, 'blue'), ('Chatted', tracked_chatted, 'emerald'), ('Messages', guild_msg_total, 'yellow'), ('Roles', guild.role_count, 'white')] %}
       {% for label, val, color in hdr %}
-      <div class="bg-[#0b0d11] rounded-xl border border-gray-800/40 p-4 text-center">
-        <p class="text-gray-500 text-xs uppercase tracking-wider">{{ label }}</p>
+      <div class="bg-[#0f1116] rounded-xl border border-gray-800/40 p-3 text-center">
+        <p class="text-gray-500 text-[10px] uppercase tracking-wider">{{ label }}</p>
         <p class="text-2xl font-bold text-{{ color }}-400 mt-1">{{ val }}</p>
       </div>
       {% endfor %}
     </div>
   </div>
 
-  <!-- Charts -->
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6"><h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">👥 Composition</h2><div class="relative" style="height:160px"><canvas id="guildCompositionChart"></canvas></div></div>
-    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6"><h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🛡️ Staff vs Community</h2><div class="relative" style="height:160px"><canvas id="guildStaffChart"></canvas></div></div>
-    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6"><h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🤖 Bots vs Humans</h2><div class="relative" style="height:160px"><canvas id="guildBotsChart"></canvas></div></div>
-  </div>
-
-  {% if guild_hourly_chart %}
-  <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 mb-8">
-    <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🕐 Hourly Activity ({{ guild_msg_total }} msgs)</h2>
-    <p class="text-xs text-gray-600 mb-3">Peak activity hours for this server — helps identify its dominant timezone</p>
-    <div class="relative" style="height:180px"><canvas id="guildHourlyChart"></canvas></div>
-  </div>
-
-  <!-- Peak Hour Staffing (#3) -->
-  {% if community_hourly and staff_hourly %}
-  <div class="bg-[#111318] rounded-2xl border border-yellow-800/40 p-6 mb-8">
-    <h2 class="text-sm font-semibold text-yellow-400 uppercase tracking-wider mb-4">⏰ Peak Hour Staffing</h2>
-    <p class="text-xs text-gray-600 mb-3">Community activity vs staff presence — reveals understaffed hours</p>
-    <div class="relative" style="height:200px"><canvas id="staffingChart"></canvas></div>
-  </div>
-  {% endif %}
-
-  {% if forecast_data %}
-  <div class="bg-[#111318] rounded-2xl border border-blue-800/40 p-6 mb-8">
-    <h2 class="text-sm font-semibold text-blue-400 uppercase tracking-wider mb-4">📈 ML 24h Activity Forecast</h2>
-    <p class="text-xs text-gray-600 mb-3">Predicted messages per hour (Random Forest) vs actual from last 7 days</p>
-    <div class="relative" style="height:180px"><canvas id="forecastChart"></canvas></div>
-    {% if forecast_metrics and forecast_metrics.samples > 0 %}
-    <div class="flex gap-6 mt-3 text-xs">
-      <span class="text-gray-500">MAE: <strong class="text-gray-300">{{ forecast_metrics.mean_absolute_error }}</strong></span>
-      <span class="text-gray-500">Bias: <strong class="text-gray-300 {% if forecast_metrics.mean_signed_error > 0 %}text-yellow-400{% elif forecast_metrics.mean_signed_error < 0 %}text-orange-400{% else %}text-gray-300{% endif %}">{{ "+" if forecast_metrics.mean_signed_error > 0 else "" }}{{ forecast_metrics.mean_signed_error }}</strong></span>
-      <span class="text-gray-500">Accuracy: <strong class="{% if forecast_metrics.accuracy_pct > 70 %}text-emerald-400{% elif forecast_metrics.accuracy_pct > 40 %}text-yellow-400{% else %}text-red-400{% endif %}">{{ forecast_metrics.accuracy_pct }}%</strong></span>
-      <span class="text-gray-500">Samples: <strong class="text-gray-300">{{ forecast_metrics.samples }}</strong></span>
-    </div>
-    {% endif %}
-  </div>
-  {% endif %}
-  {% endif %}
-
+  <!-- 2. INTELLIGENCE ALERTS -->
   {% if guild_anomalies %}
-  <div class="bg-[#111318] rounded-2xl border border-red-900/40 p-6 mb-8">
-    <h2 class="text-sm font-semibold text-red-400 uppercase tracking-wider mb-4">🚨 Behavioral Anomalies</h2>
-    <div class="space-y-2">
-      {% for a in guild_anomalies %}
-      <div class="flex justify-between items-center py-2 border-b border-gray-800/40 last:border-0">
-        <div>
-          <span class="text-red-400 text-sm font-medium">{{ a.anomaly_type | replace('_', ' ') | title }}</span>
-          <span class="text-gray-400 text-sm ml-2">— {{ a.name or a.discord_id }}</span>
-          <p class="text-gray-600 text-xs mt-0.5">{{ a.details }}</p>
-        </div>
-        <span class="text-red-400 text-xs font-bold px-2 py-1 bg-red-900/30 rounded">{{ "%.0f"|format(a.severity) }}%</span>
-      </div>
-      {% endfor %}
+  <div class="mb-8">
+    <div class="flex items-center gap-2 mb-4">
+      <span class="text-red-500 text-lg">🚨</span>
+      <h2 class="text-sm font-bold text-gray-300 uppercase tracking-widest">Intelligence Alerts</h2>
     </div>
-  </div>
-  {% endif %}
-
-  {% if guild_voice_sessions > 0 %}
-  <div class="bg-[#111318] rounded-2xl border border-emerald-800/40 p-6 mb-8">
-    <h2 class="text-sm font-semibold text-emerald-400 uppercase tracking-wider mb-5">🎙️ Voice Activity ({{ guild_voice_sessions }} sessions · {{ guild_voice_hours }}h)</h2>
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <div>
-        <h3 class="text-xs text-gray-500 uppercase tracking-wider mb-3">Top Voice Channels</h3>
-        <div class="space-y-2">
-          {% for ch in guild_voice_top_channels %}
-          <div class="flex justify-between items-center border-b border-gray-800/40 pb-1.5">
-            <span class="text-gray-300 text-sm">{{ ch.name }}</span>
-            <span class="text-gray-500 text-xs">{{ ch.sessions }} sessions · {{ ch.hours }}h</span>
+    <div class="bg-[#111318] rounded-2xl border border-red-900/30 p-6 shadow-sm">
+      <div class="space-y-3">
+        {% for a in guild_anomalies %}
+        <div class="flex justify-between items-center p-3 bg-[#0b0d11] rounded-xl border border-gray-800/40 hover:border-red-900/50 transition">
+          <div>
+            <span class="text-red-400 font-medium text-sm">{{ a.anomaly_type | replace('_', ' ') | title }}</span>
+            <span class="text-gray-400 text-sm ml-2">— {{ a.name or a.discord_id }}</span>
+            <p class="text-gray-600 text-xs mt-0.5">{{ a.details }}</p>
           </div>
-          {% endfor %}
+          <span class="text-red-400 text-xs font-bold px-2 py-1 bg-red-900/30 rounded">{{ "%.0f"|format(a.severity) }}%</span>
         </div>
+        {% endfor %}
       </div>
-      <div>
-        <h3 class="text-xs text-gray-500 uppercase tracking-wider mb-3">Voice by Hour</h3>
-        <div class="relative" style="height:120px"><canvas id="guildVoiceHourlyChart"></canvas></div>
-      </div>
-      <div>
-        <h3 class="text-xs text-gray-500 uppercase tracking-wider mb-3">Top Voice Users</h3>
-        <div class="space-y-2 max-h-48 overflow-y-auto">
-          {% for u in guild_voice_users %}
-          <div class="flex justify-between items-center border-b border-gray-800/40 pb-1.5">
-            <span class="text-gray-300 text-sm">{{ u.name }}</span>
-            <span class="text-gray-500 text-xs">{{ u.sessions }} sessions · {{ u.hours }}h</span>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- 3. ANALYTICS HUB -->
+  <div class="mb-8">
+    <div class="flex items-center gap-2 mb-4">
+      <span class="text-blue-500 text-lg">📊</span>
+      <h2 class="text-sm font-bold text-gray-300 uppercase tracking-widest">Analytics Hub</h2>
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <!-- Main Activity Charts -->
+      <div class="lg:col-span-8 space-y-6">
+        {% if guild_hourly_chart %}
+        <div class="bg-[#111318] rounded-2xl border border-gray-800/40 p-6 shadow-sm">
+          <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🕐 Hourly Activity Distribution</h3>
+          <div class="relative" style="height:200px"><canvas id="guildHourlyChart"></canvas></div>
+        </div>
+        {% endif %}
+
+        {% if community_hourly and staff_hourly %}
+        <div class="bg-[#111318] rounded-2xl border border-yellow-800/30 p-6 shadow-sm">
+          <h3 class="text-sm font-semibold text-yellow-400 uppercase tracking-wider mb-4">⏰ Peak Hour Staffing Overlay</h3>
+          <div class="relative" style="height:200px"><canvas id="staffingChart"></canvas></div>
+        </div>
+        {% endif %}
+
+        {% if forecast_data %}
+        <div class="bg-[#111318] rounded-2xl border border-blue-800/30 p-6 shadow-sm">
+          <h3 class="text-sm font-semibold text-blue-400 uppercase tracking-wider mb-4">📈 ML 24h Activity Forecast</h3>
+          <div class="relative" style="height:200px"><canvas id="forecastChart"></canvas></div>
+          {% if forecast_metrics and forecast_metrics.samples > 0 %}
+          <div class="flex gap-6 mt-4 text-xs">
+            <span class="text-gray-500">MAE: <strong class="text-gray-300">{{ forecast_metrics.mean_absolute_error }}</strong></span>
+            <span class="text-gray-500">Bias: <strong class="text-gray-300 {% if forecast_metrics.mean_signed_error > 0 %}text-yellow-400{% elif forecast_metrics.mean_signed_error < 0 %}text-orange-400{% else %}text-gray-300{% endif %}">{{ "+" if forecast_metrics.mean_signed_error > 0 else "" }}{{ forecast_metrics.mean_signed_error }}</strong></span>
+            <span class="text-gray-500">Accuracy: <strong class="{% if forecast_metrics.accuracy_pct > 70 %}text-emerald-400{% elif forecast_metrics.accuracy_pct > 40 %}text-yellow-400{% else %}text-red-400{% endif %}">{{ forecast_metrics.accuracy_pct }}%</strong></span>
           </div>
-          {% endfor %}
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Side Analytics -->
+      <div class="lg:col-span-4 space-y-6">
+        <div class="bg-[#111318] rounded-2xl border border-gray-800/40 p-6 shadow-sm">
+          <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">Guild Composition</h3>
+          <div class="space-y-4">
+            <div class="relative" style="height:120px"><canvas id="guildCompositionChart"></canvas></div>
+            <div class="relative" style="height:120px"><canvas id="guildStaffChart"></canvas></div>
+            <div class="relative" style="height:120px"><canvas id="guildBotsChart"></canvas></div>
+          </div>
         </div>
       </div>
     </div>
   </div>
-  {% endif %}
 
-  <!-- Roles & Permissions -->
-  <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6 mb-8">
-    <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-5">🔑 Roles & Permissions</h2>
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm table-hover">
-        <thead>
-          <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
-            <th class="text-left py-3 font-medium">Role</th><th class="text-center py-3 font-medium">Admin</th><th class="text-center py-3 font-medium">Ban</th><th class="text-center py-3 font-medium">Kick</th><th class="text-center py-3 font-medium">Manage Guild</th><th class="text-center py-3 font-medium">Manage Roles</th><th class="text-center py-3 font-medium">Mod</th><th class="text-right py-3 font-medium">Members</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for role in roles %}
-          <tr class="border-b border-gray-800/40">
-            <td class="py-3 font-medium" style="color: {{ role.color if role.color and role.color != '#000000' else '#fff' }}">{{ role.name }}</td>
-            <td class="py-3 text-center">{% if role.is_admin %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
-            <td class="py-3 text-center">{% if role.can_ban %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
-            <td class="py-3 text-center">{% if role.can_kick %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
-            <td class="py-3 text-center">{% if role.can_manage_guild %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
-            <td class="py-3 text-center">{% if role.can_manage_roles %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
-            <td class="py-3 text-center">{% if role.is_mod %}<span class="text-xs font-medium bg-blue-900/40 text-blue-300 px-2 py-1 rounded">MOD</span>{% else %}<span class="text-xs text-gray-600">—</span>{% endif %}</td>
-            <td class="py-3 text-right text-gray-400">{{ role.member_count }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+  <!-- 4. OPERATIONAL OVERVIEW -->
+  <div class="mb-8">
+    <div class="flex items-center gap-2 mb-4">
+      <span class="text-gray-500 text-lg">🛡️</span>
+      <h2 class="text-sm font-bold text-gray-300 uppercase tracking-widest">Operational Overview</h2>
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Roles & Permissions -->
+      <div class="lg:col-span-2 bg-[#111318] rounded-2xl border border-gray-800/40 p-6 shadow-sm">
+        <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-5">🔑 Roles & Permissions</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm table-hover">
+            <thead>
+              <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
+                <th class="text-left py-3 font-medium">Role</th><th class="text-center py-3 font-medium">Admin</th><th class="text-center py-3 font-medium">Ban</th><th class="text-center py-3 font-medium">Kick</th><th class="text-center py-3 font-medium">Manage Guild</th><th class="text-center py-3 font-medium">Manage Roles</th><th class="text-center py-3 font-medium">Mod</th><th class="text-right py-3 font-medium">Members</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for role in roles %}
+              <tr class="border-b border-gray-800/30 hover:bg-white/[0.02] transition">
+                <td class="py-3 font-medium" style="color: {{ role.color if role.color and role.color != '#000000' else '#fff' }}">{{ role.name }}</td>
+                <td class="py-3 text-center">{% if role.is_admin %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
+                <td class="py-3 text-center">{% if role.can_ban %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
+                <td class="py-3 text-center">{% if role.can_kick %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
+                <td class="py-3 text-center">{% if role.can_manage_guild %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
+                <td class="py-3 text-center">{% if role.can_manage_roles %}✅{% else %}<span class="text-gray-700">—</span>{% endif %}</td>
+                <td class="py-3 text-center">{% if role.is_mod %}<span class="text-xs font-medium bg-blue-900/40 text-blue-300 px-2 py-1 rounded">MOD</span>{% else %}<span class="text-xs text-gray-600">—</span>{% endif %}</td>
+                <td class="py-3 text-right text-gray-400">{{ role.member_count }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Voice Activity -->
+      {% if guild_voice_sessions > 0 %}
+      <div class="bg-[#111318] rounded-2xl border border-emerald-800/30 p-6 shadow-sm">
+        <h3 class="text-sm font-semibold text-emerald-400 uppercase tracking-wider mb-5">🎙️ Voice Intelligence</h3>
+        <div class="space-y-6">
+          <div class="grid grid-cols-2 gap-3">
+            <div class="bg-[#0b0d11] p-3 rounded-xl border border-gray-800/40 text-center">
+              <p class="text-gray-500 text-[10px] uppercase">Sessions</p>
+              <p class="text-xl font-bold text-white">{{ guild_voice_sessions }}</p>
+            </div>
+            <div class="bg-[#0b0d11] p-3 rounded-xl border border-gray-800/40 text-center">
+              <p class="text-gray-500 text-[10px] uppercase">Total Hours</p>
+              <p class="text-xl font-bold text-white">{{ guild_voice_hours }}h</p>
+            </div>
+          </div>
+          <div class="relative" style="height:120px"><canvas id="guildVoiceHourlyChart"></canvas></div>
+          <div class="space-y-2 max-h-40 overflow-y-auto">
+            {% for ch in guild_voice_top_channels %}
+            <div class="flex justify-between items-center border-b border-gray-800/40 pb-1.5">
+              <span class="text-gray-300 text-xs">{{ ch.name }}</span>
+              <span class="text-gray-500 text-[10px]">{{ ch.sessions }} sess · {{ ch.hours }}h</span>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- AutoMod & Pings -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+      {% if automod_rules %}
+      <div class="bg-[#111318] rounded-2xl border border-purple-800/30 p-6 shadow-sm">
+        <h3 class="text-sm font-semibold text-purple-400 uppercase tracking-wider mb-5">🤖 AutoMod Registry</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs table-hover">
+            <thead>
+              <tr class="text-gray-500 uppercase tracking-wider border-b border-gray-800/40">
+                <th class="text-left py-2">Rule</th><th class="text-left py-2">Trigger</th><th class="text-left py-2">Action</th><th class="text-center py-2">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for rule in automod_rules %}
+              <tr class="border-b border-gray-800/30 hover:bg-white/[0.02] transition">
+                <td class="py-2 font-medium text-white">{{ rule.name }}</td>
+                <td class="py-2 text-gray-400">{{ rule.trigger_type }}{% if rule.trigger_text %}: {{ rule.trigger_text[:30] }}...{% endif %}</td>
+                <td class="py-2 text-gray-400">{{ rule.action_type | replace('_', ' ') | title }}</td>
+                <td class="py-2 text-center">{% if rule.enabled %}<span class="text-[10px] font-medium bg-green-900/40 text-green-300 px-2 py-0.5 rounded">Active</span>{% else %}<span class="text-[10px] font-medium bg-gray-800/40 text-gray-500 px-2 py-0.5 rounded">Disabled</span>{% endif %}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if ping_events %}
+      <div class="bg-[#111318] rounded-2xl border border-orange-800/30 p-6 shadow-sm">
+        <h3 class="text-sm font-semibold text-orange-400 uppercase tracking-wider mb-5">📢 Ping-to-Join Events</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs table-hover">
+            <thead>
+              <tr class="text-gray-500 uppercase tracking-wider border-b border-gray-800/40">
+                <th class="text-left py-2">Mod</th><th class="text-center py-2">Gain</th><th class="text-left py-2">Joiners</th><th class="text-right py-2">When</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for ev in ping_events %}
+              <tr class="border-b border-gray-800/30 hover:bg-white/[0.02] transition">
+                <td class="py-2 font-medium text-white">{{ ev.moderator_name }}</td>
+                <td class="py-2 text-center font-bold text-orange-400">+{{ ev.new_members }}</td>
+                <td class="py-2 text-gray-400 truncate max-w-[100px]">{{ ev.joiners[:40] }}...</td>
+                <td class="py-2 text-right text-gray-600 utc-time" data-utc="{{ ev.created_at.isoformat() }}">{{ ev.created_at.strftime('%d %b %H:%M') }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endif %}
     </div>
   </div>
 
-  <!-- AutoMod -->
-  {% if automod_rules %}
-  <div class="bg-[#111318] rounded-2xl border border-purple-800/40 p-6 mb-8">
-    <h2 class="text-sm font-semibold text-purple-400 uppercase tracking-wider mb-5">🤖 AutoMod Rules ({{ automod_rules|length }})</h2>
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm table-hover">
-        <thead>
-          <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
-            <th class="text-left py-3 font-medium">Rule</th><th class="text-left py-3 font-medium">Trigger</th><th class="text-left py-3 font-medium">Action</th><th class="text-left py-3 font-medium">Created By</th><th class="text-center py-3 font-medium">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for rule in automod_rules %}
-          <tr class="border-b border-gray-800/40">
-            <td class="py-3 font-medium text-white">{{ rule.name }}</td>
-            <td class="py-3 text-gray-400">{{ rule.trigger_type }}{% if rule.trigger_text %}: {{ rule.trigger_text[:60] }}{% endif %}</td>
-            <td class="py-3 text-gray-400">{{ rule.action_type | replace('_', ' ') | title }}</td>
-            <td class="py-3 text-gray-400">{{ rule.creator_name or 'Unknown' }}</td>
-            <td class="py-3 text-center">{% if rule.enabled %}<span class="text-xs font-medium bg-green-900/40 text-green-300 px-2 py-1 rounded">Active</span>{% else %}<span class="text-xs font-medium bg-gray-800/40 text-gray-500 px-2 py-1 rounded">Disabled</span>{% endif %}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-  {% endif %}
-
-  <!-- AutoMod Triggers -->
-  {% if automod_triggers %}
-  <div class="bg-[#111318] rounded-2xl border border-yellow-800/40 p-6 mb-8">
-    <h2 class="text-sm font-semibold text-yellow-400 uppercase tracking-wider mb-5">🚨 AutoMod Triggers ({{ automod_triggers|length }} recent)</h2>
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm table-hover">
-        <thead>
-          <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
-            <th class="text-left py-3 font-medium">Rule</th><th class="text-left py-3 font-medium">User</th><th class="text-left py-3 font-medium">Channel</th><th class="text-left py-3 font-medium">Content</th><th class="text-left py-3 font-medium">Action</th><th class="text-right py-3 font-medium">When</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for t in automod_triggers %}
-          <tr class="border-b border-gray-800/40">
-            <td class="py-3 font-medium text-white text-sm">{{ t.rule_name }}</td>
-            <td class="py-3 text-gray-400">{{ t.user_name }}</td>
-            <td class="py-3 text-gray-400">#{{ t.channel_name or '?' }}</td>
-            <td class="py-3 text-gray-500 text-xs max-w-[200px] truncate">{{ t.content_snippet or '—' }}</td>
-            <td class="py-3"><span class="text-xs font-medium bg-yellow-900/40 text-yellow-300 px-2 py-1 rounded">{{ t.action_taken }}</span></td>
-            <td class="py-3 text-right text-gray-500 text-xs utc-time" data-utc="{{ t.created_at.isoformat() if t.created_at else '' }}">{{ t.created_at.strftime('%b %d %H:%M') if t.created_at else '—' }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-  {% endif %}
-
-  <!-- Ping → Join -->
-  {% if ping_events %}
-  <div class="bg-[#111318] rounded-2xl border border-orange-800/40 p-6 mb-8">
-    <h2 class="text-sm font-semibold text-orange-400 uppercase tracking-wider mb-5">📢 @everyone Ping → New Members ({{ ping_events|length }})</h2>
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm table-hover">
-        <thead>
-          <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
-            <th class="text-left py-3 font-medium">Moderator</th><th class="text-left py-3 font-medium">Channel</th><th class="text-center py-3 font-medium">New Members</th><th class="text-left py-3 font-medium">Joiners</th><th class="text-right py-3 font-medium">When</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for ev in ping_events %}
-          <tr class="border-b border-gray-800/40">
-            <td class="py-3 font-medium text-white">{{ ev.moderator_name }}</td>
-            <td class="py-3 text-gray-400">#{{ ev.channel or '?' }}</td>
-            <td class="py-3 text-center"><span class="text-sm font-bold text-orange-400">+{{ ev.new_members }}</span></td>
-            <td class="py-3 text-gray-400 text-xs">{{ ev.joiners[:80] }}{% if ev.joiners and ev.joiners|length > 80 %}...{% endif %}</td>
-            <td class="py-3 text-right text-gray-600 text-xs"><span class="utc-time" data-utc="{{ ev.created_at.isoformat() }}">{{ ev.created_at.strftime('%d %b %H:%M') }}</span></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-  {% endif %}
-
-  <!-- Role Changes -->
-  {% if role_changes %}
-  <div class="bg-[#111318] rounded-2xl border border-cyan-800/40 p-6 mb-8">
-    <h2 class="text-sm font-semibold text-cyan-400 uppercase tracking-wider mb-5">🔄 Staff Role Changes ({{ role_changes|length }} recent)</h2>
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm table-hover">
-        <thead>
-          <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
-            <th class="text-left py-3 font-medium">Member</th><th class="text-left py-3 font-medium">Change</th><th class="text-left py-3 font-medium">Role</th><th class="text-center py-3 font-medium">Category</th><th class="text-left py-3 font-medium">By</th><th class="text-right py-3 font-medium">When</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for rc in role_changes %}
-          <tr class="border-b border-gray-800/40">
-            <td class="py-3 font-medium text-white">{{ rc.member_name }}</td>
-            <td class="py-3">
-              {% if rc.change_type == 'added' %}
-              <span class="text-green-400">+ Added</span>
-              {% else %}
-              <span class="text-red-400">- Removed</span>
-              {% endif %}
-            </td>
-            <td class="py-3 text-gray-300">{{ rc.role_name }}</td>
-            <td class="py-3 text-center">
-              {% if rc.change_category == 'promotion' %}
-              <span class="text-green-400 text-xs font-medium bg-green-900/30 px-2 py-0.5 rounded">Promotion</span>
-              {% elif rc.change_category == 'demotion' %}
-              <span class="text-red-400 text-xs font-medium bg-red-900/30 px-2 py-0.5 rounded">Demotion</span>
-              {% elif rc.change_category == 'retirement' %}
-              <span class="text-yellow-400 text-xs font-medium bg-yellow-900/30 px-2 py-0.5 rounded">Retirement</span>
-              {% else %}
-              <span class="text-gray-500 text-xs font-medium bg-gray-800/40 px-2 py-0.5 rounded">Other</span>
-              {% endif %}
-            </td>
-            <td class="py-3 text-gray-400">{{ rc.modifier_name or '—' }}</td>
-            <td class="py-3 text-right text-gray-600 text-xs"><span class="utc-time" data-utc="{{ rc.created_at.isoformat() }}">{{ rc.created_at.strftime('%d %b %H:%M') }}</span></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-  {% endif %}
-
-  <!-- Staff + Community -->
+  <!-- Member Directory -->
   <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-    <div class="bg-[#111318] rounded-2xl border border-blue-800/40 p-6">
+    <div class="bg-[#111318] rounded-2xl border border-blue-800/40 p-6 shadow-sm">
       <h2 class="text-sm font-semibold text-blue-400 uppercase tracking-wider mb-5">👤 Staff ({{ staff|length }})</h2>
       {% if staff %}
-      <div class="space-y-2 max-h-96 overflow-y-auto">
+      <div class="space-y-2 max-h-96 overflow-y-auto pr-2">
         {% for m in staff %}
-        <div class="flex justify-between items-center border-b border-gray-800/40 py-2 last:border-0">
+        <div class="flex justify-between items-center p-2 rounded-lg hover:bg-white/[0.02] transition border border-transparent hover:border-gray-800/60">
           <div class="flex items-center gap-2 min-w-0">
-            <span class="inline-block w-2 h-2 rounded-full flex-shrink-0 {% if m.is_online %}bg-green-400{% else %}bg-gray-600{% endif %}" title="{{ 'Online' if m.is_online else 'Offline' }}"></span>
-            <span class="text-white truncate">{{ m.name }}</span>
-            {% if m.is_owner %}<span class="text-xs font-medium bg-yellow-900/40 text-yellow-300 px-1.5 py-0.5 rounded flex-shrink-0">Owner</span>{% endif %}
-            {% if m.activity_name %}<span class="text-xs text-gray-500 truncate hidden md:inline">{{ m.activity_name }}</span>{% endif %}
+            <span class="inline-block w-2 h-2 rounded-full flex-shrink-0 {% if m.is_online %}bg-green-400{% else %}bg-gray-600{% endif %}"></span>
+            <span class="text-white truncate text-sm">{{ m.name }}</span>
+            {% if m.is_owner %}<span class="text-[10px] font-medium bg-yellow-900/40 text-yellow-300 px-1.5 py-0.5 rounded flex-shrink-0">Owner</span>{% endif %}
           </div>
-          <span class="text-gray-600 text-xs flex-shrink-0 ml-2">{{ m.member_id }}</span>
+          <span class="text-gray-600 text-[10px] flex-shrink-0 ml-2">{{ m.member_id }}</span>
         </div>
         {% endfor %}
       </div>
@@ -297,18 +246,18 @@
       {% endif %}
     </div>
 
-    <div class="bg-[#111318] rounded-2xl border border-gray-800/60 p-6">
+    <div class="bg-[#111318] rounded-2xl border border-gray-800/40 p-6 shadow-sm">
       <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-5">👥 Community ({{ members|length }})</h2>
       {% if members %}
-      <div class="space-y-1 max-h-96 overflow-y-auto">
+      <div class="space-y-1 max-h-96 overflow-y-auto pr-2">
         {% for m in members[:50] %}
-        <div class="flex justify-between items-center border-b border-gray-800/40 py-1.5">
+        <div class="flex justify-between items-center p-1.5 rounded-lg hover:bg-white/[0.02] transition border border-transparent hover:border-gray-800/60">
           <div class="flex items-center gap-2 min-w-0">
-            <span class="inline-block w-2 h-2 rounded-full flex-shrink-0 {% if m.is_online %}bg-green-400{% else %}bg-gray-600{% endif %}" title="{{ 'Online' if m.is_online else 'Offline' }}"></span>
-            <span class="text-gray-300 text-sm truncate">{{ m.name }}</span>
-            {% if m.last_message_at %}<span class="text-xs text-emerald-600 hidden md:inline">chatted</span>{% elif m.is_online %}<span class="text-xs text-gray-600 hidden md:inline">online</span>{% else %}<span class="text-xs text-gray-700 hidden md:inline">observed</span>{% endif %}
+            <span class="inline-block w-2 h-2 rounded-full flex-shrink-0 {% if m.is_online %}bg-green-400{% else %}bg-gray-600{% endif %}"></span>
+            <span class="text-gray-300 text-xs truncate">{{ m.name }}</span>
+            {% if m.last_message_at %}<span class="text-[10px] text-emerald-600 hidden md:inline">chatted</span>{% elif m.is_online %}<span class="text-[10px] text-gray-600 hidden md:inline">online</span>{% else %}<span class="text-[10px] text-gray-700 hidden md:inline">observed</span>{% endif %}
           </div>
-          <span class="text-gray-600 text-xs flex-shrink-0 ml-2">{{ m.member_id }}</span>
+          <span class="text-gray-600 text-[10px] flex-shrink-0 ml-2">{{ m.member_id }}</span>
         </div>
         {% endfor %}
         {% if members|length > 50 %}<p class="text-gray-600 text-xs text-center mt-3">...and {{ members|length - 50 }} more</p>{% endif %}
@@ -318,6 +267,41 @@
       {% endif %}
     </div>
   </div>
+
+  <!-- Role Changes -->
+  {% if role_changes %}
+  <div class="bg-[#111318] rounded-2xl border border-cyan-800/30 p-6 shadow-sm mb-8">
+    <h2 class="text-sm font-semibold text-cyan-400 uppercase tracking-wider mb-5">🔄 Staff Role Changes</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-xs table-hover">
+        <thead>
+          <tr class="text-gray-500 uppercase tracking-wider border-b border-gray-800/40">
+            <th class="text-left py-2">Member</th><th class="text-left py-2">Change</th><th class="text-left py-2">Role</th><th class="text-center py-2">Category</th><th class="text-left py-2">By</th><th class="text-right py-2">When</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for rc in role_changes %}
+          <tr class="border-b border-gray-800/30 hover:bg-white/[0.02] transition">
+            <td class="py-2 font-medium text-white">{{ rc.member_name }}</td>
+            <td class="py-2">
+              {% if rc.change_type == 'added' %}<span class="text-green-400">+ Added</span>{% else %}<span class="text-red-400">- Removed</span>{% endif %}
+            </td>
+            <td class="py-2 text-gray-300">{{ rc.role_name }}</td>
+            <td class="py-2 text-center">
+              {% if rc.change_category == 'promotion' %}<span class="text-green-400 text-[10px] font-medium bg-green-900/30 px-2 py-0.5 rounded">Promotion</span>
+              {% elif rc.change_category == 'demotion' %}<span class="text-red-400 text-[10px] font-medium bg-red-900/30 px-2 py-0.5 rounded">Demotion</span>
+              {% elif rc.change_category == 'retirement' %}<span class="text-yellow-400 text-[10px] font-medium bg-yellow-900/30 px-2 py-0.5 rounded">Retirement</span>
+              {% else %}<span class="text-gray-500 text-[10px] font-medium bg-gray-800/40 px-2 py-0.5 rounded">Other</span>{% endif %}
+            </td>
+            <td class="py-2 text-gray-400">{{ rc.modifier_name or '—' }}</td>
+            <td class="py-2 text-right text-gray-600 utc-time" data-utc="{{ rc.created_at.isoformat() }}">{{ rc.created_at.strftime('%d %b %H:%M') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}
 
@@ -376,15 +360,6 @@ if (gb) darkChart(gb, { type: 'doughnut', data: { labels: ['Humans', 'Bots'], da
     plugins: { legend: { position: 'bottom', labels: { font: { family: font }, boxWidth: 12, padding: 8 } } },
     scales: { x: { ticks: { maxTicksLimit: 12, font: { family: font } } }, y: { beginAtZero: true, ticks: { font: { family: font } } } }
   } });
-})();
-{% endif %}
-
-{% if guild_voice_sessions > 0 %}
-(function() {
-  const el = document.getElementById('guildVoiceHourlyChart'); if (!el) return;
-  const vh = shiftHourly({{ guild_voice_hourly | tojson }});
-  const h = Array.from({length:24},(_,i)=>`${i}:00`);
-  darkChart(el, { type: 'bar', data: { labels: h, datasets: [{ label: 'Sessions', data: h.map((_,i)=>vh[i]||0), backgroundColor: 'rgba(16,185,129,0.5)', borderColor: '#10b981', borderWidth: 1, borderRadius: 3 }] }, options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 8, font: { size: 9, family: font } } }, y: { beginAtZero: true, ticks: { font: { size: 9, family: font } } } } } });
 })();
 {% endif %}
 </script>

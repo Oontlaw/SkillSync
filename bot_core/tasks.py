@@ -125,27 +125,24 @@ async def check_reversed_actions():
     print(f'[Observer] ML burnout scan...')
     await api_post('/observer/ml/burnout-scan', {'trigger': 'hourly'})
 
-    # ML forecast: run prediction every 12 heartbeats (~60 min)
-    val = inc_forecast_counter()
-    if val >= 12:
-        reset_forecast_counter()
-        print(f'[Observer] Running ML forecast predictions...')
-        try:
-            resp = await asyncio.to_thread(requests.get,
-                f'{SKILLSYNC_API}/observer/guilds',
-                headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
-            if resp.ok:
-                guilds = resp.json().get('value', [])
-                for g in guilds:
-                    gid = g['guild_id']
-                    try:
-                        await asyncio.to_thread(requests.get,
-                            f'{SKILLSYNC_API}/observer/ml/forecast/{gid}',
-                            headers={'Authorization': f'Bearer {API_KEY}'}, timeout=10)
-                    except Exception:
-                        pass
-        except Exception as e:
-            print(f'[Observer] Forecast prediction error: {e}')
+    # ML forecast: run prediction every hour (direct hourly scheduling)
+    print(f'[Observer] Running ML forecast predictions...')
+    try:
+        resp = await asyncio.to_thread(requests.get,
+            f'{SKILLSYNC_API}/observer/guilds',
+            headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
+        if resp.ok:
+            guilds = resp.json().get('value', [])
+            for g in guilds:
+                gid = g['guild_id']
+                try:
+                    await asyncio.to_thread(requests.get,
+                        f'{SKILLSYNC_API}/observer/ml/forecast/{gid}',
+                        headers={'Authorization': f'Bearer {API_KEY}'}, timeout=10)
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f'[Observer] Forecast prediction error: {e}')
 
     # ML forecast: resolve pending outcomes every heartbeat (cheap query)
     print(f'[Observer] Resolving forecast outcomes...')
@@ -233,11 +230,32 @@ async def jira_poll_loop():
         assignee_account = issue.get('assignee_account_id', '')
         if not assignee_email and not assignee_account:
             continue
-        worker = Worker.query.filter_by(discord_id=assignee_account).first()
+        
+        # Try to resolve through WorkerIdentity.jira_account_id -> WorkerIdentity.worker_id -> Worker
+        worker = None
+        if assignee_account:
+            identity = WorkerIdentity.query.filter_by(jira_account_id=assignee_account).first()
+            if identity and identity.worker_id:
+                worker = Worker.query.get(identity.worker_id)
+        
+        # If not found, try email fallback through WorkerIdentity.email -> Worker.email
+        if not worker and assignee_email:
+            identity = WorkerIdentity.query.filter_by(email=assignee_email).first()
+            if identity and identity.worker_id:
+                worker = Worker.query.get(identity.worker_id)
+        
+        # If still not found, try Worker.email directly (legacy fallback)
         if not worker and assignee_email:
             worker = Worker.query.filter_by(email=assignee_email).first()
+        
+        # If still not found, try Worker.discord_id (legacy fallback)
+        if not worker and assignee_account:
+            worker = Worker.query.filter_by(discord_id=assignee_account).first()
+        
         if not worker:
+            print(f'[WorkEngine] Could not resolve Jira assignee: email={assignee_email}, account={assignee_account}')
             continue
+        
         task_data = map_issue_to_task(issue, worker.id)
         existing = Task.query.filter_by(external_id=issue['key'], source='jira').first()
         if existing:

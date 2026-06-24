@@ -652,4 +652,118 @@ def guild_detail(guild_id):
         role_changes=role_changes)
 
 
+# Dashboard ML proxy endpoints (session-authenticated)
+@dashboard_bp.route('/dashboard/ml/anomaly-feedback', methods=['POST'])
+def dashboard_ml_anomaly_feedback():
+    """Proxy endpoint for admin feedback on anomaly predictions."""
+    redirect_resp = require_auth()
+    if redirect_resp:
+        return redirect_resp
+    
+    data = request.json or {}
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
+    
+    # Validate required fields
+    if not data.get('anomaly_id') or not data.get('feedback'):
+        return jsonify({'error': 'Missing required fields'}), 400
+    
+    feedback = data['feedback']
+    if feedback not in ('confirmed', 'dismissed'):
+        return jsonify({'error': 'feedback must be "confirmed" or "dismissed"'}), 400
+    
+    # Get the anomaly
+    anomaly = BehavioralAnomaly.query.get_or_404(int(data['anomaly_id']))
+    
+    # Check if the anomaly belongs to a guild the user can access
+    accessible_ids = get_accessible_guild_ids()
+    if anomaly.guild_id and accessible_ids and anomaly.guild_id not in accessible_ids:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    # Update the anomaly
+    anomaly.feedback = feedback
+    anomaly.feedback_at = datetime.utcnow()
+    db.session.commit()
+    
+    return jsonify({'status': 'ok', 'feedback': feedback, 'anomaly_id': anomaly.id})
+
+
+@dashboard_bp.route('/dashboard/ml/burnout-feedback', methods=['POST'])
+def dashboard_ml_burnout_feedback():
+    """Proxy endpoint for admin feedback on burnout predictions."""
+    redirect_resp = require_auth()
+    if redirect_resp:
+        return redirect_resp
+    
+    data = request.json or {}
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
+    
+    # Validate required fields
+    if not data.get('risk_id') or not data.get('feedback'):
+        return jsonify({'error': 'Missing required fields'}), 400
+    
+    feedback = data['feedback']
+    if feedback not in ('confirmed', 'dismissed'):
+        return jsonify({'error': 'feedback must be "confirmed" or "dismissed"'}), 400
+    
+    # Get the burnout risk
+    from database import BurnoutRisk
+    risk = BurnoutRisk.query.get_or_404(int(data['risk_id']))
+    
+    # Update the burnout risk
+    risk.feedback = feedback
+    risk.feedback_at = datetime.utcnow()
+    db.session.commit()
+    
+    return jsonify({'status': 'ok', 'feedback': feedback, 'risk_id': risk.id})
+
+
+@dashboard_bp.route('/dashboard/ml/retrain', methods=['POST'])
+def dashboard_ml_retrain():
+    """Proxy endpoint for ML model retraining."""
+    redirect_resp = require_auth()
+    if redirect_resp:
+        return redirect_resp
+    
+    data = request.json or {}
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
+    
+    # Validate required fields
+    if not data.get('trigger'):
+        return jsonify({'error': 'Missing required field: trigger'}), 400
+    
+    # Use the ML engine to retrain
+    try:
+        result = ml_engine.train_all(days=data.get('days', 30))
+        return jsonify({'status': 'ok', 'result': result})
+    except Exception as e:
+        return jsonify({'error': f'Retrain failed: {str(e)}'}), 500
+
+
+@dashboard_bp.route('/dashboard/ml/federated-train', methods=['POST'])
+def dashboard_ml_federated_train():
+    """Proxy endpoint for federated learning training."""
+    redirect_resp = require_auth()
+    if redirect_resp:
+        return redirect_resp
+    
+    data = request.json or {}
+    if not data:
+        return jsonify({'error': 'No JSON body'}), 400
+    
+    # Validate required fields
+    if not data.get('days'):
+        return jsonify({'error': 'Missing required field: days'}), 400
+    
+    # Use the ML federated module to train
+    try:
+        from ml import federated
+        result = federated.train_federated(days=data.get('days', 30))
+        return jsonify({'status': 'ok', 'result': result})
+    except Exception as e:
+        return jsonify({'error': f'Federated training failed: {str(e)}'}), 500
+
+
 

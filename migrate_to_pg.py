@@ -68,7 +68,7 @@ def get_sqlite_data():
 
 def insert_into_pg(data):
     pg_engine = create_engine(PG_URI)
-    # Exact table names matching SQLAlchemy models
+    # Exact table names matching SQLAlchemy models (including all current tables)
     table_order = [
         'workers',
         'guild_info', 'guild_roles', 'guild_members', 'guild_channels',
@@ -79,6 +79,9 @@ def insert_into_pg(data):
         'ping_join_events', 'mention_records',
         'role_change_log', 'pending_bans', 'pending_timeouts',
         'work_connection', 'work_pull_request',
+        # New tables from recent migrations
+        'organisations', 'org_members', 'worker_identities',
+        'prediction_logs', 'member_join_leave',
     ]
     total = 0
     with pg_engine.connect() as conn:
@@ -123,14 +126,25 @@ with tmp.app_context():
     create_pg_schema()
 
     # Stamp Alembic version so Flask doesn't re-run migrations
-    LATEST_REVISION = 'eb8f4d2a1c0d'  # latest migration ID (head)
+    # Get current Alembic head programmatically
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+    alembic_config = Config()
+    alembic_config.set_main_option('script_location', 'migrations')
+    script = ScriptDirectory.from_config(alembic_config)
+    current_head = script.get_current_head()
+    
+    if not current_head:
+        print("ERROR: No Alembic head found. Cannot proceed with migration.")
+        sys.exit(1)
+    
     pg_engine = create_engine(PG_URI)
     with pg_engine.connect() as conn:
-        conn.execute(text(f"CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL)"))
-        conn.execute(text(f"INSERT INTO alembic_version (version_num) VALUES ('{LATEST_REVISION}')"))
+        conn.execute(text("CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL)"))
+        conn.execute(text(f"INSERT INTO alembic_version (version_num) VALUES ('{current_head}')"))
         conn.commit()
     pg_engine.dispose()
-    print(f"  Stamped alembic_version with {LATEST_REVISION}")
+    print(f"  Stamped alembic_version with {current_head}")
 
     print("\nReading SQLite data...")
     data = get_sqlite_data()

@@ -126,9 +126,13 @@ async def flush_message_buffer():
     if not message_buffer:
         return
     batch = message_buffer[:]
-    message_buffer = []
-    await api_post('/observer/messages', batch)
-    log(f'FLUSHED {len(batch)} messages to behavioral log')
+    try:
+        await api_post('/observer/messages', batch)
+        message_buffer = []
+        log(f'FLUSHED {len(batch)} messages to behavioral log')
+    except Exception as e:
+        log(f'FLUSH FAILED {len(batch)} messages: {e}')
+        # Keep batch in buffer for retry
 
 
 async def flush_presence_buffer():
@@ -137,9 +141,13 @@ async def flush_presence_buffer():
     if not presence_buffer:
         return
     batch = presence_buffer[:]
-    presence_buffer = []
-    await api_post('/observer/activity', {'batch': True, 'updates': batch})
-    log(f'FLUSHED {len(batch)} presence updates')
+    try:
+        await api_post('/observer/activity', {'batch': True, 'updates': batch})
+        presence_buffer = []
+        log(f'FLUSHED {len(batch)} presence updates')
+    except Exception as e:
+        log(f'FLUSH FAILED {len(batch)} presence updates: {e}')
+        # Keep batch in buffer for retry
 
 
 async def flush_voice_buffer():
@@ -148,9 +156,13 @@ async def flush_voice_buffer():
     if not voice_buffer:
         return
     batch = voice_buffer[:]
-    voice_buffer = []
-    await api_post('/observer/voice-activity', {'batch': True, 'sessions': batch})
-    log(f'FLUSHED {len(batch)} voice sessions')
+    try:
+        await api_post('/observer/voice-activity', {'batch': True, 'sessions': batch})
+        voice_buffer = []
+        log(f'FLUSHED {len(batch)} voice sessions')
+    except Exception as e:
+        log(f'FLUSH FAILED {len(batch)} voice sessions: {e}')
+        # Keep batch in buffer for retry
 
 
 async def flush_mention_buffer():
@@ -159,9 +171,13 @@ async def flush_mention_buffer():
     if not mention_buffer:
         return
     batch = mention_buffer[:]
-    mention_buffer = []
-    await api_post('/observer/mentions', batch)
-    log(f'FLUSHED {len(batch)} mentions')
+    try:
+        await api_post('/observer/mentions', batch)
+        mention_buffer = []
+        log(f'FLUSHED {len(batch)} mentions')
+    except Exception as e:
+        log(f'FLUSH FAILED {len(batch)} mentions: {e}')
+        # Keep batch in buffer for retry
 
 
 async def flush_join_buffer():
@@ -170,8 +186,13 @@ async def flush_join_buffer():
     if not join_buffer:
         return
     batch = join_buffer[:]
-    join_buffer = []
-    await api_post('/observer/activity', {'batch': True, 'joins': batch})
+    try:
+        await api_post('/observer/activity', {'batch': True, 'joins': batch})
+        join_buffer = []
+        log(f'FLUSHED {len(batch)} joins')
+    except Exception as e:
+        log(f'FLUSH FAILED {len(batch)} joins: {e}')
+        # Keep batch in buffer for retry
 
 
 async def flush_member_presence_buffer():
@@ -180,9 +201,13 @@ async def flush_member_presence_buffer():
     if not member_presence_buffer:
         return
     batch = member_presence_buffer[:]
-    member_presence_buffer = []
-    await api_post('/observer/presence', {'updates': batch})
-    log(f'FLUSHED {len(batch)} member presence updates')
+    try:
+        await api_post('/observer/presence', {'updates': batch})
+        member_presence_buffer = []
+        log(f'FLUSHED {len(batch)} member presence updates')
+    except Exception as e:
+        log(f'FLUSH FAILED {len(batch)} member presence updates: {e}')
+        # Keep batch in buffer for retry
 
 
 async def flush_online_count():
@@ -192,8 +217,12 @@ async def flush_online_count():
     payload = {}
     for guild_id, members in list(online_members.items()):
         payload[guild_id] = len(members)
-    await api_post('/observer/online-count', payload)
-    log(f'FLUSHED online counts for {len(payload)} guilds: {payload}')
+    try:
+        await api_post('/observer/online-count', payload)
+        log(f'FLUSHED online counts for {len(payload)} guilds: {payload}')
+    except Exception as e:
+        log(f'FLUSH FAILED online counts: {e}')
+        # Keep payload in buffer for retry
 
 
 async def flush_join_leave_buffer():
@@ -202,6 +231,10 @@ async def flush_join_leave_buffer():
     if not join_leave_buffer:
         return
     batch = join_leave_buffer[:]
-    join_leave_buffer = []
-    await api_post('/observer/join-leave', {'batch': True, 'events': batch})
-    log(f'FLUSHED {len(batch)} join/leave events')
+    try:
+        await api_post('/observer/join-leave', {'batch': True, 'events': batch})
+        join_leave_buffer = []
+        log(f'FLUSHED {len(batch)} join/leave events')
+    except Exception as e:
+        log(f'FLUSH FAILED {len(batch)} join/leave events: {e}')
+        # Keep batch in buffer for retry

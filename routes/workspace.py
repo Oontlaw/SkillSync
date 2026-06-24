@@ -27,22 +27,6 @@ def ws_admin_required(f):
     return decorated
 
 
-@workspace_bp.route('/magic-login')
-def workspace_magic_login():
-    """Temporary bypass — auto-login as test org admin."""
-    org = Organisation.query.filter_by(slug='test').first()
-    member = OrgMember.query.filter_by(org_id=org.id, email='test@test.com').first()
-    if not org or not member:
-        return 'Org or member not found', 404
-    session['ws_org_id'] = org.id
-    session['ws_member_id'] = member.id
-    session['ws_member_role'] = member.role
-    session['ws_member_name'] = member.name
-    session['ws_org_name'] = org.name
-    session['ws_org_slug'] = org.slug
-    return redirect(url_for('workspace.workspace_dashboard'))
-
-
 @workspace_bp.route('/login', methods=['GET', 'POST'])
 def workspace_login():
     if request.method == 'POST':

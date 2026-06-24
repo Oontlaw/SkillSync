@@ -97,9 +97,25 @@ def predict(discord_id, days=30):
     if not os.path.exists(ANOMALY_MODEL_PATH):
         return None
     model = joblib.load(ANOMALY_MODEL_PATH)
+    
+    # Get base feature vector
     vec = user_anomaly_feature_vector(discord_id, days)
     if vec is None:
         return None
+    
+    # Append correction features to match model training (28 + 2 = 30 dimensions)
+    try:
+        correction_vec = _correction_features(discord_id, days)
+        vec = np.concatenate([vec, correction_vec])
+    except Exception as e:
+        print(f'[anomaly] Failed to append correction features: {e}')
+        return None
+    
+    # Verify feature count matches model expectations
+    if vec.shape[0] != 30:
+        print(f'[anomaly] Feature vector dimension mismatch: expected 30, got {vec.shape[0]}')
+        return None
+    
     vec = vec.reshape(1, -1)
     score = float(model.decision_function(vec)[0])
     is_anomaly = score < ANOMALY_THRESHOLD
@@ -112,6 +128,21 @@ def predict(discord_id, days=30):
         'threshold': ANOMALY_THRESHOLD,
     }
     _log_anomaly_prediction(discord_id, score, is_anomaly, severity)
+    if is_anomaly:
+        # Also create a BehavioralAnomaly record for dashboard feedback loop
+        from database import BehavioralAnomaly
+        existing = BehavioralAnomaly.query.filter_by(
+            discord_id=discord_id, anomaly_type='ml_anomaly', cleared_at=None
+        ).first()
+        if not existing:
+            db.session.add(BehavioralAnomaly(
+                discord_id=discord_id,
+                anomaly_type='ml_anomaly',
+                severity=severity,
+                details=f'ML-detected behavioral anomaly (score: {round(score, 4)})',
+                source='discord',
+            ))
+            db.session.commit()
     return result
 
 
@@ -127,13 +158,28 @@ def scan_all(min_msgs=10, days=30):
         if scores[i] < ANOMALY_THRESHOLD:
             severity = min(100, max(0, int((ANOMALY_THRESHOLD - scores[i]) * 100)))
             _log_anomaly_prediction(did, scores[i], True, severity)
+            # Also create a BehavioralAnomaly record for dashboard feedback loop
+            from database import BehavioralAnomaly
+            existing = BehavioralAnomaly.query.filter_by(
+                discord_id=did, anomaly_type='ml_anomaly', cleared_at=None
+            ).first()
+            if not existing:
+                db.session.add(BehavioralAnomaly(
+                    discord_id=did,
+                    anomaly_type='ml_anomaly',
+                    severity=severity,
+                    details=f'ML-detected behavioral anomaly (score: {round(float(scores[i]), 4)})',
+                    source='discord',
+                ))
             results.append({
                 'discord_id': did,
                 'anomaly_score': round(float(scores[i]), 4),
                 'severity': severity,
                 'threshold': ANOMALY_THRESHOLD,
             })
+    db.session.commit()
     return results
+
 
 
 def get_precision_recall(days=30):

@@ -211,11 +211,14 @@ def check_model_health():
     # Check forecast accuracy
     try:
         forecast_metrics = get_all_accuracy_metrics(days=7)
-        if forecast_metrics.get('accuracy_pct') is not None:
-            health['forecast_accuracy'] = forecast_metrics['accuracy_pct']
-            if forecast_metrics['accuracy_pct'] < 50:
+        # forecast_metrics structure: {'forecast': {...}}
+        forecast_data = forecast_metrics.get('forecast', {})
+        accuracy_pct = forecast_data.get('accuracy_pct')
+        if accuracy_pct is not None:
+            health['forecast_accuracy'] = accuracy_pct
+            if accuracy_pct < 50:
                 health['needs_retrain'] = True
-                health['reasons'].append(f"Forecast accuracy {forecast_metrics['accuracy_pct']}% < 50%")
+                health['reasons'].append(f"Forecast accuracy {accuracy_pct}% < 50%")
     except Exception as e:
         health['forecast_accuracy_error'] = str(e)
 

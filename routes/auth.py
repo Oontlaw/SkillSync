@@ -32,6 +32,10 @@ def login():
     state = secrets.token_hex(16)
     session['oauth_state'] = state
     uri = _redirect_uri()
+    
+    # Debug logging to verify credentials and URI
+    print(f'[Auth] Login attempt - ClientID: {CLIENT_ID}, URI: {uri}, State: {state}')
+    
     return redirect(
         f'{DISCORD_API}/oauth2/authorize?client_id={CLIENT_ID}'
         f'&redirect_uri={uri}'

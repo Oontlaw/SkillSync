@@ -117,16 +117,18 @@ def _log_forecast_predictions(guild_id, preds, X_pred, prediction_time):
 
     log_entries = []
     for h in range(24):
+        metadata = {
+            'guild_id': guild_id,
+            'predicted_hour': h,
+            'predicted_dow': prediction_time.weekday(),
+            'prediction_date': today.isoformat(),
+        }
+        
         entry = PredictionLog(
             model_name='forecast',
             prediction_value=int(preds[h]),
             features_json=json.dumps(features_list[h]),
-            metadata_json=json.dumps({
-                'guild_id': guild_id,
-                'predicted_hour': h,
-                'predicted_dow': prediction_time.weekday(),
-                'prediction_date': today.isoformat(),
-            }),
+            metadata_json=json.dumps(metadata),
             confidence=None,
             prediction_time=prediction_time,
         )

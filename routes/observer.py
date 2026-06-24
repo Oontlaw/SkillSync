@@ -638,53 +638,6 @@ def get_messages():
     })
 
 
-@observer_bp.route('/observer/guilds/<guild_id>/members', methods=['GET'])
-@require_api_key
-def get_guild_members(guild_id):
-    """Paginated endpoint to get guild members with filters."""
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 20, type=int)
-    is_staff = request.args.get('is_staff')
-    is_bot = request.args.get('is_bot')
-    is_online = request.args.get('is_online')
-    
-    query = GuildMember.query.filter(GuildMember.guild_id == guild_id).order_by(GuildMember.top_role_position.desc(), GuildMember.name)
-    
-    if is_staff is not None:
-        query = query.filter(GuildMember.is_staff == (is_staff.lower() == 'true'))
-    if is_bot is not None:
-        query = query.filter(GuildMember.is_bot == (is_bot.lower() == 'true'))
-    if is_online is not None:
-        query = query.filter(GuildMember.is_online == (is_online.lower() == 'true'))
-    
-    paginated = paginate_query(query, page, per_page)
-    
-    return jsonify({
-        'page': paginated['page'],
-        'per_page': paginated['per_page'],
-        'total': paginated['total'],
-        'total_pages': paginated['total_pages'],
-        'has_next': paginated['has_next'],
-        'has_prev': paginated['has_prev'],
-        'items': [{
-            'id': m.id,
-            'guild_id': m.guild_id,
-            'member_id': m.member_id,
-            'name': m.name,
-            'display_name': m.display_name,
-            'is_bot': m.is_bot,
-            'is_owner': m.is_owner,
-            'is_staff': m.is_staff,
-            'is_online': m.is_online,
-            'status': m.status,
-            'activity_name': m.activity_name,
-            'last_seen_online': m.last_seen_online.isoformat() if m.last_seen_online else None,
-            'last_message_at': m.last_message_at.isoformat() if m.last_message_at else None,
-            'created_at': m.created_at.isoformat() if m.created_at else None
-        } for m in paginated['items']]
-    })
-
-
 @observer_bp.route('/observer/analytics', methods=['GET'])
 @require_api_key
 def all_analytics():
@@ -957,66 +910,6 @@ def list_all_automod_rules():
         'trigger_type': r.trigger_type,
         'action_type': r.action_type,
     } for r in rules])
-
-
-@observer_bp.route('/observer/guilds/<guild_id>/automod', methods=['GET'])
-@require_api_key
-def list_guild_automod(guild_id):
-    """Lists AutoMod rules for a guild."""
-    rules = AutoModRule.query.filter_by(guild_id=guild_id).order_by(AutoModRule.created_at.desc()).all()
-    return jsonify([{
-        'rule_id': r.rule_id,
-        'name': r.name,
-        'creator_name': r.creator_name,
-        'trigger_type': r.trigger_type,
-        'trigger_text': r.trigger_text,
-        'action_type': r.action_type,
-        'alert_channel_id': r.alert_channel_id,
-        'enabled': r.enabled,
-        'exempt_roles': r.exempt_roles.split(',') if r.exempt_roles else [],
-        'exempt_channels': r.exempt_channels.split(',') if r.exempt_channels else [],
-    } for r in rules])
-
-
-@observer_bp.route('/observer/guilds/<guild_id>/trust', methods=['GET', 'POST'])
-@require_api_key
-def guild_trust(guild_id):
-    """Get or toggle content storage trust for a guild."""
-    guild = GuildInfo.query.filter_by(guild_id=guild_id).first_or_404()
-
-    if request.method == 'POST':
-        data = request.json or {}
-        enabled = data.get('store_content', not guild.store_content)
-        guild.store_content = bool(enabled)
-        db.session.commit()
-        status = 'enabled' if guild.store_content else 'disabled'
-        print(f'[Observer API] Content storage {status} for {guild.name}')
-        return jsonify({'guild_id': guild_id, 'store_content': guild.store_content})
-
-    return jsonify({'guild_id': guild_id, 'store_content': guild.store_content, 'name': guild.name})
-
-
-@observer_bp.route('/observer/guilds/<guild_id>/prefix', methods=['GET', 'PATCH'])
-@require_api_key
-def guild_prefix(guild_id):
-    """Get or set prefixes for a guild. Stores as JSON array."""
-    guild = GuildInfo.query.filter_by(guild_id=guild_id).first_or_404()
-
-    if request.method == 'PATCH':
-        data = request.json
-        if not data:
-            return jsonify({'error': 'No JSON body'}), 400
-        new_prefixes = data.get('prefixes', ['!ss '])
-        for p in new_prefixes:
-            if len(p) > 10:
-                return jsonify({'error': f'Prefix "{p}" too long (max 10 chars)'}), 400
-        guild.prefix = json.dumps(new_prefixes)
-        db.session.commit()
-        print(f'[Observer API] Prefixes set for {guild.name}: {new_prefixes}')
-        return jsonify({'guild_id': guild_id, 'prefixes': new_prefixes})
-
-    prefixes = json.loads(guild.prefix) if guild.prefix else ['!ss ']
-    return jsonify({'guild_id': guild_id, 'prefixes': prefixes})
 
 
 @observer_bp.route('/observer/presence', methods=['POST'])

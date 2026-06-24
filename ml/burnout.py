@@ -149,6 +149,20 @@ def score_worker(discord_id, days=30):
         is_flagged=is_flagged,
         signals=signals,
     )
+    if is_flagged:
+        # Also create a BurnoutRisk record for dashboard feedback loop
+        from database import BurnoutRisk
+        existing = BurnoutRisk.query.filter_by(discord_id=discord_id).first()
+        if not existing:
+            db.session.add(BurnoutRisk(
+                worker_id=worker.id if worker else None,
+                discord_id=discord_id,
+                name=worker.name if worker else 'Unknown',
+                score=float(burnout_score),
+                signals=json.dumps(signals),
+                detected_at=datetime.utcnow(),
+            ))
+            db.session.commit()
     return result
 
 
@@ -172,6 +186,18 @@ def scan_all(days=30):
                 is_flagged=True,
                 signals=[],
             )
+            # Also create a BurnoutRisk record for dashboard feedback loop
+            from database import BurnoutRisk
+            existing = BurnoutRisk.query.filter_by(discord_id=dids[i]).first()
+            if not existing:
+                db.session.add(BurnoutRisk(
+                    worker_id=wids[i],
+                    discord_id=dids[i],
+                    name=names[i],
+                    score=float(burnout_score),
+                    signals=json.dumps([]),
+                    detected_at=datetime.utcnow(),
+                ))
             results.append({
                 'worker_id': wids[i],
                 'discord_id': dids[i],
@@ -180,6 +206,7 @@ def scan_all(days=30):
                 'raw_score': round(float(scores[i]), 4),
                 'signals': [],
             })
+    db.session.commit()
     return results
 
 
