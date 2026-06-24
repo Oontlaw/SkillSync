@@ -3,7 +3,7 @@ import os, sys
 from datetime import datetime
 from sqlalchemy import create_engine, MetaData, text, inspect
 
-PG_URI = 'postgresql://skillsync:skillsync@127.0.0.1:5432/skillsync'
+PG_URI = os.getenv('DATABASE_URL', 'postgresql://user:password@localhost/skillsync')
 SQLITE_PATH = os.path.join(os.path.dirname(__file__), 'instance', 'skillsync.db')
 
 sys.path.insert(0, os.path.dirname(__file__))

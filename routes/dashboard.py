@@ -1,5 +1,5 @@
 import os, json
-from flask import Blueprint, render_template, session, redirect, url_for, request
+from flask import Blueprint, render_template, session, redirect, url_for, request, jsonify
 from database import db, Worker, Task, ScoreLog, AdminCorrection, MessageRecord, GuildInfo, GuildRole, GuildMember, GuildChannel, BehavioralAnomaly, MentionRecord, AutoModRule, AutoModTrigger, PingJoinEvent, VoiceActivity, BurnoutRisk, RoleChangeLog, MemberJoinLeave
 from datetime import datetime, timedelta
 from sqlalchemy import func
@@ -243,15 +243,6 @@ def index():
     # Hourly join/leave breakdown for last 7 days
     hourly_joins_7d = {str(h):0 for h in range(24)}
     hourly_leaves_7d = {str(h):0 for h in range(24)}
-    for h, c in db.session.query(MemberJoinLeave.hour_of_day, func.count(MemberJoinLeave.id)).filter(
-        MemberJoinLeave.created_at >= cutoff,
-        MemberJoinLeave.event_type == 'join'
-    ).filter(MemberJoinLeave.hour_of_day != None).group_by(MemberJoinLeave.hour_of_day).all():
-        if accessible_ids:
-            # Wait, let's adjust the query to filter guilds properly
-            # Let's redo it with guild filter
-            continue
-    # Okay let's properly build the hourly queries with guild filters
     hourly_joins_data = db.session.query(
         MemberJoinLeave.hour_of_day, func.count(MemberJoinLeave.id)
     ).filter(
@@ -291,6 +282,8 @@ def index():
                 ml_corrector_stats = summary.get('corrector')
         except Exception:
             pass
+    anomaly_precision = ml_status.get('anomaly_precision', {})
+    burnout_precision = ml_status.get('burnout_precision', {})
 
     return render_template('dashboard.html',
         user=user,
@@ -332,7 +325,35 @@ def index():
         total_leaves_7d=total_leaves_7d,
         hourly_joins_7d=hourly_joins_7d,
         hourly_leaves_7d=hourly_leaves_7d,
+        anomaly_precision=anomaly_precision,
+        burnout_precision=burnout_precision,
     )
+
+@dashboard_bp.route('/_live')
+def dashboard_live():
+    auth = require_auth()
+    if auth:
+        return jsonify({'error': 'unauthorized'}), 401
+    accessible_ids = get_accessible_guild_ids()
+    if not accessible_ids:
+        return jsonify({'total_online_members': 0, 'total_members_tracked': 0, 'guild_online_map': {}})
+    guilds = GuildInfo.query.filter(GuildInfo.guild_id.in_(accessible_ids)).all()
+    guild_online_map = {}
+    guild_member_count_map = {}
+    for g in guilds:
+        guild_online_map[g.guild_id] = getattr(g, 'online_count', 0)
+        guild_member_count_map[g.guild_id] = GuildMember.query.filter(
+            GuildMember.guild_id == g.guild_id,
+            GuildMember.is_bot == False
+        ).count()
+    total_online = sum(guild_online_map.values())
+    total_members = sum(guild_member_count_map.values())
+    return jsonify({
+        'total_online_members': total_online,
+        'total_members_tracked': total_members,
+        'guild_online_map': guild_online_map,
+        'guild_member_count_map': guild_member_count_map,
+    })
 
 @dashboard_bp.route('/worker/<int:worker_id>')
 def worker_detail(worker_id):

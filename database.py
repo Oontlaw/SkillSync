@@ -313,6 +313,8 @@ class BehavioralAnomaly(db.Model):
     source = db.Column(db.String(30), default='discord', index=True)
     detected_at = db.Column(db.DateTime, default=datetime.utcnow)
     cleared_at = db.Column(db.DateTime, nullable=True)
+    feedback = db.Column(db.String(30), nullable=True, index=True)
+    feedback_at = db.Column(db.DateTime, nullable=True)
 
     def __repr__(self):
         return f'<BehavioralAnomaly {self.anomaly_type} | {self.discord_id} | sev={self.severity}>'
@@ -413,6 +415,8 @@ class BurnoutRisk(db.Model):
     voice_creep = db.Column(db.Float, default=0.0)
     signals = db.Column(db.Text, nullable=True)
     detected_at = db.Column(db.DateTime, default=datetime.utcnow)
+    feedback = db.Column(db.String(30), nullable=True, index=True)
+    feedback_at = db.Column(db.DateTime, nullable=True)
 
     def __repr__(self):
         return f'<BurnoutRisk {self.name} | score={self.score}>'

@@ -132,3 +132,26 @@ def scan_all(days=30):
                 'signals': [],
             })
     return results
+
+
+def get_precision_recall(days=30):
+    """Compute precision from admin feedback on burnout risk predictions."""
+    from database import BurnoutRisk
+    from datetime import datetime, timedelta
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    with_feedback = BurnoutRisk.query.filter(
+        BurnoutRisk.feedback != None,
+        BurnoutRisk.detected_at >= cutoff,
+    ).all()
+    if not with_feedback:
+        return {'total_with_feedback': 0, 'confirmed': 0, 'dismissed': 0, 'precision': None}
+    confirmed = sum(1 for b in with_feedback if b.feedback == 'confirmed')
+    dismissed = sum(1 for b in with_feedback if b.feedback == 'dismissed')
+    precision = round(confirmed / max(confirmed + dismissed, 1), 3) if (confirmed + dismissed) > 0 else None
+    return {
+        'total_with_feedback': len(with_feedback),
+        'confirmed': confirmed,
+        'dismissed': dismissed,
+        'precision': precision,
+        'precision_pct': round(precision * 100, 1) if precision is not None else None,
+    }

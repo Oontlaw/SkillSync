@@ -156,6 +156,16 @@ def get_model_status():
     except Exception as e:
         status['accuracy_metrics'] = {'error': str(e)}
 
+    # Precision/recall from admin feedback
+    try:
+        status['anomaly_precision'] = anomaly.get_precision_recall(days=30)
+    except Exception as e:
+        status['anomaly_precision'] = {'error': str(e)}
+    try:
+        status['burnout_precision'] = burnout.get_precision_recall(days=30)
+    except Exception as e:
+        status['burnout_precision'] = {'error': str(e)}
+
     # Training history
     status['training_history'] = _load_training_history()
 

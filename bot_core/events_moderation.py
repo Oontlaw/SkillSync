@@ -347,6 +347,7 @@ async def handle_member_update(before, after):
 
 async def handle_member_remove(member):
     """Detect kicks via audit log and track all leave events."""
+    log(f'DEBUG: on_member_remove FIRED: {member.name} (id={member.id}) in guild={member.guild.name if member.guild else "NO_GUILD"}')
     try:
         if member.guild:
             track_offline(str(member.guild.id), member.id)

@@ -108,3 +108,27 @@ def scan_all(min_msgs=10, days=30):
                 'threshold': ANOMALY_THRESHOLD,
             })
     return results
+
+
+def get_precision_recall(days=30):
+    """Compute precision and recall from admin feedback on anomaly predictions."""
+    from database import BehavioralAnomaly
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    with_feedback = BehavioralAnomaly.query.filter(
+        BehavioralAnomaly.feedback != None,
+        BehavioralAnomaly.detected_at >= cutoff,
+        BehavioralAnomaly.anomaly_type == 'ml_anomaly',
+    ).all()
+    if not with_feedback:
+        return {'total_with_feedback': 0, 'confirmed': 0, 'dismissed': 0, 'precision': None, 'recall': None}
+    confirmed = sum(1 for a in with_feedback if a.feedback == 'confirmed')
+    dismissed = sum(1 for a in with_feedback if a.feedback == 'dismissed')
+    total = len(with_feedback)
+    precision = round(confirmed / max(confirmed + dismissed, 1), 3) if (confirmed + dismissed) > 0 else None
+    return {
+        'total_with_feedback': total,
+        'confirmed': confirmed,
+        'dismissed': dismissed,
+        'precision': precision,
+        'precision_pct': round(precision * 100, 1) if precision is not None else None,
+    }

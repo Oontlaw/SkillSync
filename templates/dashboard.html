@@ -121,7 +121,18 @@
   <div class="bg-[#111318] rounded-2xl border border-red-900/40 p-6">
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-sm font-semibold text-red-400 uppercase tracking-wider">🚨 Behavioral Anomalies</h2>
-      <span class="text-xs text-gray-600">Last 48h</span>
+      <div class="flex gap-4 items-center">
+        {% if anomaly_precision and anomaly_precision.precision is not none %}
+        <span class="text-xs" title="Admin feedback precision (confirmed / total feedback)">
+          <span class="text-gray-500">Precision:</span>
+          <span class="text-cyan-400 font-bold">{{ anomaly_precision.precision_pct }}%</span>
+          <span class="text-gray-600">({{ anomaly_precision.confirmed }}/{{ anomaly_precision.total_with_feedback }})</span>
+        </span>
+        {% elif anomaly_precision and anomaly_precision.total_with_feedback == 0 %}
+        <span class="text-xs text-gray-600">No feedback yet</span>
+        {% endif %}
+        <span class="text-xs text-gray-600">Last 48h</span>
+      </div>
     </div>
     <div class="overflow-x-auto">
       <table class="w-full text-xs">
@@ -130,16 +141,31 @@
             <th class="text-left py-2">User</th>
             <th class="text-left py-2 px-2">Type</th>
             <th class="text-center py-2 px-2">Severity</th>
+            <th class="text-center py-2 px-2">Feedback</th>
             <th class="text-right py-2 pl-2">Detected</th>
           </tr>
         </thead>
         <tbody>
           {% for a in anomalies %}
-          <tr class="border-b border-gray-800/30">
+          <tr class="border-b border-gray-800/30" id="anomaly-row-{{ a.id }}">
             <td class="py-2 text-white">{{ a.discord_id[:12] if a.discord_id else 'N/A' }}</td>
             <td class="py-2 px-2"><span class="px-1.5 py-0.5 rounded text-[10px] font-medium {% if a.anomaly_type == 'ml_anomaly' %}bg-purple-900/40 text-purple-400{% else %}bg-yellow-900/40 text-yellow-400{% endif %}">{{ a.anomaly_type }}</span></td>
             <td class="py-2 px-2 text-center">
               <span class="font-bold {% if a.severity >= 60 %}text-red-400{% elif a.severity >= 25 %}text-yellow-400{% else %}text-green-400{% endif %}">{{ a.severity }}</span>
+            </td>
+            <td class="py-2 px-2 text-center feedback-cell">
+              {% if a.feedback == 'confirmed' %}
+              <span class="text-green-400 text-[10px] font-medium">✓ Confirmed</span>
+              {% elif a.feedback == 'dismissed' %}
+              <span class="text-gray-500 text-[10px] font-medium">✕ Dismissed</span>
+              {% elif a.anomaly_type == 'ml_anomaly' %}
+              <div class="flex gap-1 justify-center">
+                <button onclick="feedback('anomaly', {{ a.id }}, 'confirmed', this)" class="px-1.5 py-0.5 rounded text-[10px] bg-green-900/30 text-green-500 hover:bg-green-900/60 transition cursor-pointer" title="Confirm this anomaly">✓</button>
+                <button onclick="feedback('anomaly', {{ a.id }}, 'dismissed', this)" class="px-1.5 py-0.5 rounded text-[10px] bg-gray-700/30 text-gray-400 hover:bg-gray-700/60 transition cursor-pointer" title="Dismiss as false positive">✕</button>
+              </div>
+              {% else %}
+              <span class="text-gray-600 text-[10px]">—</span>
+              {% endif %}
             </td>
             <td class="py-2 pl-2 text-right text-gray-400">{{ a.detected_at.strftime('%H:%M %b %d') if a.detected_at else 'N/A' }}</td>
           </tr>
@@ -155,10 +181,23 @@
 {% if burnout_risks %}
 <div class="max-w-7xl mx-auto px-6 mb-6">
   <div class="bg-[#111318] rounded-2xl border border-yellow-900/40 p-6">
-    <h2 class="text-sm font-semibold text-yellow-400 uppercase tracking-wider mb-4">🔥 Staff Burnout Risk</h2>
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-sm font-semibold text-yellow-400 uppercase tracking-wider">🔥 Staff Burnout Risk</h2>
+      <div class="flex gap-4 items-center">
+        {% if burnout_precision and burnout_precision.precision is not none %}
+        <span class="text-xs" title="Admin feedback precision (confirmed / total feedback)">
+          <span class="text-gray-500">Precision:</span>
+          <span class="text-cyan-400 font-bold">{{ burnout_precision.precision_pct }}%</span>
+          <span class="text-gray-600">({{ burnout_precision.confirmed }}/{{ burnout_precision.total_with_feedback }})</span>
+        </span>
+        {% elif burnout_precision and burnout_precision.total_with_feedback == 0 %}
+        <span class="text-xs text-gray-600">No feedback yet</span>
+        {% endif %}
+      </div>
+    </div>
     <div class="grid grid-cols-5 gap-3">
       {% for br in burnout_risks %}
-      <div class="bg-[#0b0d11] rounded-xl border border-gray-800/40 p-4 text-center">
+      <div class="bg-[#0b0d11] rounded-xl border border-gray-800/40 p-4 text-center" id="burnout-card-{{ br.id }}">
         <p class="text-gray-300 font-medium text-sm truncate" title="{{ br.name }}">{{ br.name }}</p>
         <p class="text-2xl font-bold {% if br.score >= 60 %}text-red-400{% elif br.score >= 25 %}text-yellow-400{% else %}text-green-400{% endif %} mt-1">{{ "%.0f"|format(br.score) }}</p>
         <p class="text-xs text-gray-600 mt-1">
@@ -169,6 +208,18 @@
 {% endfor %}
           {% endif %}
         </p>
+        <div class="mt-2 feedback-cell">
+          {% if br.feedback == 'confirmed' %}
+          <span class="text-green-400 text-[10px] font-medium">✓ Confirmed</span>
+          {% elif br.feedback == 'dismissed' %}
+          <span class="text-gray-500 text-[10px] font-medium">✕ Dismissed</span>
+          {% else %}
+          <div class="flex gap-1 justify-center">
+            <button onclick="feedback('burnout', {{ br.id }}, 'confirmed', this)" class="px-1.5 py-0.5 rounded text-[10px] bg-green-900/30 text-green-500 hover:bg-green-900/60 transition cursor-pointer" title="Confirm burnout risk">✓</button>
+            <button onclick="feedback('burnout', {{ br.id }}, 'dismissed', this)" class="px-1.5 py-0.5 rounded text-[10px] bg-gray-700/30 text-gray-400 hover:bg-gray-700/60 transition cursor-pointer" title="Dismiss as false positive">✕</button>
+          </div>
+          {% endif %}
+        </div>
       </div>
       {% endfor %}
     </div>
@@ -416,9 +467,9 @@
       <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">🛡️ Server Overview</h2>
       <div class="grid grid-cols-4 gap-4 mb-5 pb-5 border-b border-gray-800/40">
         <div><p class="text-gray-500 text-xs">Tracked</p><p class="text-xl font-bold text-white">{{ total_guilds }}</p></div>
-        <div><p class="text-gray-500 text-xs">Members</p><p class="text-xl font-bold text-white">{{ total_members_tracked }}</p></div>
+        <div><p class="text-gray-500 text-xs">Members</p><p class="text-xl font-bold text-white"><span data-live="total_members">{{ total_members_tracked }}</span></p></div>
         <div><p class="text-gray-500 text-xs">Staff</p><p class="text-xl font-bold text-blue-400">{{ total_staff_tracked }}</p></div>
-        <div><p class="text-gray-500 text-xs">Online</p><p class="text-xl font-bold text-green-400">{{ "%.0f"|format(total_online_members / total_members_tracked * 100 if total_members_tracked else 0) }}%</p></div>
+        <div><p class="text-gray-500 text-xs">Online</p><p class="text-xl font-bold text-green-400"><span data-live="total_online_pct">{{ "%.0f"|format(total_online_members / total_members_tracked * 100 if total_members_tracked else 0) }}%</span></p></div>
       </div>
       {% for guild in guilds %}
       <a href="/guild/{{ guild.guild_id }}" class="flex justify-between items-center py-3 px-4 rounded-lg card-hover border border-transparent hover:border-gray-700/50 {% if not loop.last %}mb-1{% endif %}">
@@ -428,7 +479,7 @@
         </div>
         <div class="flex gap-5 text-xs">
           <span class="text-gray-400">{{ guild_member_count_map.get(guild.guild_id, guild.member_count) }} tracked</span>
-          <span class="text-green-400">{{ guild_online_map.get(guild.guild_id, 0) }} online</span>
+          <span class="text-green-400" data-live="guild_online" data-guild-id="{{ guild.guild_id }}">{{ guild_online_map.get(guild.guild_id, 0) }} online</span>
           <span class="text-blue-400">{{ guild.staff_count }} staff</span>
         </div>
       </a>
@@ -657,6 +708,54 @@ darkChart(document.getElementById('growthChart'), {
     }
   }
 });
+
+async function feedback(type, id, verdict, btn) {
+  const orig = btn.innerHTML;
+  btn.innerHTML = '⏳';
+  btn.disabled = true;
+  try {
+    const url = type === 'anomaly' ? '/api/observer/ml/anomalies/feedback' : '/api/observer/ml/burnout/feedback';
+    const idKey = type === 'anomaly' ? 'anomaly_id' : 'risk_id';
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [idKey]: id, feedback: verdict }),
+    });
+    const data = await r.json();
+    if (data.status === 'ok') {
+      const cell = btn.closest('.feedback-cell');
+      cell.innerHTML = verdict === 'confirmed'
+        ? '<span class="text-green-400 text-[10px] font-medium">✓ Confirmed</span>'
+        : '<span class="text-gray-500 text-[10px] font-medium">✕ Dismissed</span>';
+    } else {
+      btn.innerHTML = '❌';
+      setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 2000);
+    }
+  } catch {
+    btn.innerHTML = '❌';
+    setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 2000);
+  }
+}
+
+// Live online count polling
+async function refreshOnlineCounts() {
+  try {
+    const r = await fetch('/_live');
+    if (!r.ok) return;
+    const data = await r.json();
+    const total = data.total_members_tracked || 0;
+    const online = data.total_online_members || 0;
+    const pct = total > 0 ? (online / total * 100).toFixed(0) : '0';
+    document.querySelectorAll('[data-live="total_members"]').forEach(el => { el.textContent = total; });
+    document.querySelectorAll('[data-live="total_online_pct"]').forEach(el => { el.textContent = pct + '%'; });
+    document.querySelectorAll('[data-live="guild_online"]').forEach(el => {
+      const gid = el.dataset.guildId;
+      el.textContent = (data.guild_online_map && data.guild_online_map[gid] != null ? data.guild_online_map[gid] : 0) + ' online';
+    });
+  } catch {}
+}
+setInterval(refreshOnlineCounts, 10000);
+refreshOnlineCounts();
 
 async function retrainModel(model, btn) {
   const orig = btn.innerHTML;

@@ -162,6 +162,19 @@ async def check_reversed_actions():
     except Exception as e:
         print(f'[Observer] Retrain check error: {e}')
 
+    # Auto-retrain when anomaly precision drops below threshold
+    try:
+        resp = await asyncio.to_thread(requests.get,
+            f'{SKILLSYNC_API}/observer/ml/anomalies/precision-recall',
+            headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
+        if resp.ok:
+            data = resp.json()
+            if data.get('total_with_feedback', 0) >= 3 and data.get('precision') is not None and data['precision'] < 0.5:
+                print(f'[Observer] Anomaly precision {data["precision_pct"]}% below 50%, triggering retrain...')
+                await api_post('/observer/ml/retrain', {'trigger': 'low_precision'})
+    except Exception as e:
+        print(f'[Observer] Precision check error: {e}')
+
     # Weekly ML model retrain (168 hours = 7 days)
     val = bot_state.inc_ml_retrain_counter()
     if val >= 168:

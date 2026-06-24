@@ -63,6 +63,7 @@ async def handle_presence_update(before, after):
 
 async def handle_member_join(member):
     """Track new members joining — buffered. Also checks @everyone ping window."""
+    log(f'DEBUG: on_member_join FIRED: {member.name} (id={member.id}) in guild={member.guild.name if member.guild else "NO_GUILD"}')
     try:
         track_online(str(member.guild.id), member.id)
         join_buffer.append({

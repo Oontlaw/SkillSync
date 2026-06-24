@@ -1597,6 +1597,63 @@ def ml_scan_burnout():
     return jsonify({'scanned': len(flagged), 'updated': updated, 'flagged': flagged})
 
 
+@observer_bp.route('/observer/ml/anomalies/feedback', methods=['POST'])
+@require_api_key
+def ml_anomaly_feedback():
+    """Submit admin feedback on an anomaly prediction (confirm or dismiss)."""
+    data = request.json or {}
+    ok, err = validate_payload(data, ['anomaly_id', 'feedback'])
+    if not ok:
+        return jsonify({'error': err}), 400
+    feedback = data['feedback']
+    if feedback not in ('confirmed', 'dismissed'):
+        return jsonify({'error': 'feedback must be "confirmed" or "dismissed"'}), 400
+    anomaly = db.session.get(BehavioralAnomaly, int(data['anomaly_id']))
+    if not anomaly:
+        return jsonify({'error': 'Anomaly not found'}), 404
+    anomaly.feedback = feedback
+    anomaly.feedback_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({'status': 'ok', 'feedback': feedback, 'anomaly_id': anomaly.id})
+
+
+@observer_bp.route('/observer/ml/anomalies/precision-recall', methods=['GET'])
+@require_api_key
+def ml_anomaly_precision_recall():
+    """Get precision/recall metrics for ML anomaly detection."""
+    days = request.args.get('days', 30, type=int)
+    return jsonify(ml_anomaly.get_precision_recall(days=days))
+
+
+@observer_bp.route('/observer/ml/burnout/feedback', methods=['POST'])
+@require_api_key
+def ml_burnout_feedback():
+    """Submit admin feedback on a burnout risk prediction (confirm or dismiss)."""
+    from database import BurnoutRisk
+    data = request.json or {}
+    ok, err = validate_payload(data, ['risk_id', 'feedback'])
+    if not ok:
+        return jsonify({'error': err}), 400
+    feedback = data['feedback']
+    if feedback not in ('confirmed', 'dismissed'):
+        return jsonify({'error': 'feedback must be "confirmed" or "dismissed"'}), 400
+    risk = db.session.get(BurnoutRisk, int(data['risk_id']))
+    if not risk:
+        return jsonify({'error': 'Burnout risk record not found'}), 404
+    risk.feedback = feedback
+    risk.feedback_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({'status': 'ok', 'feedback': feedback, 'risk_id': risk.id})
+
+
+@observer_bp.route('/observer/ml/burnout/precision-recall', methods=['GET'])
+@require_api_key
+def ml_burnout_precision_recall():
+    """Get precision metrics for burnout risk predictions."""
+    days = request.args.get('days', 30, type=int)
+    return jsonify(ml_burnout.get_precision_recall(days=days))
+
+
 @observer_bp.route('/observer/ml/request-retrain', methods=['POST'])
 @require_api_key
 def ml_request_retrain():
