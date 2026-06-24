@@ -3,6 +3,9 @@ import numpy as np
 import joblib
 from sklearn.ensemble import IsolationForest
 from ml.features import staff_feature_vectors
+import json
+from datetime import datetime
+from database import db, PredictionLog
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), 'models')
 BURNOUT_MODEL_PATH = os.path.join(MODELS_DIR, 'burnout_iforest.joblib')
@@ -37,6 +40,29 @@ def _staff_vectors_with_corrections(days=30):
         augs.append([_correction_rate(wid, days)])
     X_aug = np.concatenate([X, np.array(augs)], axis=1)
     return X_aug, wids, dids, names
+
+
+def _log_burnout_prediction(discord_id, worker_id, raw_score, burnout_score, is_flagged, signals):
+    """Log a burnout prediction to PredictionLog."""
+    try:
+        entry = PredictionLog(
+            model_name='burnout',
+            prediction_value=float(burnout_score),
+            confidence=float(min(1.0, max(0.0, abs(raw_score) / max(abs(BURNOUT_THRESHOLD), 0.01)))),
+            metadata_json=json.dumps({
+                'discord_id': discord_id,
+                'worker_id': worker_id,
+                'is_flagged': is_flagged,
+                'raw_score': round(raw_score, 4),
+                'signals': signals,
+                'threshold': BURNOUT_THRESHOLD,
+            }),
+            prediction_time=datetime.utcnow(),
+        )
+        db.session.add(entry)
+        db.session.commit()
+    except Exception as e:
+        print(f'[burnout] PredictionLog write failed: {e}')
 
 
 def train(contamination=0.1, days=30):
@@ -103,12 +129,27 @@ def score_worker(discord_id, days=30):
     if len(features) > 7 and features[7] > 0.3:
         signals.append('frequent_corrections')
 
-    return {
+    result = {
         'burnout_score': burnout_score,
         'is_flagged': bool(is_flagged),
         'raw_anomaly_score': round(raw_score, 4),
         'signals': signals,
     }
+    worker = None
+    try:
+        from database import Worker as WorkerModel
+        worker = WorkerModel.query.filter_by(discord_id=discord_id).first()
+    except Exception:
+        pass
+    _log_burnout_prediction(
+        discord_id=discord_id,
+        worker_id=worker.id if worker else None,
+        raw_score=raw_score,
+        burnout_score=burnout_score,
+        is_flagged=is_flagged,
+        signals=signals,
+    )
+    return result
 
 
 def scan_all(days=30):
@@ -123,6 +164,14 @@ def scan_all(days=30):
         is_flagged = scores[i] < BURNOUT_THRESHOLD
         burnout_score = min(100, max(0, int((BURNOUT_THRESHOLD - scores[i]) * 100))) if is_flagged else 0
         if is_flagged:
+            _log_burnout_prediction(
+                discord_id=dids[i],
+                worker_id=wids[i],
+                raw_score=scores[i],
+                burnout_score=burnout_score,
+                is_flagged=True,
+                signals=[],
+            )
             results.append({
                 'worker_id': wids[i],
                 'discord_id': dids[i],

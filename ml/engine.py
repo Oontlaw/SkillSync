@@ -38,7 +38,15 @@ def resolve_all_outcomes():
     """Resolve pending predictions across all models."""
     from ml.forecast import resolve_outcomes
     resolved = resolve_outcomes(days_back=7)
-    return {'forecast_resolved': resolved}
+    results = {'forecast_resolved': resolved}
+    # Resolve corrector predictions against actual AdminCorrection records
+    try:
+        from ml import corrector
+        corrector_result = corrector.resolve_corrector_outcomes(days_back=30)
+        results['corrector'] = corrector_result
+    except Exception as e:
+        results['corrector'] = {'error': str(e)}
+    return results
 
 
 def get_all_accuracy_metrics(days=7):

@@ -4,6 +4,8 @@ import joblib
 from datetime import datetime, timedelta
 from sklearn.ensemble import IsolationForest
 from ml.features import all_user_feature_vectors, user_anomaly_feature_vector
+import json
+from database import db, PredictionLog
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), 'models')
 ANOMALY_MODEL_PATH = os.path.join(MODELS_DIR, 'anomaly_iforest.joblib')
@@ -41,6 +43,27 @@ def all_user_vectors_with_corrections(days=30, min_msgs=10):
         augs.append(_correction_features(did, days))
     X_aug = np.concatenate([X, np.array(augs)], axis=1)
     return X_aug, ids
+
+
+def _log_anomaly_prediction(discord_id, score, is_anomaly, severity):
+    """Log a single anomaly prediction to PredictionLog."""
+    try:
+        entry = PredictionLog(
+            model_name='anomaly',
+            prediction_value=float(score),
+            confidence=float(min(1.0, max(0.0, abs(score) / max(abs(ANOMALY_THRESHOLD), 0.01)))),
+            metadata_json=json.dumps({
+                'discord_id': discord_id,
+                'is_anomaly': is_anomaly,
+                'severity': severity,
+                'threshold': ANOMALY_THRESHOLD,
+            }),
+            prediction_time=datetime.utcnow(),
+        )
+        db.session.add(entry)
+        db.session.commit()
+    except Exception as e:
+        print(f'[anomaly] PredictionLog write failed: {e}')
 
 
 def train(min_msgs=10, days=30, contamination=0.1):
@@ -82,12 +105,14 @@ def predict(discord_id, days=30):
     is_anomaly = score < ANOMALY_THRESHOLD
     # Convert raw score to 0-100 severity
     severity = min(100, max(0, int((ANOMALY_THRESHOLD - score) * 100))) if is_anomaly else 0
-    return {
+    result = {
         'anomaly_score': round(score, 4),
         'is_anomaly': bool(is_anomaly),
         'severity': severity,
         'threshold': ANOMALY_THRESHOLD,
     }
+    _log_anomaly_prediction(discord_id, score, is_anomaly, severity)
+    return result
 
 
 def scan_all(min_msgs=10, days=30):
@@ -101,6 +126,7 @@ def scan_all(min_msgs=10, days=30):
     for i, did in enumerate(ids):
         if scores[i] < ANOMALY_THRESHOLD:
             severity = min(100, max(0, int((ANOMALY_THRESHOLD - scores[i]) * 100)))
+            _log_anomaly_prediction(did, scores[i], True, severity)
             results.append({
                 'discord_id': did,
                 'anomaly_score': round(float(scores[i]), 4),

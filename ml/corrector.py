@@ -6,11 +6,89 @@ from datetime import datetime, timedelta
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.model_selection import cross_val_score, LeaveOneOut
 from sklearn.preprocessing import StandardScaler
+import json
+from database import db, PredictionLog
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), 'models')
 CORRECTOR_MODEL_PATH = os.path.join(MODELS_DIR, 'score_corrector.joblib')
 SCALER_PATH = os.path.join(MODELS_DIR, 'corrector_scaler.joblib')
 MIN_CORRECTIONS = 5
+
+
+def _log_corrector_prediction(worker_id, original_change, predicted_change, direction, confidence):
+    """Log a corrector recommendation to PredictionLog.
+    Outcome is resolved by resolve_corrector_outcomes() when an AdminCorrection
+    record appears after prediction_time for the same worker_id.
+    """
+    try:
+        entry = PredictionLog(
+            model_name='corrector',
+            prediction_value=float(predicted_change),
+            confidence=float(confidence),
+            metadata_json=json.dumps({
+                'worker_id': worker_id,
+                'original_change': original_change,
+                'direction': direction,
+            }),
+            prediction_time=datetime.utcnow(),
+        )
+        db.session.add(entry)
+        db.session.commit()
+        return entry.id
+    except Exception as e:
+        print(f'[corrector] PredictionLog write failed: {e}')
+        return None
+
+
+def resolve_corrector_outcomes(days_back=30):
+    """
+    Resolve pending corrector predictions by matching them to AdminCorrection records.
+    For each unresolved corrector PredictionLog entry:
+      - Find AdminCorrection records for the same worker_id created AFTER prediction_time
+      - If found, compute error between predicted_change and actual corrected_change
+      - Mark was_correct = True if abs(error) <= 2.0 points, else False
+    """
+    import json as _json
+    from database import AdminCorrection
+    cutoff = datetime.utcnow() - timedelta(days=days_back)
+
+    pending = PredictionLog.query.filter(
+        PredictionLog.model_name == 'corrector',
+        PredictionLog.was_correct == None,
+        PredictionLog.prediction_time >= cutoff,
+    ).all()
+
+    resolved = 0
+    for log in pending:
+        try:
+            meta = _json.loads(log.metadata_json) if log.metadata_json else {}
+            worker_id = meta.get('worker_id')
+            if not worker_id:
+                continue
+
+            actual = AdminCorrection.query.filter(
+                AdminCorrection.worker_id == int(worker_id),
+                AdminCorrection.created_at > log.prediction_time,
+            ).order_by(AdminCorrection.created_at).first()
+
+            if not actual:
+                continue
+
+            actual_change = actual.corrected_score_change
+            error = actual_change - log.prediction_value
+            log.actual_value = float(actual_change)
+            log.error_signed = float(error)
+            log.error_magnitude = float(abs(error))
+            log.was_correct = abs(error) <= 2.0
+            log.outcome_time = actual.created_at
+            resolved += 1
+        except Exception as e:
+            print(f'[corrector] resolve error on log {log.id}: {e}')
+            continue
+
+    if resolved:
+        db.session.commit()
+    return {'resolved': resolved, 'pending_checked': len(pending)}
 
 
 def _build_training_data(days=365):
@@ -148,11 +226,20 @@ def predict(original_change, worker_id=None, worker_stats=None):
     dir_proba = float(max(cls.predict_proba(vec_scaled)[0]))
 
     direction_map = {0: 'decrease', 1: 'unchanged', 2: 'increase'}
-    return {
+    direction = direction_map.get(pred_dir, 'unknown')
+    result = {
         'predicted_change': round(pred_change, 1),
-        'direction': direction_map.get(pred_dir, 'unknown'),
+        'direction': direction,
         'confidence': round(dir_proba, 3),
     }
+    _log_corrector_prediction(
+        worker_id=worker_id,
+        original_change=original_change,
+        predicted_change=pred_change,
+        direction=direction,
+        confidence=dir_proba,
+    )
+    return result
 
 
 def get_stats():
