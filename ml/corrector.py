@@ -40,6 +40,16 @@ def _log_corrector_prediction(worker_id, original_change, predicted_change, dire
         return None
 
 
+def log_corrector_prediction(worker_id, original_score, corrected_score, reason):
+    """Log a corrector prediction using the unified logging function."""
+    try:
+        from ml.forecast import log_corrector_prediction as unified_log
+        return unified_log(worker_id, original_score, corrected_score, reason)
+    except Exception as e:
+        print(f'[corrector] Unified logging failed: {e}')
+        return None
+
+
 def resolve_corrector_outcomes(days_back=30):
     """
     Resolve pending corrector predictions by matching them to AdminCorrection records.

@@ -36,13 +36,24 @@ def _save_training_history(history):
 
 def resolve_all_outcomes():
     """Resolve pending predictions across all models."""
-    from ml.forecast import resolve_outcomes
+    from ml.forecast import resolve_outcomes, resolve_anomaly_outcomes, resolve_burnout_outcomes, resolve_corrector_outcomes
     resolved = resolve_outcomes(days_back=7)
     results = {'forecast_resolved': resolved}
-    # Resolve corrector predictions against actual AdminCorrection records
+    # Resolve anomaly predictions
     try:
-        from ml import corrector
-        corrector_result = corrector.resolve_corrector_outcomes(days_back=30)
+        anomaly_result = resolve_anomaly_outcomes(days_back=30)
+        results['anomaly'] = anomaly_result
+    except Exception as e:
+        results['anomaly'] = {'error': str(e)}
+    # Resolve burnout predictions
+    try:
+        burnout_result = resolve_burnout_outcomes(days_back=30)
+        results['burnout'] = burnout_result
+    except Exception as e:
+        results['burnout'] = {'error': str(e)}
+    # Resolve corrector predictions
+    try:
+        corrector_result = resolve_corrector_outcomes(days_back=30)
         results['corrector'] = corrector_result
     except Exception as e:
         results['corrector'] = {'error': str(e)}
@@ -177,4 +188,59 @@ def get_model_status():
     # Training history
     status['training_history'] = _load_training_history()
 
+    # Model health check - check if retrain is needed
+    try:
+        health = check_model_health()
+        status['health'] = health
+    except Exception as e:
+        status['health'] = {'error': str(e)}
+
     return status
+
+
+def check_model_health():
+    """Check if models need retraining based on prediction accuracy."""
+    health = {
+        'needs_retrain': False,
+        'reasons': [],
+        'forecast_accuracy': None,
+        'anomaly_precision': None,
+        'burnout_precision': None,
+    }
+
+    # Check forecast accuracy
+    try:
+        forecast_metrics = get_all_accuracy_metrics(days=7)
+        if forecast_metrics.get('accuracy_pct') is not None:
+            health['forecast_accuracy'] = forecast_metrics['accuracy_pct']
+            if forecast_metrics['accuracy_pct'] < 50:
+                health['needs_retrain'] = True
+                health['reasons'].append(f"Forecast accuracy {forecast_metrics['accuracy_pct']}% < 50%")
+    except Exception as e:
+        health['forecast_accuracy_error'] = str(e)
+
+    # Check anomaly precision
+    try:
+        from ml import anomaly
+        anomaly_pr = anomaly.get_precision_recall(days=30)
+        if anomaly_pr.get('precision') is not None:
+            health['anomaly_precision'] = anomaly_pr['precision']
+            if anomaly_pr.get('total_with_feedback', 0) >= 3 and anomaly_pr['precision'] < 0.5:
+                health['needs_retrain'] = True
+                health['reasons'].append(f"Anomaly precision {anomaly_pr['precision_pct']}% < 50% (3+ feedback samples)")
+    except Exception as e:
+        health['anomaly_precision_error'] = str(e)
+
+    # Check burnout precision
+    try:
+        from ml import burnout
+        burnout_pr = burnout.get_precision_recall(days=30)
+        if burnout_pr.get('precision') is not None:
+            health['burnout_precision'] = burnout_pr['precision']
+            if burnout_pr.get('total_with_feedback', 0) >= 3 and burnout_pr['precision'] < 0.5:
+                health['needs_retrain'] = True
+                health['reasons'].append(f"Burnout precision {burnout_pr['precision_pct']}% < 50% (3+ feedback samples)")
+    except Exception as e:
+        health['burnout_precision_error'] = str(e)
+
+    return health

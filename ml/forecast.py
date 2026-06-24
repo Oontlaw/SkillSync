@@ -45,10 +45,10 @@ def _live_rolling_averages(guild_id):
     ).all()
     if not rows:
         return 0, 0, 0
-    # Bucket by hour
+    # Bucket by hour using hour_of_day field for consistency
     hourly = defaultdict(int)
     for r in rows:
-        hourly[r.created_at.hour] += 1
+        hourly[r.hour_of_day] += 1
     # Compute averages over each window
     now_hour = now.hour
     avg_6 = sum(hourly[(now_hour - i) % 24] for i in range(6)) / 6.0
@@ -112,7 +112,6 @@ def predict_next_24h(guild_id, days=30):
 
 def _log_forecast_predictions(guild_id, preds, X_pred, prediction_time):
     """Log 24 hourly predictions to PredictionLog."""
-    now_hour = prediction_time.hour
     today = prediction_time.replace(hour=0, minute=0, second=0, microsecond=0)
     features_list = X_pred.tolist() if hasattr(X_pred, 'tolist') else X_pred
 
@@ -236,3 +235,208 @@ def train_all_guilds(days=30):
         result = train(g.guild_id, days=days)
         results.append({'guild_id': g.guild_id, 'name': g.name, **result})
     return results
+
+
+def log_anomaly_prediction(discord_id, score, is_anomaly, severity):
+    """Log an anomaly prediction to PredictionLog."""
+    try:
+        from database import db, PredictionLog
+        from datetime import datetime
+        import json
+
+        entry = PredictionLog(
+            model_name='anomaly',
+            prediction_value=float(score),
+            confidence=float(min(1.0, max(0.0, abs(score) / max(abs(-0.15), 0.01)))),
+            metadata_json=json.dumps({
+                'discord_id': discord_id,
+                'is_anomaly': is_anomaly,
+                'severity': severity,
+                'threshold': -0.15,
+            }),
+            prediction_time=datetime.utcnow(),
+        )
+        db.session.add(entry)
+        db.session.commit()
+    except Exception as e:
+        print(f'[forecast] Anomaly prediction log failed: {e}')
+
+
+def log_burnout_prediction(discord_id, worker_id, raw_score, burnout_score, is_flagged, signals):
+    """Log a burnout prediction to PredictionLog."""
+    try:
+        from database import db, PredictionLog
+        from datetime import datetime
+        import json
+
+        entry = PredictionLog(
+            model_name='burnout',
+            prediction_value=float(burnout_score),
+            confidence=float(min(1.0, max(0.0, abs(raw_score) / max(abs(0.0), 0.01)))),
+            metadata_json=json.dumps({
+                'discord_id': discord_id,
+                'worker_id': worker_id,
+                'is_flagged': is_flagged,
+                'raw_score': round(raw_score, 4),
+                'signals': signals,
+                'threshold': 0.0,
+            }),
+            prediction_time=datetime.utcnow(),
+        )
+        db.session.add(entry)
+        db.session.commit()
+    except Exception as e:
+        print(f'[forecast] Burnout prediction log failed: {e}')
+
+
+def log_corrector_prediction(worker_id, original_score, corrected_score, reason):
+    """Log a corrector prediction to PredictionLog."""
+    try:
+        from database import db, PredictionLog
+        from datetime import datetime
+        import json
+
+        entry = PredictionLog(
+            model_name='corrector',
+            prediction_value=float(corrected_score - original_score),
+            features_json=json.dumps({
+                'worker_id': worker_id,
+                'original_score': original_score,
+                'corrected_score': corrected_score,
+                'reason': reason,
+            }),
+            metadata_json=json.dumps({
+                'worker_id': worker_id,
+                'original_score': original_score,
+                'corrected_score': corrected_score,
+                'reason': reason,
+            }),
+            prediction_time=datetime.utcnow(),
+        )
+        db.session.add(entry)
+        db.session.commit()
+    except Exception as e:
+        print(f'[forecast] Corrector prediction log failed: {e}')
+
+
+def resolve_all_outcomes():
+    """Resolve pending predictions across all models."""
+    resolved = resolve_outcomes(days_back=7)
+    return {'forecast_resolved': resolved}
+
+
+def resolve_anomaly_outcomes(days_back=30):
+    """Resolve pending anomaly predictions."""
+    from database import db, PredictionLog, BehavioralAnomaly
+    from datetime import datetime, timedelta
+    import json
+
+    cutoff = datetime.utcnow() - timedelta(days=days_back)
+    pending = PredictionLog.query.filter(
+        PredictionLog.model_name == 'anomaly',
+        PredictionLog.actual_value == None,
+        PredictionLog.prediction_time >= cutoff,
+    ).limit(500).all()
+
+    resolved = 0
+    for log in pending:
+        meta = json.loads(log.metadata_json) if log.metadata_json else {}
+        discord_id = meta.get('discord_id')
+        is_anomaly = meta.get('is_anomaly')
+        severity = meta.get('severity')
+
+        if discord_id is None:
+            continue
+
+        # Check if there's an admin feedback for this anomaly
+        anomaly = BehavioralAnomaly.query.filter_by(
+            discord_id=discord_id,
+            anomaly_type='ml_anomaly',
+            detected_at=log.prediction_time
+        ).first()
+
+        if anomaly and anomaly.feedback:
+            # Admin provided feedback
+            log.actual_value = 1 if anomaly.feedback == 'confirmed' else 0
+            log.outcome_time = datetime.utcnow()
+            log.was_correct = (anomaly.feedback == 'confirmed') if log.actual_value is not None else None
+            resolved += 1
+
+    db.session.commit()
+    return resolved
+
+
+def resolve_burnout_outcomes(days_back=30):
+    """Resolve pending burnout predictions."""
+    from database import db, PredictionLog, BurnoutRisk
+    from datetime import datetime, timedelta
+    import json
+
+    cutoff = datetime.utcnow() - timedelta(days=days_back)
+    pending = PredictionLog.query.filter(
+        PredictionLog.model_name == 'burnout',
+        PredictionLog.actual_value == None,
+        PredictionLog.prediction_time >= cutoff,
+    ).limit(500).all()
+
+    resolved = 0
+    for log in pending:
+        meta = json.loads(log.metadata_json) if log.metadata_json else {}
+        discord_id = meta.get('discord_id')
+
+        if discord_id is None:
+            continue
+
+        # Check if there's an admin feedback for this burnout risk
+        burnout = BurnoutRisk.query.filter_by(
+            discord_id=discord_id,
+            detected_at=log.prediction_time
+        ).first()
+
+        if burnout and burnout.feedback:
+            # Admin provided feedback
+            log.actual_value = 1 if burnout.feedback == 'confirmed' else 0
+            log.outcome_time = datetime.utcnow()
+            log.was_correct = (burnout.feedback == 'confirmed') if log.actual_value is not None else None
+            resolved += 1
+
+    db.session.commit()
+    return resolved
+
+
+def resolve_corrector_outcomes(days_back=30):
+    """Resolve pending corrector predictions."""
+    from database import db, PredictionLog, AdminCorrection
+    from datetime import datetime, timedelta
+    import json
+
+    cutoff = datetime.utcnow() - timedelta(days=days_back)
+    pending = PredictionLog.query.filter(
+        PredictionLog.model_name == 'corrector',
+        PredictionLog.actual_value == None,
+        PredictionLog.prediction_time >= cutoff,
+    ).limit(500).all()
+
+    resolved = 0
+    for log in pending:
+        meta = json.loads(log.metadata_json) if log.metadata_json else {}
+        worker_id = meta.get('worker_id')
+
+        if worker_id is None:
+            continue
+
+        # Check if there's an admin correction for this worker
+        correction = AdminCorrection.query.filter_by(
+            worker_id=worker_id,
+            created_at=log.prediction_time
+        ).first()
+
+        if correction:
+            # Admin correction exists
+            log.actual_value = 1
+            log.outcome_time = datetime.utcnow()
+            log.was_correct = True
+            resolved += 1
+
+    db.session.commit()
+    return resolved
