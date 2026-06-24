@@ -1,0 +1,84 @@
+{% extends "workspace_base.html" %}
+{% block title %}SkillSync – Settings{% endblock %}
+{% block content %}
+<div class="max-w-7xl mx-auto px-6 py-8">
+  <div class="flex items-center justify-between mb-8">
+    <div>
+      <h1 class="text-2xl font-bold text-white">{{ org_name }}</h1>
+      <p class="text-gray-500 text-sm">Organisation Settings</p>
+    </div>
+    <div class="flex items-center gap-4">
+      <a href="{{ url_for('workspace.workspace_dashboard') }}" class="text-gray-400 hover:text-white text-sm transition">Dashboard</a>
+      <a href="{{ url_for('workspace.workspace_workers') }}" class="text-gray-400 hover:text-white text-sm transition">Workers</a>
+      <a href="{{ url_for('workspace.workspace_identities') }}" class="text-gray-400 hover:text-white text-sm transition">Identities</a>
+      <form method="POST" action="{{ url_for('workspace.workspace_logout') }}" class="inline">
+        <button type="submit" class="text-gray-500 hover:text-red-400 text-sm transition cursor-pointer">Logout</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Org Info -->
+    <div class="bg-[#111318] border border-gray-800/60 rounded-xl p-5 glow">
+      <h2 class="text-white font-semibold mb-3">Organisation</h2>
+      <div class="space-y-3 text-sm">
+        <div><span class="text-gray-500">Name:</span> <span class="text-gray-300">{{ org.name }}</span></div>
+        <div><span class="text-gray-500">Slug:</span> <span class="text-gray-300">{{ org.slug }}</span></div>
+        <div><span class="text-gray-500">Plan:</span> <span class="text-gray-300">{{ org.plan }}</span></div>
+        <div><span class="text-gray-500">Email Domain:</span> <span class="text-gray-300">{{ org.email_domain or 'Not set' }}</span></div>
+        <div><span class="text-gray-500">Created:</span> <span class="text-gray-300 utc-time" data-utc="{{ org.created_at.isoformat() }}">{{ org.created_at }}</span></div>
+        <div>
+          <span class="text-gray-500">API Key:</span>
+          <code class="text-gray-300 bg-[#0b0d11] px-2 py-0.5 rounded text-xs select-all cursor-pointer" onclick="navigator.clipboard.writeText(this.textContent);showToast('API key copied','success')">{{ org.api_key }}</code>
+        </div>
+      </div>
+    </div>
+
+    <!-- Privacy Toggles -->
+    <div class="bg-[#111318] border border-gray-800/60 rounded-xl p-5 glow">
+      <h2 class="text-white font-semibold mb-3">Privacy & Sharing</h2>
+      <div class="space-y-4">
+        <label class="flex items-start gap-3 cursor-pointer">
+          <input type="checkbox" id="share_feature_vectors" {% if org.share_feature_vectors %}checked{% endif %} class="mt-1 accent-blue-500">
+          <div>
+            <span class="text-white text-sm font-medium">Share Feature Vectors</span>
+            <p class="text-gray-500 text-xs">Allow community feature vectors to be used as prior for workspace scoring.</p>
+          </div>
+        </label>
+        <label class="flex items-start gap-3 cursor-pointer">
+          <input type="checkbox" id="share_anomaly_types" {% if org.share_anomaly_types %}checked{% endif %} class="mt-1 accent-blue-500">
+          <div>
+            <span class="text-white text-sm font-medium">Share Anomaly Types</span>
+            <p class="text-gray-500 text-xs">Allow anomaly patterns to be shared across workspaces for better detection.</p>
+          </div>
+        </label>
+        <label class="flex items-start gap-3 cursor-pointer">
+          <input type="checkbox" id="store_task_content" {% if org.store_task_content %}checked{% endif %} class="mt-1 accent-blue-500">
+          <div>
+            <span class="text-white text-sm font-medium">Store Task Content</span>
+            <p class="text-gray-500 text-xs">Store full task description and content in the database (may include sensitive data).</p>
+          </div>
+        </label>
+        <button onclick="saveSettings()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition">Save Settings</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function saveSettings() {
+  fetch('{{ url_for("workspace.workspace_settings") }}', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      share_feature_vectors: document.getElementById('share_feature_vectors').checked,
+      share_anomaly_types: document.getElementById('share_anomaly_types').checked,
+      store_task_content: document.getElementById('store_task_content').checked,
+    }),
+  }).then(r => r.json()).then(res => {
+    if (res.ok) showToast('Settings saved', 'success');
+    else showToast('Error saving settings', 'error');
+  }).catch(() => showToast('Network error', 'error'));
+}
+</script>
+{% endblock %}

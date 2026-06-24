@@ -15,6 +15,7 @@ from bot_core.state import (  # re-exported for other modules
     flush_voice_buffer, flush_mention_buffer,
     flush_join_buffer, flush_member_presence_buffer,
     flush_online_count, flush_join_leave_buffer,
+    inc_forecast_counter, reset_forecast_counter,
 )
 from bot_core.api_client import api_post
 from bot_core.logging import log
@@ -123,6 +124,32 @@ async def check_reversed_actions():
     await api_post('/observer/ml/anomalies/scan', {'trigger': 'hourly'})
     print(f'[Observer] ML burnout scan...')
     await api_post('/observer/ml/burnout-scan', {'trigger': 'hourly'})
+
+    # ML forecast: run prediction every 12 heartbeats (~60 min)
+    val = inc_forecast_counter()
+    if val >= 12:
+        reset_forecast_counter()
+        print(f'[Observer] Running ML forecast predictions...')
+        try:
+            resp = await asyncio.to_thread(requests.get,
+                f'{SKILLSYNC_API}/observer/guilds',
+                headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
+            if resp.ok:
+                guilds = resp.json().get('value', [])
+                for g in guilds:
+                    gid = g['guild_id']
+                    try:
+                        await asyncio.to_thread(requests.get,
+                            f'{SKILLSYNC_API}/observer/ml/forecast/{gid}',
+                            headers={'Authorization': f'Bearer {API_KEY}'}, timeout=10)
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f'[Observer] Forecast prediction error: {e}')
+
+    # ML forecast: resolve pending outcomes every heartbeat (cheap query)
+    print(f'[Observer] Resolving forecast outcomes...')
+    await api_post('/observer/ml/resolve', {'days_back': 7})
 
     # Correction-triggered retrain check
     try:

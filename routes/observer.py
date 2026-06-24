@@ -1234,6 +1234,7 @@ def scan_anomalies():
                     anomaly_type=a['type'],
                     severity=a['severity'],
                     details=a['details'],
+                    source='discord',
                 )
                 db.session.add(record)
                 total_flagged += 1
@@ -1503,7 +1504,7 @@ def ml_status():
     return jsonify({'models': status, 'last_training': last_train})
 
 
-@observer_bp.route('/observer/ml/forecast/<guild_id>', methods=['GET'])
+@observer_bp.route('/observer/ml/forecast/<guild_id>', methods=['GET', 'POST'])
 @require_api_key
 def ml_forecast_guild(guild_id):
     """Get 24h activity forecast for a guild."""
@@ -1515,6 +1516,26 @@ def ml_forecast_guild(guild_id):
         'forecast': preds.tolist(),
         'hours': list(range(24)),
     })
+
+
+@observer_bp.route('/observer/ml/resolve', methods=['POST'])
+@require_api_key
+def ml_resolve_outcomes():
+    """Resolve pending predictions — compare forecast vs actual."""
+    days_back = request.json.get('days_back', 7) if request.is_json else 7
+    from ml.forecast import resolve_outcomes
+    resolved = resolve_outcomes(days_back=days_back)
+    return jsonify({'resolved': resolved})
+
+
+@observer_bp.route('/observer/ml/accuracy', methods=['GET'])
+@require_api_key
+def ml_accuracy():
+    """Return accuracy metrics for all ML models over trailing N days."""
+    days = request.args.get('days', 7, type=int)
+    from ml.engine import get_all_accuracy_metrics
+    metrics = get_all_accuracy_metrics(days=days)
+    return jsonify(metrics)
 
 
 @observer_bp.route('/observer/ml/anomalies/scan', methods=['POST'])
@@ -1535,6 +1556,7 @@ def ml_scan_anomalies():
                 anomaly_type='ml_anomaly',
                 severity=a['severity'],
                 details=f'ML isolation forest anomaly (score: {a["anomaly_score"]})',
+                source='discord',
             )
             db.session.add(record)
             total_new += 1

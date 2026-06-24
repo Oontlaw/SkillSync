@@ -1,7 +1,7 @@
 import numpy as np
 from collections import defaultdict
 from datetime import datetime, timedelta
-from database import db, MessageRecord, ScoreLog, VoiceActivity, BehavioralAnomaly, BurnoutRisk, GuildMember
+from database import db, MessageRecord, ScoreLog, VoiceActivity, BehavioralAnomaly, BurnoutRisk, GuildMember, Worker
 
 
 def user_hourly_profile(discord_id, days=30):
@@ -259,3 +259,85 @@ def staff_feature_vectors(days=30):
         names.append(w.name)
 
     return np.array(X_list), wids, dids, names
+
+
+def community_prior_for_worker(worker_id):
+    """Build community behavioral priors for a worker based on Discord activity.
+    Returns dict with 5 signals, or None if insufficient data."""
+    worker = db.session.get(Worker, worker_id)
+    if not worker or not worker.discord_id:
+        return None
+    did = worker.discord_id
+    cutoff_30 = datetime.utcnow() - timedelta(days=30)
+    cutoff_7 = datetime.utcnow() - timedelta(days=7)
+
+    total_msgs_30 = MessageRecord.query.filter(
+        MessageRecord.discord_id == did,
+        MessageRecord.created_at >= cutoff_30
+    ).count()
+    if total_msgs_30 < 10:
+        return None
+
+    # 1. Activity consistency (inverted CV of daily counts)
+    daily_counts = db.session.query(
+        db.func.date(MessageRecord.created_at).label('day'),
+        db.func.count(MessageRecord.id).label('c')
+    ).filter(
+        MessageRecord.discord_id == did,
+        MessageRecord.created_at >= cutoff_30
+    ).group_by(db.func.date(MessageRecord.created_at)).all()
+    if daily_counts and len(daily_counts) > 1:
+        vals = np.array([d.c for d in daily_counts])
+        cv = vals.std() / max(vals.mean(), 0.1)
+        activity_consistency = max(0.0, min(1.0, 1.0 - min(cv, 1.0)))
+    else:
+        activity_consistency = 0.5
+
+    # 2. Off-hours ratio (outside 09:00-17:00)
+    off_hours_count = MessageRecord.query.filter(
+        MessageRecord.discord_id == did,
+        MessageRecord.created_at >= cutoff_30,
+        MessageRecord.hour_of_day != None,
+        ~MessageRecord.hour_of_day.between(9, 16),
+    ).count()
+    off_hours_ratio = off_hours_count / max(total_msgs_30, 1)
+
+    # 3. Anomaly rate (anomalies per 30 days, capped at 10)
+    anomaly_count = BehavioralAnomaly.query.filter(
+        BehavioralAnomaly.discord_id == did,
+        BehavioralAnomaly.detected_at >= cutoff_30
+    ).count()
+    anomaly_rate = min(10, anomaly_count) / 10.0
+
+    # 4. Score trajectory (second half vs first half of 30-day window)
+    recent_scores = ScoreLog.query.filter(
+        ScoreLog.worker_id == worker_id,
+        ScoreLog.created_at >= cutoff_30
+    ).order_by(ScoreLog.created_at).all()
+    if len(recent_scores) >= 4:
+        mid = len(recent_scores) // 2
+        first_half = sum(abs(s.change) for s in recent_scores[:mid])
+        second_half = sum(abs(s.change) for s in recent_scores[mid:])
+        if first_half + second_half > 0:
+            score_trajectory = 1.0 if second_half > first_half else (0.0 if second_half < first_half else 0.5)
+        else:
+            score_trajectory = 0.5
+    else:
+        score_trajectory = 0.5
+
+    # 5. Recent activity ratio (msgs/day last 7d / msgs/day last 30d)
+    total_msgs_7 = MessageRecord.query.filter(
+        MessageRecord.discord_id == did,
+        MessageRecord.created_at >= cutoff_7
+    ).count()
+    daily_30 = total_msgs_30 / 30.0
+    daily_7 = total_msgs_7 / 7.0
+    recent_activity_ratio = min(2.0, daily_7 / max(daily_30, 0.1))
+
+    return {
+        'activity_consistency': round(activity_consistency, 4),
+        'off_hours_ratio': round(off_hours_ratio, 4),
+        'anomaly_rate': round(anomaly_rate, 4),
+        'score_trajectory': round(score_trajectory, 4),
+        'recent_activity_ratio': round(recent_activity_ratio, 4),
+    }

@@ -12,6 +12,7 @@ from routes.api import api_bp
 from routes.community import community_bp
 from routes.observer import observer_bp
 from routes.work import work_bp
+from routes.workspace import workspace_bp
 from config import Config
 
 app = Flask(__name__)
@@ -27,6 +28,7 @@ app.register_blueprint(api_bp, url_prefix='/api')
 app.register_blueprint(community_bp, url_prefix='/api')
 app.register_blueprint(observer_bp, url_prefix='/api')
 app.register_blueprint(work_bp, url_prefix='/api')
+app.register_blueprint(workspace_bp)
 
 with app.app_context():
     if os.path.isdir(migrate.directory):

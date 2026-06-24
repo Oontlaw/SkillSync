@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}SkillSync Workspace{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', sans-serif; background: #0b0d11; overflow-x: hidden; }
+    .gradient-text { background: linear-gradient(135deg, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .card-hover { transition: all 0.2s ease; }
+    .card-hover:hover { border-color: #3b82f6 !important; transform: translateY(-2px); }
+    .glow { box-shadow: 0 0 30px rgba(59,130,246,0.08); }
+    .table-hover tr:hover { background: rgba(59,130,246,0.04); }
+    .skeleton { background: linear-gradient(90deg, #1f2937 25%, #2d3748 50%, #1f2937 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px; }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; text-align: center; }
+    .toast { position: fixed; bottom: 24px; right: 24px; z-index: 100; padding: 12px 20px; border-radius: 10px; font-size: 13px; font-weight: 500; opacity: 0; transform: translateY(10px); transition: all 0.3s ease; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+  </style>
+</head>
+<body class="text-gray-100 min-h-screen">
+
+<main>
+{% block content %}{% endblock %}
+</main>
+
+<footer class="border-t border-gray-800/40 py-6 text-center text-gray-600 text-xs mt-8">
+  SkillSync — Workforce Intelligence Platform
+</footer>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  const font = 'Inter';
+  const gridColor = 'rgba(255,255,255,0.05)';
+  const textColor = '#9ca3af';
+
+  function darkChart(ctx, config) {
+    config.options.responsive = true;
+    config.options.maintainAspectRatio = true;
+    if (config.options.plugins && config.options.plugins.legend) {
+      config.options.plugins.legend.labels = config.options.plugins.legend.labels || {};
+      config.options.plugins.legend.labels.color = textColor;
+      config.options.plugins.legend.labels.font = { family: font };
+    }
+    if (config.options.scales) {
+      if (config.options.scales.x) { config.options.scales.x.ticks = config.options.scales.x.ticks || {}; config.options.scales.x.ticks.color = textColor; config.options.scales.x.grid = config.options.scales.x.grid || {}; config.options.scales.x.grid.color = gridColor; }
+      if (config.options.scales.y) { config.options.scales.y.ticks = config.options.scales.y.ticks || {}; config.options.scales.y.ticks.color = textColor; config.options.scales.y.grid = config.options.scales.y.grid || {}; config.options.scales.y.grid.color = gridColor; }
+    }
+    return new Chart(ctx, config);
+  }
+
+  function showToast(msg, type) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast show ' + (type === 'error' ? 'bg-red-700 text-red-100' : type === 'success' ? 'bg-emerald-700 text-emerald-100' : 'bg-gray-700 text-gray-100');
+    setTimeout(() => t.classList.remove('show'), 3000);
+  }
+
+  function localizeTimestamps() {
+    document.querySelectorAll('.utc-time').forEach(el => {
+      const utcStr = el.dataset.utc;
+      if (!utcStr) return;
+      const d = new Date(utcStr + 'Z');
+      if (isNaN(d.getTime())) return;
+      const hasTime = utcStr.includes('T');
+      if (hasTime) {
+        el.textContent = d.toLocaleString(undefined, {
+          year: 'numeric', month: 'short', day: 'numeric',
+          hour: '2-digit', minute: '2-digit'
+        });
+      } else {
+        el.textContent = d.toLocaleDateString(undefined, {
+          year: 'numeric', month: 'short', day: 'numeric'
+        });
+      }
+    });
+  }
+  document.addEventListener('DOMContentLoaded', localizeTimestamps);
+</script>
+
+{% block scripts %}{% endblock %}
+
+</body>
+</html>

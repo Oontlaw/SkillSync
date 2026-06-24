@@ -1,0 +1,130 @@
+{% extends "workspace_base.html" %}
+{% block title %}SkillSync – Identities{% endblock %}
+{% block content %}
+<div class="max-w-7xl mx-auto px-6 py-8">
+  <div class="flex items-center justify-between mb-8">
+    <div>
+      <h1 class="text-2xl font-bold text-white">{{ org_name }}</h1>
+      <p class="text-gray-500 text-sm">Worker Identities</p>
+    </div>
+    <div class="flex items-center gap-4">
+      <a href="{{ url_for('workspace.workspace_dashboard') }}" class="text-gray-400 hover:text-white text-sm transition">Dashboard</a>
+      <a href="{{ url_for('workspace.workspace_workers') }}" class="text-gray-400 hover:text-white text-sm transition">Workers</a>
+      <a href="{{ url_for('workspace.workspace_settings') }}" class="text-gray-400 hover:text-white text-sm transition">Settings</a>
+      <form method="POST" action="{{ url_for('workspace.workspace_logout') }}" class="inline">
+        <button type="submit" class="text-gray-500 hover:text-red-400 text-sm transition cursor-pointer">Logout</button>
+      </form>
+    </div>
+  </div>
+
+  {% if role in ('admin', 'hr') %}
+  <button onclick="document.getElementById('linkForm').classList.toggle('hidden')" class="mb-4 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition">+ Link Identity</button>
+  <div id="linkForm" class="hidden mb-6 bg-[#111318] border border-gray-800/60 rounded-xl p-5 glow">
+    <h2 class="text-white font-semibold mb-3">Link New Identity</h2>
+    <form id="identityLinkForm" class="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div>
+        <label class="text-gray-400 text-xs uppercase tracking-wide">Discord ID</label>
+        <input type="text" name="discord_id" class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500" placeholder="112233445566778899">
+      </div>
+      <div>
+        <label class="text-gray-400 text-xs uppercase tracking-wide">Worker ID</label>
+        <select name="worker_id" class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
+          <option value="">-- Select --</option>
+          {% for w in unlinked_workers %}
+          <option value="{{ w.id }}">{{ w.name }} (ID: {{ w.id }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="text-gray-400 text-xs uppercase tracking-wide">Employee ID</label>
+        <input type="text" name="org_employee_id" class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500" placeholder="EMP-001">
+      </div>
+      <div>
+        <label class="text-gray-400 text-xs uppercase tracking-wide">Jira Account ID</label>
+        <input type="text" name="jira_account_id" class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500" placeholder="5e4f...">
+      </div>
+      <div>
+        <label class="text-gray-400 text-xs uppercase tracking-wide">Display Name</label>
+        <input type="text" name="display_name" class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500" placeholder="John Smith">
+      </div>
+      <div>
+        <label class="text-gray-400 text-xs uppercase tracking-wide">Email</label>
+        <input type="email" name="email" class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500" placeholder="john@acme.com">
+      </div>
+      <div class="md:col-span-3">
+        <button type="submit" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-lg transition">Save Identity</button>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+
+  <div class="bg-[#111318] border border-gray-800/60 rounded-xl p-5 glow">
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm table-hover">
+        <thead>
+          <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
+            <th class="text-left py-3 pr-4">Discord ID</th>
+            <th class="text-left py-3 pr-4">Worker ID</th>
+            <th class="text-left py-3 pr-4">Display Name</th>
+            <th class="text-left py-3 pr-4">Employee ID</th>
+            <th class="text-left py-3 pr-4">Jira ID</th>
+            <th class="text-left py-3 pr-4">Email</th>
+            <th class="text-left py-3 pr-4">Consent</th>
+            <th class="text-left py-3">Linked At</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ident in identities %}
+          <tr class="border-b border-gray-800/20 hover:bg-gray-800/10">
+            <td class="py-3 pr-4 text-gray-300 font-mono text-xs">{{ ident.discord_id or '-' }}</td>
+            <td class="py-3 pr-4">
+              {% if ident.worker_id %}
+              <a href="{{ url_for('workspace.workspace_worker_detail', worker_id=ident.worker_id) }}" class="text-blue-400 hover:text-blue-300">#{{ ident.worker_id }}</a>
+              {% else %}
+              <span class="text-gray-600">-</span>
+              {% endif %}
+            </td>
+            <td class="py-3 pr-4 text-gray-300">{{ ident.display_name or '-' }}</td>
+            <td class="py-3 pr-4 text-gray-400">{{ ident.org_employee_id or '-' }}</td>
+            <td class="py-3 pr-4 text-gray-400 font-mono text-xs">{{ ident.jira_account_id or '-' }}</td>
+            <td class="py-3 pr-4 text-gray-400">{{ ident.email or '-' }}</td>
+            <td class="py-3 pr-4">
+              <span class="{% if ident.consent_community_prior %}text-emerald-400{% else %}text-gray-500{% endif %} text-xs">P{% if not ident.consent_community_prior %}<span class="line-through">{% endif %}rior{% if not ident.consent_community_prior %}</span>{% endif %}</span>
+              <span class="mx-1 text-gray-600">/</span>
+              <span class="{% if ident.consent_federated %}text-cyan-400{% else %}text-gray-500{% endif %} text-xs">F{% if not ident.consent_federated %}<span class="line-through">{% endif %}ed{% if not ident.consent_federated %}</span>{% endif %}</span>
+            </td>
+            <td class="py-3 text-gray-500 utc-time text-xs" data-utc="{{ ident.linked_at.isoformat() }}">{{ ident.linked_at }}</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="8" class="py-8 text-center text-gray-500">No identities linked yet. Use the form above to link workers.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const form = document.getElementById('identityLinkForm');
+  if (!form) return;
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    const data = {};
+    new FormData(form).forEach((v, k) => data[k] = v);
+    if (data.worker_id === '') data.worker_id = null;
+    else data.worker_id = parseInt(data.worker_id);
+    fetch('{{ url_for("workspace.workspace_link_identity") }}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data),
+    }).then(r => r.json()).then(res => {
+      if (res.ok) { location.reload(); }
+      else { alert(res.error || 'Error linking identity'); }
+    }).catch(() => alert('Network error'));
+  });
+});
+</script>
+{% endblock %}

@@ -34,9 +34,30 @@ def _save_training_history(history):
         json.dump(history, f, default=str)
 
 
+def resolve_all_outcomes():
+    """Resolve pending predictions across all models."""
+    from ml.forecast import resolve_outcomes
+    resolved = resolve_outcomes(days_back=7)
+    return {'forecast_resolved': resolved}
+
+
+def get_all_accuracy_metrics(days=7):
+    """Return accuracy metrics for all models."""
+    from ml.forecast import get_accuracy_metrics
+    return {
+        'forecast': get_accuracy_metrics(days=days),
+    }
+
+
 def train_all(days=30, min_msgs=10):
     """Train all ML models and return results."""
     results = {}
+
+    # 0. Resolve pending predictions first
+    try:
+        results['outcome_resolution'] = resolve_all_outcomes()
+    except Exception as e:
+        results['outcome_resolution'] = {'error': str(e)}
 
     # 1. Anomaly detection
     try:
@@ -128,6 +149,12 @@ def get_model_status():
         'global_vs_baseline': fed_status.get('global_vs_baseline'),
         'history': fed_status.get('history'),
     }
+
+    # Prediction accuracy metrics (last 7 days)
+    try:
+        status['accuracy_metrics'] = get_all_accuracy_metrics(days=7)
+    except Exception as e:
+        status['accuracy_metrics'] = {'error': str(e)}
 
     # Training history
     status['training_history'] = _load_training_history()

@@ -602,6 +602,7 @@ def guild_detail(guild_id):
     forecast_data = None
     if forecast_preds is not None:
         forecast_data = forecast_preds.tolist()
+    forecast_metrics = ml_forecast.get_accuracy_metrics(days=7)
 
     # Behavioral anomalies for this guild
     guild_anomalies = BehavioralAnomaly.query.filter(
@@ -625,7 +626,8 @@ def guild_detail(guild_id):
         community_hourly=community_hourly, staff_hourly=staff_hourly,
         online_count=online_count, tracked_offline=tracked_offline, tracked_chatted=tracked_chatted,
         community_count=community_count, human_count=human_count, bot_count=bot_count,
-        forecast_data=forecast_data, guild_anomalies=guild_anomalies,
+        forecast_data=forecast_data, forecast_metrics=forecast_metrics,
+        guild_anomalies=guild_anomalies,
         role_changes=role_changes)
 
 

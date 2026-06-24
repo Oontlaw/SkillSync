@@ -81,6 +81,7 @@ mention_buffer = []
 
 # ── ML retrain counter (weekly schedule) ──
 ml_retrain_counter = 0
+forecast_counter = 0
 
 def set_ml_retrain_counter(val):
     global ml_retrain_counter
@@ -90,6 +91,15 @@ def inc_ml_retrain_counter():
     global ml_retrain_counter
     ml_retrain_counter += 1
     return ml_retrain_counter
+
+def inc_forecast_counter():
+    global forecast_counter
+    forecast_counter += 1
+    return forecast_counter
+
+def reset_forecast_counter():
+    global forecast_counter
+    forecast_counter = 0
 
 # ── Retrain-on-correction flag ──
 _correction_retrain_needed = False

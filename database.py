@@ -1,5 +1,6 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+from werkzeug.security import generate_password_hash, check_password_hash
 
 db = SQLAlchemy()
 
@@ -19,6 +20,85 @@ class Worker(db.Model):
 
     def __repr__(self):
         return f'<Worker {self.name} | Score: {self.score}>'
+
+
+class Organisation(db.Model):
+    __tablename__ = 'organisations'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False)
+    slug = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    email_domain = db.Column(db.String(150), nullable=True)
+    api_key = db.Column(db.String(128), unique=True, nullable=False, index=True)
+    plan = db.Column(db.String(30), default='free')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    is_active = db.Column(db.Boolean, default=True)
+
+    share_feature_vectors = db.Column(db.Boolean, default=True)
+    share_anomaly_types = db.Column(db.Boolean, default=True)
+    store_task_content = db.Column(db.Boolean, default=False)
+
+    members = db.relationship('OrgMember', backref='organisation', lazy=True)
+    identities = db.relationship('WorkerIdentity', backref='organisation', lazy=True)
+
+    def __repr__(self):
+        return f'<Organisation {self.slug}>'
+
+
+class OrgMember(db.Model):
+    __tablename__ = 'org_members'
+
+    id = db.Column(db.Integer, primary_key=True)
+    org_id = db.Column(db.Integer, db.ForeignKey('organisations.id'), nullable=False, index=True)
+    email = db.Column(db.String(150), nullable=False)
+    name = db.Column(db.String(150), nullable=False)
+    role = db.Column(db.String(30), default='member')
+    password_hash = db.Column(db.String(256), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_login = db.Column(db.DateTime, nullable=True)
+    is_active = db.Column(db.Boolean, default=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('org_id', 'email', name='uq_org_member_email'),
+    )
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+    def __repr__(self):
+        return f'<OrgMember {self.email} @ org={self.org_id}>'
+
+
+class WorkerIdentity(db.Model):
+    __tablename__ = 'worker_identities'
+
+    id = db.Column(db.Integer, primary_key=True)
+    worker_id = db.Column(db.Integer, db.ForeignKey('workers.id'), nullable=True, index=True)
+    org_id = db.Column(db.Integer, db.ForeignKey('organisations.id'), nullable=False, index=True)
+
+    discord_id = db.Column(db.String(50), nullable=True, index=True)
+    org_employee_id = db.Column(db.String(100), nullable=True)
+    jira_account_id = db.Column(db.String(100), nullable=True)
+    display_name = db.Column(db.String(150), nullable=True)
+    email = db.Column(db.String(150), nullable=True)
+
+    linked_at = db.Column(db.DateTime, default=datetime.utcnow)
+    linked_by = db.Column(db.String(150), nullable=True)
+    is_active = db.Column(db.Boolean, default=True)
+
+    consent_community_prior = db.Column(db.Boolean, default=True)
+    consent_federated = db.Column(db.Boolean, default=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('org_id', 'discord_id', name='uq_identity_org_discord'),
+        db.UniqueConstraint('org_id', 'org_employee_id', name='uq_identity_org_employee'),
+    )
+
+    def __repr__(self):
+        return f'<WorkerIdentity discord={self.discord_id} org={self.org_id}>'
 
 
 class Task(db.Model):
@@ -230,11 +310,33 @@ class BehavioralAnomaly(db.Model):
     anomaly_type = db.Column(db.String(50), nullable=False)
     severity = db.Column(db.Float, default=0.0)
     details = db.Column(db.Text, nullable=True)
+    source = db.Column(db.String(30), default='discord', index=True)
     detected_at = db.Column(db.DateTime, default=datetime.utcnow)
     cleared_at = db.Column(db.DateTime, nullable=True)
 
     def __repr__(self):
         return f'<BehavioralAnomaly {self.anomaly_type} | {self.discord_id} | sev={self.severity}>'
+
+
+class PredictionLog(db.Model):
+    __tablename__ = 'prediction_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    model_name = db.Column(db.String(50), nullable=False, index=True)
+    prediction_value = db.Column(db.Float, nullable=True)
+    actual_value = db.Column(db.Float, nullable=True)
+    error_magnitude = db.Column(db.Float, nullable=True)
+    error_signed = db.Column(db.Float, nullable=True)
+    features_json = db.Column(db.Text, nullable=True)
+    metadata_json = db.Column(db.Text, nullable=True)
+    confidence = db.Column(db.Float, nullable=True)
+    prediction_time = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    outcome_time = db.Column(db.DateTime, nullable=True)
+    was_correct = db.Column(db.Boolean, nullable=True)
+
+    def __repr__(self):
+        resolved = 'resolved' if self.was_correct is not None else 'pending'
+        return f'<PredictionLog {self.model_name} | {resolved}>'
 
 
 class AutoModRule(db.Model):
