@@ -13,6 +13,7 @@ from ml import anomaly as ml_anomaly
 from ml import burnout as ml_burnout
 from ml import forecast as ml_forecast
 from ml import federated as ml_federated
+from ml import growth as ml_growth
 
 observer_bp = Blueprint('observer', __name__)
 
@@ -501,9 +502,8 @@ def log_messages():
                     guild_id=guild_id,
                     member_id=discord_id,
                     name=sanitize_str(msg.get('name', 'Unknown'), 200),
-                    is_online=True,
-                    status='online',
-                    last_seen_online=now,
+                    is_online=False,
+                    status='offline',
                     last_message_at=now,
                 )
                 db.session.add(member)
@@ -1434,27 +1434,12 @@ def ml_accuracy():
 @observer_bp.route('/observer/ml/anomalies/scan', methods=['POST'])
 @require_api_key
 def ml_scan_anomalies():
-    """Run ML-based anomaly detection across all users.
-    Replaces rule-based detect_anomalies_for_user with Isolation Forest."""
-    now = datetime.utcnow()
-    anomalies = ml_anomaly.scan_all()
-    total_new = 0
-    for a in anomalies:
-        existing = BehavioralAnomaly.query.filter_by(
-            discord_id=a['discord_id'], anomaly_type='ml_anomaly', cleared_at=None
-        ).filter(BehavioralAnomaly.detected_at > now - timedelta(hours=12)).first()
-        if not existing:
-            record = BehavioralAnomaly(
-                discord_id=a['discord_id'],
-                anomaly_type='ml_anomaly',
-                severity=a['severity'],
-                details=f'ML isolation forest anomaly (score: {a["anomaly_score"]})',
-                source='discord',
-            )
-            db.session.add(record)
-            total_new += 1
-    db.session.commit()
-    return jsonify({'scanned': len(anomalies), 'new_anomalies': total_new})
+    """Run ML-based anomaly detection — per-guild if guild_id provided, else all guilds.
+    Records are created by scan_all() with the correct guild_id."""
+    data = request.json or {}
+    guild_id = data.get('guild_id')
+    anomalies = ml_anomaly.scan_all(guild_id=guild_id)
+    return jsonify({'scanned': len(anomalies), 'guild_id': guild_id})
 
 
 @observer_bp.route('/observer/ml/burnout-scan', methods=['POST'])
@@ -1553,6 +1538,53 @@ def ml_request_retrain():
     """Signal that a correction-feedback retrain is needed."""
     _set_retrain_flag()
     return jsonify({'status': 'retrain_requested', 'at': datetime.utcnow().isoformat()})
+
+
+@observer_bp.route('/observer/ml/growth/train/<guild_id>', methods=['POST'])
+@require_api_key
+def ml_growth_train_guild(guild_id):
+    """Train growth prediction model for a guild."""
+    data = request.json or {}
+    days = int(data.get('days', 90))
+    result = ml_growth.train(guild_id, days=days)
+    return jsonify(result)
+
+
+@observer_bp.route('/observer/ml/growth/forecast/<guild_id>', methods=['GET'])
+@require_api_key
+def ml_growth_forecast(guild_id):
+    """Get 7-day growth forecast for a guild."""
+    preds = ml_growth.predict_next_7d(guild_id)
+    if preds is None:
+        return jsonify({'error': 'No growth model for this guild'}), 404
+    return jsonify({'guild_id': guild_id, **preds})
+
+
+@observer_bp.route('/observer/ml/growth/anomalies/<guild_id>', methods=['GET'])
+@require_api_key
+def ml_growth_anomalies(guild_id):
+    """Detect anomalous join/leave days for a guild."""
+    days = request.args.get('days', 30, type=int)
+    anomalies = ml_growth.detect_anomalous_growth(guild_id, days=days)
+    return jsonify({'guild_id': guild_id, 'anomalies': anomalies, 'count': len(anomalies)})
+
+
+@observer_bp.route('/observer/ml/growth/train-all', methods=['POST'])
+@require_api_key
+def ml_growth_train_all():
+    """Train growth models for all guilds."""
+    data = request.json or {}
+    days = int(data.get('days', 90))
+    results = ml_growth.train_all_guilds(days=days)
+    return jsonify({'results': results})
+
+
+@observer_bp.route('/observer/ml/health', methods=['GET'])
+@require_api_key
+def ml_health():
+    """Get model drift health status."""
+    health = ml_engine.get_model_health()
+    return jsonify(health)
 
 
 @observer_bp.route('/observer/ml/pending-retrain', methods=['GET'])

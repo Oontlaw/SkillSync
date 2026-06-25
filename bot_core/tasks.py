@@ -115,13 +115,30 @@ async def check_reversed_actions():
             'timestamp': now.isoformat()
         })
 
-    # Scan anomalies and burnout risks
+    # Scan anomalies and burnout risks — per-guild for ML, global for rule-based
     print(f'[Observer] Scanning behavioral anomalies...')
     await api_post('/observer/anomalies/scan', {'trigger': 'hourly'})
     print(f'[Observer] Scanning burnout risks...')
     await api_post('/observer/burnout-scan', {'trigger': 'hourly'})
-    print(f'[Observer] ML anomaly scan...')
-    await api_post('/observer/ml/anomalies/scan', {'trigger': 'hourly'})
+    print(f'[Observer] ML anomaly scan (per-guild)...')
+    try:
+        resp = await asyncio.to_thread(requests.get,
+            f'{SKILLSYNC_API}/observer/guilds',
+            headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
+        if resp.ok:
+            data = resp.json()
+            guilds = data if isinstance(data, list) else data.get('value', [])
+            for g in guilds:
+                gid = g['guild_id']
+                try:
+                    await api_post('/observer/ml/anomalies/scan', {'guild_id': gid})
+                except Exception as e:
+                    print(f'[Observer] Anomaly scan error for guild {gid}: {e}')
+        else:
+            await api_post('/observer/ml/anomalies/scan', {'trigger': 'hourly'})
+    except Exception as e:
+        print(f'[Observer] Failed to fetch guild list for per-guild scan: {e}')
+        await api_post('/observer/ml/anomalies/scan', {'trigger': 'hourly'})
     print(f'[Observer] ML burnout scan...')
     await api_post('/observer/ml/burnout-scan', {'trigger': 'hourly'})
 

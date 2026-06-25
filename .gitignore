@@ -62,3 +62,22 @@ SYNOPSIS.md
 
 project-context.md
 generate_report.py
+
+# One-off scripts and local utilities
+start_tunnel.py
+test_predict.py
+test_scans.py
+health_check.py
+check_db_stats.py
+check_pg.py
+migrate_to_pg.py
+health_check_final.py
+watchdog.ps1
+
+# Local launchers (machine-specific paths)
+start.bat
+stop.bat
+start-dev.bat
+
+# Runtime state
+.running.lock

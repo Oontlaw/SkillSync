@@ -3,7 +3,7 @@ import discord
 import requests
 from bot_core.config import SKILLSYNC_API, API_KEY
 from bot_core.api_client import api_post
-from bot_core.state import prefix_cache, set_automod_alert_channels, track_online, track_offline
+from bot_core.state import prefix_cache, set_automod_alert_channels, track_online, track_offline, online_members
 from bot_core.logging import log
 
 
@@ -72,6 +72,9 @@ async def scan_guild(guild):
     bot_count = 0
     online_count = 0
     is_large_guild = guild.member_count > 1000
+
+    # Reset online set for this guild so skipped members don't leak as stale online
+    online_members[str(guild.id)] = set()
 
     for member in guild.members:
         if is_large_guild and not member.bot and member.status == discord.Status.offline:

@@ -10,7 +10,7 @@ import json
 import numpy as np
 from datetime import datetime
 
-from ml import anomaly, forecast, burnout, corrector, federated
+from ml import anomaly, forecast, burnout, corrector, federated, growth
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), 'models')
 TRAINING_HISTORY_PATH = os.path.join(MODELS_DIR, 'training_history.json')
@@ -36,25 +36,20 @@ def _save_training_history(history):
 
 def resolve_all_outcomes():
     """Resolve pending predictions across all models."""
-    from ml.forecast import resolve_outcomes, resolve_anomaly_outcomes, resolve_burnout_outcomes, resolve_corrector_outcomes
+    from ml.forecast import resolve_outcomes
+    from ml.corrector import resolve_corrector_outcomes
     resolved = resolve_outcomes(days_back=7)
     results = {'forecast_resolved': resolved}
-    # Resolve anomaly predictions
     try:
-        anomaly_result = resolve_anomaly_outcomes(days_back=30)
-        results['anomaly'] = anomaly_result
+        results['anomaly'] = anomaly.resolve_anomaly_outcomes(days_back=30)
     except Exception as e:
         results['anomaly'] = {'error': str(e)}
-    # Resolve burnout predictions
     try:
-        burnout_result = resolve_burnout_outcomes(days_back=30)
-        results['burnout'] = burnout_result
+        results['burnout'] = burnout.resolve_burnout_outcomes(days_back=30)
     except Exception as e:
         results['burnout'] = {'error': str(e)}
-    # Resolve corrector predictions
     try:
-        corrector_result = resolve_corrector_outcomes(days_back=30)
-        results['corrector'] = corrector_result
+        results['corrector'] = resolve_corrector_outcomes(days_back=30)
     except Exception as e:
         results['corrector'] = {'error': str(e)}
     return results
@@ -115,6 +110,20 @@ def train_all(days=30, min_msgs=10):
         results['federated'] = federated.train_federated(days=days)
     except Exception as e:
         results['federated'] = {'status': 'error', 'error': str(e)}
+
+    # 6. Growth models per guild
+    from database import GuildInfo
+    try:
+        guilds = GuildInfo.query.all()
+        growth_results = []
+        for g in guilds:
+            try:
+                growth_results.append(growth.train(g.guild_id, days=days))
+            except Exception as e:
+                growth_results.append({'guild_id': g.guild_id, 'status': 'error', 'error': str(e)})
+        results['growth'] = {'guilds': len(growth_results), 'results': growth_results}
+    except Exception as e:
+        results['growth'] = {'status': 'error', 'error': str(e)}
 
     results['trained_at'] = datetime.utcnow().isoformat()
 
@@ -188,61 +197,61 @@ def get_model_status():
     # Training history
     status['training_history'] = _load_training_history()
 
-    # Model health check - check if retrain is needed
+    # Drift health check
     try:
-        health = check_model_health()
-        status['health'] = health
+        status['health'] = get_model_health()
     except Exception as e:
         status['health'] = {'error': str(e)}
+
+    # Growth model status
+    try:
+        growth_count = len([f for f in os.listdir(MODELS_DIR) if f.startswith('growth_') and f.endswith('.joblib')])
+        status['growth'] = {'trained': growth_count > 0, 'guild_count': growth_count}
+    except Exception as e:
+        status['growth'] = {'error': str(e)}
 
     return status
 
 
-def check_model_health():
-    """Check if models need retraining based on prediction accuracy."""
+def get_model_health():
+    """Check for model drift — returns dict with drift_detected and drift_reasons."""
     health = {
-        'needs_retrain': False,
-        'reasons': [],
+        'drift_detected': False,
+        'drift_reasons': [],
         'forecast_accuracy': None,
         'anomaly_precision': None,
         'burnout_precision': None,
     }
 
-    # Check forecast accuracy
     try:
         forecast_metrics = get_all_accuracy_metrics(days=7)
-        # forecast_metrics structure: {'forecast': {...}}
         forecast_data = forecast_metrics.get('forecast', {})
         accuracy_pct = forecast_data.get('accuracy_pct')
         if accuracy_pct is not None:
             health['forecast_accuracy'] = accuracy_pct
             if accuracy_pct < 50:
-                health['needs_retrain'] = True
-                health['reasons'].append(f"Forecast accuracy {accuracy_pct}% < 50%")
+                health['drift_detected'] = True
+                health['drift_reasons'].append(f"Forecast accuracy {accuracy_pct}% < 50%")
     except Exception as e:
         health['forecast_accuracy_error'] = str(e)
 
-    # Check anomaly precision
     try:
-        from ml import anomaly
         anomaly_pr = anomaly.get_precision_recall(days=30)
         if anomaly_pr.get('precision') is not None:
             health['anomaly_precision'] = anomaly_pr['precision']
             if anomaly_pr.get('total_with_feedback', 0) >= 3 and anomaly_pr['precision'] < 0.5:
-                health['needs_retrain'] = True
-                health['reasons'].append(f"Anomaly precision {anomaly_pr['precision_pct']}% < 50% (3+ feedback samples)")
+                health['drift_detected'] = True
+                health['drift_reasons'].append(f"Anomaly precision {anomaly_pr['precision_pct']}% < 50% (3+ feedback samples)")
     except Exception as e:
         health['anomaly_precision_error'] = str(e)
 
-    # Check burnout precision
     try:
-        from ml import burnout
         burnout_pr = burnout.get_precision_recall(days=30)
         if burnout_pr.get('precision') is not None:
             health['burnout_precision'] = burnout_pr['precision']
             if burnout_pr.get('total_with_feedback', 0) >= 3 and burnout_pr['precision'] < 0.5:
-                health['needs_retrain'] = True
-                health['reasons'].append(f"Burnout precision {burnout_pr['precision_pct']}% < 50% (3+ feedback samples)")
+                health['drift_detected'] = True
+                health['drift_reasons'].append(f"Burnout precision {burnout_pr['precision_pct']}% < 50% (3+ feedback samples)")
     except Exception as e:
         health['burnout_precision_error'] = str(e)
 

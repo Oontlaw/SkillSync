@@ -4,15 +4,18 @@ from datetime import datetime, timedelta
 from database import db, MessageRecord, ScoreLog, VoiceActivity, BehavioralAnomaly, BurnoutRisk, GuildMember, Worker
 
 
-def user_hourly_profile(discord_id, days=30):
+def user_hourly_profile(discord_id, days=30, guild_id=None):
     """Build 24-dim hourly activity vector for a user over last N days.
-    Returns numpy array of shape (24,) with normalized message counts."""
+    If guild_id is provided, only messages from that guild are included."""
     cutoff = datetime.utcnow() - timedelta(days=days)
-    rows = MessageRecord.query.filter(
+    q = MessageRecord.query.filter(
         MessageRecord.discord_id == discord_id,
         MessageRecord.created_at >= cutoff,
         MessageRecord.hour_of_day != None
-    ).with_entities(MessageRecord.hour_of_day).all()
+    )
+    if guild_id:
+        q = q.filter(MessageRecord.guild_id == guild_id)
+    rows = q.with_entities(MessageRecord.hour_of_day).all()
     if not rows:
         return None
     counts = np.zeros(24)
@@ -24,14 +27,17 @@ def user_hourly_profile(discord_id, days=30):
     return counts
 
 
-def user_message_stats(discord_id, days=30):
+def user_message_stats(discord_id, days=30, guild_id=None):
     """Compute message length statistics and daily volume for a user.
-    Returns dict with mean, std, p95, max_len, daily_mean, daily_std, cv."""
+    If guild_id is provided, only messages from that guild are included."""
     cutoff = datetime.utcnow() - timedelta(days=days)
-    rows = MessageRecord.query.filter(
+    q = MessageRecord.query.filter(
         MessageRecord.discord_id == discord_id,
         MessageRecord.created_at >= cutoff
-    ).with_entities(
+    )
+    if guild_id:
+        q = q.filter(MessageRecord.guild_id == guild_id)
+    rows = q.with_entities(
         MessageRecord.message_length,
         MessageRecord.created_at
     ).all()
@@ -57,30 +63,35 @@ def user_message_stats(discord_id, days=30):
     }
 
 
-def user_anomaly_feature_vector(discord_id, days=30):
+def user_anomaly_feature_vector(discord_id, days=30, guild_id=None):
     """Build combined feature vector for anomaly detection.
+    If guild_id is provided, only messages from that guild are included.
     Shape: (28,) = 24 hourly bins + mean_len + std_len + p95_len + cv."""
-    profile = user_hourly_profile(discord_id, days)
-    stats = user_message_stats(discord_id, days)
+    profile = user_hourly_profile(discord_id, days, guild_id=guild_id)
+    stats = user_message_stats(discord_id, days, guild_id=guild_id)
     if profile is None or stats is None:
         return None
     extra = np.array([stats['mean_len'], stats['std_len'], stats['p95_len'], stats['cv']])
     return np.concatenate([profile, extra])
 
 
-def all_user_feature_vectors(days=30, min_msgs=10):
+def all_user_feature_vectors(days=30, min_msgs=10, guild_id=None):
     """Build feature matrix for all users with sufficient message history.
+    If guild_id is provided, only users with messages in that guild are included.
     Returns (X, ids) where X is (n_users, 28) and ids is list of discord_ids."""
     cutoff = datetime.utcnow() - timedelta(days=days)
-    ids = db.session.query(MessageRecord.discord_id).filter(
+    q = db.session.query(MessageRecord.discord_id).filter(
         MessageRecord.created_at >= cutoff
-    ).group_by(MessageRecord.discord_id).having(
+    )
+    if guild_id:
+        q = q.filter(MessageRecord.guild_id == guild_id)
+    ids = q.group_by(MessageRecord.discord_id).having(
         db.func.count(MessageRecord.id) >= min_msgs
     ).all()
     ids = [r[0] for r in ids]
     X_list, valid_ids = [], []
     for did in ids:
-        vec = user_anomaly_feature_vector(did, days)
+        vec = user_anomaly_feature_vector(did, days, guild_id=guild_id)
         if vec is not None:
             X_list.append(vec)
             valid_ids.append(did)

@@ -231,3 +231,34 @@ def get_precision_recall(days=30):
         'precision': precision,
         'precision_pct': round(precision * 100, 1) if precision is not None else None,
     }
+
+
+def resolve_burnout_outcomes(days_back=30):
+    """Resolve pending burnout predictions against admin feedback on BurnoutRisk."""
+    from datetime import datetime, timedelta
+    cutoff = datetime.utcnow() - timedelta(days=days_back)
+    pending = PredictionLog.query.filter(
+        PredictionLog.model_name == 'burnout',
+        PredictionLog.actual_value == None,
+        PredictionLog.prediction_time >= cutoff,
+    ).limit(500).all()
+
+    resolved = 0
+    for log in pending:
+        meta = json.loads(log.metadata_json) if log.metadata_json else {}
+        discord_id = meta.get('discord_id')
+        if discord_id is None:
+            continue
+        burnout = BurnoutRisk.query.filter_by(
+            discord_id=discord_id,
+            detected_at=log.prediction_time
+        ).first()
+        if burnout and burnout.feedback:
+            log.actual_value = 1 if burnout.feedback == 'confirmed' else 0
+            log.outcome_time = datetime.utcnow()
+            log.was_correct = (burnout.feedback == 'confirmed')
+            resolved += 1
+
+    if resolved:
+        db.session.commit()
+    return resolved

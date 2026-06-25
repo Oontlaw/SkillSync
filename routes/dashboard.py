@@ -201,15 +201,9 @@ def index():
         ).group_by(GuildMember.guild_id).all()
     ) if accessible_ids else {}
     total_members_tracked = sum(guild_member_count_map.values())
-    guild_online_map = dict(
-        db.session.query(
-            GuildMember.guild_id, func.count(GuildMember.id)
-        ).filter(
-            GuildMember.guild_id.in_(accessible_ids),
-            GuildMember.is_bot == False,
-            GuildMember.is_online == True
-        ).group_by(GuildMember.guild_id).all()
-    ) if accessible_ids else {}
+    guild_online_map = {}
+    for g in guilds:
+        guild_online_map[g.guild_id] = g.online_count if g.online_count is not None else 0
     total_online_members = sum(guild_online_map.values())
     total_staff_tracked = GuildMember.query.filter(
         GuildMember.is_staff == True,
@@ -284,6 +278,10 @@ def index():
             pass
     anomaly_precision = ml_status.get('anomaly_precision', {})
     burnout_precision = ml_status.get('burnout_precision', {})
+    model_health = ml_status.get('health', {})
+    health_drift_detected = model_health.get('drift_detected', False)
+    health_drift_reasons = model_health.get('drift_reasons', [])
+    growth_status = ml_status.get('growth', {})
 
     return render_template('dashboard.html',
         user=user,
@@ -327,6 +325,9 @@ def index():
         hourly_leaves_7d=hourly_leaves_7d,
         anomaly_precision=anomaly_precision,
         burnout_precision=burnout_precision,
+        health_drift_detected=health_drift_detected,
+        health_drift_reasons=health_drift_reasons,
+        growth_status=growth_status,
     )
 
 @dashboard_bp.route('/_live')
@@ -341,7 +342,7 @@ def dashboard_live():
     guild_online_map = {}
     guild_member_count_map = {}
     for g in guilds:
-        guild_online_map[g.guild_id] = getattr(g, 'online_count', 0)
+        guild_online_map[g.guild_id] = g.online_count if g.online_count is not None else 0
         guild_member_count_map[g.guild_id] = GuildMember.query.filter(
             GuildMember.guild_id == g.guild_id,
             GuildMember.is_bot == False

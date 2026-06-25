@@ -5,6 +5,23 @@
 
 <div id="tzDebug" class="max-w-7xl mx-auto px-6 pb-2 text-xs text-gray-600"></div>
 
+{% if health_drift_detected %}
+<div class="max-w-7xl mx-auto px-6 pb-4">
+  <div class="bg-red-900/20 border border-red-500/40 rounded-xl p-4 flex items-start gap-3">
+    <span class="text-red-400 text-xl mt-0.5">⚠️</span>
+    <div>
+      <p class="text-red-400 text-sm font-semibold">Model Drift Detected</p>
+      <ul class="text-red-300/80 text-xs mt-1 space-y-0.5">
+        {% for reason in health_drift_reasons %}
+        <li>• {{ reason }}</li>
+        {% endfor %}
+      </ul>
+      <p class="text-gray-500 text-[10px] mt-1">Auto-retrain will trigger on next heartbeat, or click <strong>🔄 All</strong> above.</p>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <!-- 1. GLOBAL STATS & ML STATUS -->
 <div class="max-w-7xl mx-auto px-6 pt-8 pb-6">
   <div class="bg-[#111318] rounded-2xl border border-gray-800/40 p-6 glow">
