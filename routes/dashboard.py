@@ -49,7 +49,7 @@ def refresh_accessible_guilds():
 
 
 @dashboard_bp.route('/')
-def index():
+def index(template_name='dashboard.html'):
     user = session.get('user')
 
     # Public landing page when not logged in
@@ -283,7 +283,7 @@ def index():
     health_drift_reasons = model_health.get('drift_reasons', [])
     growth_status = ml_status.get('growth', {})
 
-    return render_template('dashboard.html',
+    return render_template(template_name,
         user=user,
         accessible_guilds=session.get('accessible_guilds', []),
         invite_url=BOT_INVITE_URL, logged_out=False,

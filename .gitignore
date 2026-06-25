@@ -81,3 +81,25 @@ start-dev.bat
 
 # Runtime state
 .running.lock
+.flask.pid
+.bot.pid
+.ngrok.pid
+.watchdog.pid
+
+# IDE
+.opencode/
+
+# One-off debug / diagnostic scripts
+debug_v2.py
+health_report.py
+
+# Local machine utilities and launchers
+check_services.ps1
+quick_restart.ps1
+restart_services.ps1
+restart_services_fixed.ps1
+restart_services_simple.bat
+simple_restart.ps1
+start_bot.bat
+start_flask.bat
+v2_start.sh
