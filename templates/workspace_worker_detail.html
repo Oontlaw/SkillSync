@@ -21,6 +21,30 @@ block content %}
                     {{ worker.name if worker else 'Worker' }}
                 </div>
                 <div class="ws-subtitle">{{ org_name }}</div>
+                {% if burnout and burnout.burnout_risk != 'none' %}
+                <div style="margin-top: 8px">
+                    {% if burnout.burnout_risk == 'high' %}
+                    <span class="ws-tag ws-tag-red">⚠ High Burnout Risk</span>
+                    {% elif burnout.burnout_risk == 'medium' %}
+                    <span class="ws-tag ws-tag-orange"
+                        >⚠ Medium Burnout Risk</span
+                    >
+                    {% elif burnout.burnout_risk == 'low' %}
+                    <span class="ws-tag ws-tag-muted">Low Burnout Risk</span>
+                    {% endif %} {% if burnout.signals %}
+                    <div
+                        style="
+                            font-size: 11px;
+                            color: var(--text-muted);
+                            margin-top: 4px;
+                        "
+                    >
+                        Signals: {{ burnout.signals | join(', ') | replace('_',
+                        ' ') }}
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
             </div>
         </div>
 
@@ -271,65 +295,209 @@ block content %}
                 </div>
             </div>
 
-            <!-- Stats -->
+            <!-- Stats — Dual Score + Task Breakdown -->
             <div class="ws-card">
                 <div class="ws-card-h">
                     <span class="ws-card-t">Stats</span>
                 </div>
                 <div class="ws-card-b">
                     <div
-                        style="display: flex; flex-direction: column; gap: 16px"
+                        style="display: flex; flex-direction: column; gap: 12px"
                     >
-                        <div>
-                            <div class="ws-label" style="margin-bottom: 4px">
-                                Current Score
+                        <!-- Dual scores side by side -->
+                        <div
+                            style="
+                                display: grid;
+                                grid-template-columns: 1fr 1fr;
+                                gap: 10px;
+                            "
+                        >
+                            <div
+                                style="
+                                    background: var(--bg);
+                                    padding: 10px;
+                                    border-radius: 6px;
+                                    border: 1px solid var(--border);
+                                    text-align: center;
+                                "
+                            >
+                                <div
+                                    class="ws-label"
+                                    style="
+                                        margin-bottom: 2px;
+                                        text-align: center;
+                                    "
+                                >
+                                    Work Engine
+                                </div>
+                                <div
+                                    style="
+                                        font-size: 22px;
+                                        font-weight: 800;
+                                        letter-spacing: -0.02em;
+                                    "
+                                    class="{% if work_score_total > 0 %}score-pos{% elif work_score_total < 0 %}score-neg{% else %}score-neu{% endif %}"
+                                >
+                                    {{ "%+.1f"|format(work_score_total) }}
+                                </div>
+                                <div
+                                    style="
+                                        font-size: 9px;
+                                        color: var(--text-muted);
+                                        margin-top: 1px;
+                                    "
+                                >
+                                    work_engine
+                                </div>
                             </div>
                             <div
                                 style="
-                                    font-size: 32px;
-                                    font-weight: 800;
-                                    letter-spacing: -0.03em;
-                                    line-height: 1;
+                                    background: var(--bg);
+                                    padding: 10px;
+                                    border-radius: 6px;
+                                    border: 1px solid var(--border);
+                                    text-align: center;
                                 "
-                                class="{% if worker.score > 0 %}score-pos{% elif worker.score < 0 %}score-neg{% else %}score-neu{% endif %}"
                             >
-                                {{ "%+.1f"|format(worker.score) }}
+                                <div
+                                    class="ws-label"
+                                    style="
+                                        margin-bottom: 2px;
+                                        text-align: center;
+                                    "
+                                >
+                                    Community
+                                </div>
+                                <div
+                                    style="
+                                        font-size: 22px;
+                                        font-weight: 800;
+                                        letter-spacing: -0.02em;
+                                    "
+                                    class="{% if community_score_total > 0 %}score-pos{% elif community_score_total < 0 %}score-neg{% else %}score-neu{% endif %}"
+                                >
+                                    {{ "%+.1f"|format(community_score_total) }}
+                                </div>
+                                <div
+                                    style="
+                                        font-size: 9px;
+                                        color: var(--text-muted);
+                                        margin-top: 1px;
+                                    "
+                                >
+                                    discord
+                                </div>
                             </div>
                         </div>
+
+                        <hr class="ws-divider" style="margin: 2px 0" />
+
+                        <!-- Task breakdown -->
                         <div>
-                            <div class="ws-label" style="margin-bottom: 4px">
-                                Role
+                            <div class="ws-label" style="margin-bottom: 6px">
+                                Task Breakdown
                             </div>
                             <div
-                                style="font-size: 13px; color: var(--text-sec)"
+                                style="
+                                    display: grid;
+                                    grid-template-columns: 1fr 1fr;
+                                    gap: 4px 16px;
+                                    font-size: 12px;
+                                "
                             >
-                                {{ worker.role or '—' }}
-                            </div>
-                        </div>
-                        <div>
-                            <div class="ws-label" style="margin-bottom: 4px">
-                                Tasks
-                            </div>
-                            <div
-                                style="font-size: 13px; color: var(--text-sec)"
-                            >
-                                {{ tasks|length }} recent
-                            </div>
-                        </div>
-                        <div>
-                            <div class="ws-label" style="margin-bottom: 4px">
-                                Score Events
-                            </div>
-                            <div
-                                style="font-size: 13px; color: var(--text-sec)"
-                            >
-                                {{ scores|length }} recent
+                                <div
+                                    style="
+                                        color: var(--text-sec);
+                                        display: flex;
+                                        justify-content: space-between;
+                                    "
+                                >
+                                    <span>✓ Completed</span>
+                                    <span
+                                        class="score</span>-pos"
+                                        style="font-weight: 700"
+                                        >{{ task_completed }}</span
+                                    >
+                                </div>
+                                <div
+                                    style="
+                                        color: var(--text-sec);
+                                        display: flex;
+                                        justify-content: space-between;
+                                    "
+                                >
+                                    <span>✗ Missed</span>
+                                    <span
+                                        class="score-neg"
+                                        style="font-weight: 700"
+                                        >{{ task_missed }}</span
+                                    >
+                                </div>
+                                <div
+                                    style="
+                                        color: var(--text-sec);
+                                        display: flex;
+                                        justify-content: space-between;
+                                    "
+                                >
+                                    <span>⟳ Pending</span>
+                                    <span
+                                        class="score-neu"
+                                        style="font-weight: 700"
+                                        >{{ task_pending }}</span
+                                    >
+                                </div>
+                                <div
+                                    style="
+                                        color: var(--text-sec);
+                                        display: flex;
+                                        justify-content: space-between;
+                                    "
+                                >
+                                    <span>⚡ Early</span>
+                                    <span
+                                        class="score-pos"
+                                        style="font-weight: 700"
+                                        >{{ task_early }}</span
+                                    >
+                                </div>
+                                <div
+                                    style="
+                                        color: var(--text-sec);
+                                        display: flex;
+                                        justify-content: space-between;
+                                    "
+                                >
+                                    <span>⏰ Late</span>
+                                    <span
+                                        class="score-neg"
+                                        style="font-weight: 700"
+                                        >{{ task_late }}</span
+                                    >
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
+
+        <!-- Work Score Trend Chart -->
+        {% if score_chart_labels %}
+        <div class="ws-card mb-16">
+            <div class="ws-card-h">
+                <span class="ws-card-t">Work Score Trend</span>
+                <span style="font-size: 10px; color: var(--text-muted)"
+                    >Cumulative — last 30 work events</span
+                >
+            </div>
+            <div class="ws-card-b">
+                <div class="ws-chart">
+                    <canvas id="workerScoreChart"></canvas>
+                </div>
+            </div>
+        </div>
+        {% endif %}
 
         <!-- Tasks Table -->
         {% if tasks %}
@@ -405,72 +573,195 @@ block content %}
         </div>
         {% endif %}
 
-        <!-- Score History -->
-        {% if scores %}
-        <div class="ws-card">
+        <!-- Score History — Tabbed Work Engine / Community -->
+        <div class="ws-card mb-16">
             <div class="ws-card-h">
                 <span class="ws-card-t">Score History</span>
-                <span style="font-size: 10px; color: var(--text-muted)"
-                    >Last 30</span
-                >
+                <div class="ws-flex gap-8">
+                    <button
+                        class="ws-btn ws-btn-sm active-tab"
+                        id="tab-work"
+                        onclick="switchTab('work')"
+                    >
+                        Work Engine ({{ work_scores|length }})
+                    </button>
+                    <button
+                        class="ws-btn ws-btn-sm"
+                        id="tab-community"
+                        onclick="switchTab('community')"
+                    >
+                        Community ({{ community_scores|length }})
+                    </button>
+                </div>
             </div>
             <div class="ws-card-b np">
-                <div class="ws-tbl-wrap">
-                    <table class="ws-tbl">
-                        <thead>
-                            <tr>
-                                <th style="text-align: right">Change</th>
-                                <th>Reason</th>
-                                <th>Source</th>
-                                <th>Corrected</th>
-                                <th>Date</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for s in scores %}
-                            <tr>
-                                <td
-                                    style="text-align: right; font-weight: 700"
-                                    class="{% if s.change > 0 %}score-pos{% elif s.change < 0 %}score-neg{% else %}score-neu{% endif %}"
-                                >
-                                    {{ "%+.1f"|format(s.change) }}
-                                </td>
-                                <td
-                                    style="
-                                        max-width: 220px;
-                                        white-space: nowrap;
-                                        overflow: hidden;
-                                        text-overflow: ellipsis;
-                                    "
-                                >
-                                    {{ s.reason or '—' }}
-                                </td>
-                                <td>{{ s.source or '—' }}</td>
-                                <td>
-                                    {% if s.admin_correction %}
-                                    <span class="ws-tag ws-tag-orange"
-                                        >edited</span
+                <!-- Work Engine pane -->
+                <div id="pane-work">
+                    {% if work_scores %}
+                    <div class="ws-tbl-wrap">
+                        <table class="ws-tbl">
+                            <thead>
+                                <tr>
+                                    <th style="text-align: right">Change</th>
+                                    <th>Reason</th>
+                                    <th>Source</th>
+                                    <th>Corrected</th>
+                                    <th>Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for s in work_scores %}
+                                <tr>
+                                    <td
+                                        style="
+                                            text-align: right;
+                                            font-weight: 700;
+                                        "
+                                        class="{% if s.change > 0 %}score-pos{% elif s.change < 0 %}score-neg{% else %}score-neu{% endif %}"
                                     >
-                                    {% else %}
-                                    <span style="color: var(--text-muted)"
-                                        >—</span
+                                        {{ "%+.1f"|format(s.change) }}
+                                    </td>
+                                    <td
+                                        style="
+                                            max-width: 220px;
+                                            white-space: nowrap;
+                                            overflow: hidden;
+                                            text-overflow: ellipsis;
+                                        "
                                     >
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <span
-                                        data-utc="{{ s.created_at.isoformat() }}"
-                                        >{{ s.created_at }}</span
+                                        {{ s.reason or '—' }}
+                                    </td>
+                                    <td>{{ s.source or '—' }}</td>
+                                    <td>
+                                        {% if s.admin_correction %}<span
+                                            class="ws-tag ws-tag-orange"
+                                            >edited</span
+                                        >{% else %}<span
+                                            style="color: var(--text-muted)"
+                                            >—</span
+                                        >{% endif %}
+                                    </td>
+                                    <td>
+                                        <span
+                                            data-utc="{{ s.created_at.isoformat() }}"
+                                            >{{ s.created_at }}</span
+                                        >
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="ws-empty">No work engine score events yet</div>
+                    {% endif %}
+                </div>
+                <!-- Community pane -->
+                <div id="pane-community" style="display: none">
+                    {% if community_scores %}
+                    <div class="ws-tbl-wrap">
+                        <table class="ws-tbl">
+                            <thead>
+                                <tr>
+                                    <th style="text-align: right">Change</th>
+                                    <th>Reason</th>
+                                    <th>Source</th>
+                                    <th>Corrected</th>
+                                    <th>Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for s in community_scores %}
+                                <tr>
+                                    <td
+                                        style="
+                                            text-align: right;
+                                            font-weight: 700;
+                                        "
+                                        class="{% if s.change > 0 %}score-pos{% elif s.change < 0 %}score-neg{% else %}score-neu{% endif %}"
                                     >
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                                        {{ "%+.1f"|format(s.change) }}
+                                    </td>
+                                    <td
+                                        style="
+                                            max-width: 220px;
+                                            white-space: nowrap;
+                                            overflow: hidden;
+                                            text-overflow: ellipsis;
+                                        "
+                                    >
+                                        {{ s.reason or '—' }}
+                                    </td>
+                                    <td>{{ s.source or '—' }}</td>
+                                    <td>
+                                        {% if s.admin_correction %}<span
+                                            class="ws-tag ws-tag-orange"
+                                            >edited</span
+                                        >{% else %}<span
+                                            style="color: var(--text-muted)"
+                                            >—</span
+                                        >{% endif %}
+                                    </td>
+                                    <td>
+                                        <span
+                                            data-utc="{{ s.created_at.isoformat() }}"
+                                            >{{ s.created_at }}</span
+                                        >
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="ws-empty">No community score events yet</div>
+                    {% endif %}
                 </div>
             </div>
         </div>
-        {% endif %} {% endif %}{# end error check #}
+
+        {% endif %}{# end error check #}
     </div>
 </div>
+{% endblock %} {% block scripts %}
+<script>
+    // Tab switching for score history
+    function switchTab(name) {
+        document.getElementById('pane-work').style.display = name === 'work' ? '' : 'none';
+        document.getElementById('pane-community').style.display = name === 'community' ? '' : 'none';
+        document.getElementById('tab-work').classList.toggle('active-tab', name === 'work');
+        document.getElementById('tab-community').classList.toggle('active-tab', name === 'community');
+    }
+
+    // Work Score Trend chart
+    const wLabels = {{ score_chart_labels | tojson }};
+    const wData   = {{ score_chart_data | tojson }};
+    if (wLabels && wLabels.length > 0) {
+        new Chart(document.getElementById('workerScoreChart'), {
+            type: 'line',
+            data: {
+                labels: wLabels,
+                datasets: [{
+                    label: 'Work Score',
+                    data: wData,
+                    borderColor: wData[wData.length - 1] >= 0 ? '#4ade80' : '#f87171',
+                    backgroundColor: wData[wData.length - 1] >= 0 ? 'rgba(74,222,128,0.05)' : 'rgba(248,113,113,0.05)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 2,
+                    borderWidth: 1.5,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { ticks: { color: '#444', font: { size: 10 }, maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.04)' } },
+                    y: { ticks: { color: '#444', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } }
+                }
+            }
+        });
+    }
+</script>
 {% endblock %}

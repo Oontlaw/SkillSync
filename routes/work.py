@@ -1,7 +1,7 @@
 from datetime import datetime
 from functools import wraps
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, session
 
 from database import Organisation, ScoreLog, Task, Worker, db
 from work_engine.webhook import parse_webhook_payload
@@ -277,39 +277,53 @@ def manual_award():
 
 
 @work_bp.route("/work/jira/test", methods=["POST"])
-@require_work_key
 def test_jira_connection():
-    """Test Jira credentials for the provided org. Payload: { "org_id": 1 }"""
-    data = request.get_json(silent=True)
-    if not data or not data.get("org_id"):
-        return jsonify({"error": "org_id required"}), 400
+    """Test Jira credentials for the logged-in org (called from workspace settings UI)."""
+    if not session.get("ws_member_id") or session.get("ws_member_role") not in (
+        "admin",
+        "hr",
+    ):
+        return jsonify({"error": "Unauthorised"}), 403
 
-    org = db.session.get(Organisation, data["org_id"])
+    org_id = session.get("ws_org_id")
+    if not org_id:
+        return jsonify({"error": "No active workspace session"}), 403
+
+    org = db.session.get(Organisation, org_id)
     if not org:
         return jsonify({"error": "Organisation not found"}), 404
 
-    if not all([org.jira_url, org.jira_email, org.jira_api_token, org.jira_project]):
-        return jsonify({"error": "Jira not configured for this org"}), 400
+    # Accept inline credentials from the form (user may not have saved yet)
+    data = request.get_json(silent=True) or {}
+    jira_url = data.get("jira_url") or org.jira_url
+    jira_email = data.get("jira_email") or org.jira_email
+    jira_api_token = data.get("jira_api_token") or org.jira_api_token
+    jira_project = data.get("jira_project") or org.jira_project
+
+    if not all([jira_url, jira_email, jira_api_token, jira_project]):
+        return jsonify(
+            {"ok": False, "error": "Fill in all four Jira fields first"}
+        ), 400
 
     import requests as req
 
     try:
-        url = f"{org.jira_url.rstrip('/')}/rest/api/3/project/{org.jira_project}"
-        resp = req.get(url, auth=(org.jira_email, org.jira_api_token), timeout=10)
+        url = f"{jira_url.rstrip('/')}/rest/api/3/project/{jira_project}"
+        resp = req.get(url, auth=(jira_email, jira_api_token), timeout=10)
         if resp.status_code == 200:
             proj_data = resp.json()
             return jsonify(
                 {
                     "ok": True,
-                    "project_name": proj_data.get("name", org.jira_project),
-                    "project_key": org.jira_project,
+                    "project_name": proj_data.get("name", jira_project),
+                    "project_key": jira_project,
                 }
             )
         else:
             return jsonify(
                 {
                     "ok": False,
-                    "error": f"Jira returned status {resp.status_code}: {resp.text[:200]}",
+                    "error": f"Jira returned {resp.status_code}: {resp.text[:200]}",
                 }
             ), 400
     except Exception as e:

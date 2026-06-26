@@ -151,10 +151,21 @@ endblock %} {% block content %}
                         >
                             Save
                         </button>
+                        <button class="ws-btn ws-btn-sm" onclick="testJira()">
+                            Test Connection
+                        </button>
                         <button class="ws-btn ws-btn-sm" onclick="syncJira()">
                             Sync Now
                         </button>
                     </div>
+                    <div
+                        id="jira-status"
+                        style="
+                            margin-top: 10px;
+                            font-size: 11px;
+                            color: var(--text-muted);
+                        "
+                    ></div>
                 </div>
             </div>
 
@@ -296,6 +307,39 @@ endblock %} {% block content %}
         else wsToast(res.error || 'Error', 'error');
       })
       .catch(() => wsToast('Network error', 'error'));
+    }
+
+    function testJira() {
+      const status = document.getElementById('jira-status');
+      status.textContent = 'Testing...';
+      status.style.color = 'var(--text-muted)';
+      fetch('{{ url_for("work.test_jira_connection") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+        body: JSON.stringify({
+          jira_url: document.getElementById('jira_url').value,
+          jira_email: document.getElementById('jira_email').value,
+          jira_api_token: document.getElementById('jira_api_token').value,
+          jira_project: document.getElementById('jira_project').value,
+        }),
+      })
+      .then(r => r.json())
+      .then(res => {
+        if (res.ok) {
+          status.textContent = 'Connected — ' + res.project_name + ' (' + res.project_key + ')';
+          status.style.color = 'var(--green)';
+          wsToast('Jira connection OK', 'success');
+        } else {
+          status.textContent = res.error || 'Connection failed';
+          status.style.color = 'var(--red)';
+          wsToast(res.error || 'Connection failed', 'error');
+        }
+      })
+      .catch(() => {
+        status.textContent = 'Network error';
+        status.style.color = 'var(--red)';
+        wsToast('Network error', 'error');
+      });
     }
 
     function savePrivacy() {
