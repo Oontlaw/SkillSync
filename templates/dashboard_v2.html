@@ -536,7 +536,7 @@
                                                 color: var(--green);
                                                 font-size: 11px;
                                             "
-                                            >✓ Confirmed</span
+                                            >[OK] Confirmed</span
                                         >
                                         {% elif a.feedback == 'dismissed'
                                         %}<span
@@ -544,7 +544,7 @@
                                                 color: var(--text-dim);
                                                 font-size: 11px;
                                             "
-                                            >✕ Dismissed</span
+                                            >[X] Dismissed</span
                                         >
                                         {% elif a.anomaly_type == 'ml_anomaly'
                                         %}
@@ -552,13 +552,13 @@
                                             class="ws-feedback-btn"
                                             onclick="feedback('anomaly',{{ a.id }},'confirmed',this)"
                                         >
-                                            ✓
+                                            [OK]
                                         </button>
                                         <button
                                             class="ws-feedback-btn"
                                             onclick="feedback('anomaly',{{ a.id }},'dismissed',this)"
                                         >
-                                            ✕
+                                            [X]
                                         </button>
                                         {% else %}<span
                                             style="
@@ -696,27 +696,27 @@
                                             color: var(--green);
                                             font-size: 10px;
                                         "
-                                        >✓ Confirmed</span
+                                        >[OK] Confirmed</span
                                     >
                                     {% elif br.feedback == 'dismissed' %}<span
                                         style="
                                             color: var(--text-dim);
                                             font-size: 10px;
                                         "
-                                        >✕ Dismissed</span
+                                        >[X] Dismissed</span
                                     >
                                     {% else %}
                                     <button
                                         class="ws-feedback-btn"
                                         onclick="feedback('burnout',{{ br.id }},'confirmed',this)"
                                     >
-                                        ✓
+                                        [OK]
                                     </button>
                                     <button
                                         class="ws-feedback-btn"
                                         onclick="feedback('burnout',{{ br.id }},'dismissed',this)"
                                     >
-                                        ✕
+                                        [X]
                                     </button>
                                     {% endif %}
                                 </div>
@@ -1438,7 +1438,7 @@
                             text-transform: uppercase;
                             letter-spacing: 0.05em;
                         "
-                        >🏆 Global Leaderboard</span
+                        >Global Leaderboard</span
                     >
                     <div style="margin-top: 12px">
                         <table class="ws-table">
@@ -1758,7 +1758,7 @@
                                         text-transform: uppercase;
                                         letter-spacing: 0.05em;
                                     "
-                                    >🔗 Work Engine</span
+                                    >Work Engine</span
                                 >
                                 <span
                                     style="
@@ -1968,7 +1968,7 @@
               body: JSON.stringify(body)
             });
                 if (btn) {
-                  btn.parentElement.innerHTML = action === 'confirmed' ? '<span style="color:var(--accent);font-size:10px;">✓ Confirmed</span>' : '<span style="color:#666;font-size:10px;">✕ Dismissed</span>';
+                  btn.parentElement.innerHTML = action === 'confirmed' ? '<span style="color:var(--accent);font-size:10px;">[OK] Confirmed</span>' : '<span style="color:#666;font-size:10px;">[X] Dismissed</span>';
                 }
               }
 

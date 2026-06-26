@@ -221,7 +221,7 @@ endblock %} {% block content %}
                 <h3
                     class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-5"
                 >
-                    🔑 Roles & Permissions
+                    Roles & Permissions
                 </h3>
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm table-hover">
@@ -265,32 +265,44 @@ endblock %} {% block content %}
                                     {{ role.name }}
                                 </td>
                                 <td class="py-3 text-center">
-                                    {% if role.is_admin %}✅{% else %}<span
-                                        class="text-gray-700"
+                                    {% if role.is_admin %}<span
+                                        class="text-green-400 text-xs"
+                                        >YES</span
+                                    >{% else %}<span class="text-gray-700"
                                         >—</span
                                     >{% endif %}
                                 </td>
                                 <td class="py-3 text-center">
-                                    {% if role.can_ban %}✅{% else %}<span
-                                        class="text-gray-700"
+                                    {% if role.can_ban %}<span
+                                        class="text-green-400 text-xs"
+                                        >YES</span
+                                    >{% else %}<span class="text-gray-700"
                                         >—</span
                                     >{% endif %}
                                 </td>
                                 <td class="py-3 text-center">
-                                    {% if role.can_kick %}✅{% else %}<span
-                                        class="text-gray-700"
+                                    {% if role.can_kick %}<span
+                                        class="text-green-400 text-xs"
+                                        >YES</span
+                                    >{% else %}<span class="text-gray-700"
                                         >—</span
                                     >{% endif %}
                                 </td>
                                 <td class="py-3 text-center">
-                                    {% if role.can_manage_guild %}✅{% else
-                                    %}<span class="text-gray-700">—</span>{%
-                                    endif %}
+                                    {% if role.can_manage_guild %}<span
+                                        class="text-green-400 text-xs"
+                                        >YES</span
+                                    >{% else %}<span class="text-gray-700"
+                                        >—</span
+                                    >{% endif %}
                                 </td>
                                 <td class="py-3 text-center">
-                                    {% if role.can_manage_roles %}✅{% else
-                                    %}<span class="text-gray-700">—</span>{%
-                                    endif %}
+                                    {% if role.can_manage_roles %}<span
+                                        class="text-green-400 text-xs"
+                                        >YES</span
+                                    >{% else %}<span class="text-gray-700"
+                                        >—</span
+                                    >{% endif %}
                                 </td>
                                 <td class="py-3 text-center">
                                     {% if role.is_mod %}<span
@@ -319,7 +331,7 @@ endblock %} {% block content %}
                 <h3
                     class="text-sm font-semibold text-emerald-400 uppercase tracking-wider mb-5"
                 >
-                    🎙️ Voice Intelligence
+                    Voice Intelligence
                 </h3>
                 <div class="space-y-6">
                     <div class="grid grid-cols-2 gap-3">
@@ -375,7 +387,7 @@ endblock %} {% block content %}
                 <h3
                     class="text-sm font-semibold text-purple-400 uppercase tracking-wider mb-5"
                 >
-                    🤖 AutoMod Registry
+                    AutoMod Registry
                 </h3>
                 <div class="overflow-x-auto">
                     <table class="w-full text-xs table-hover">
@@ -428,7 +440,7 @@ endblock %} {% block content %}
                 <h3
                     class="text-sm font-semibold text-orange-400 uppercase tracking-wider mb-5"
                 >
-                    📢 Ping-to-Join Events
+                    Ping-to-Join Events
                 </h3>
                 <div class="overflow-x-auto">
                     <table class="w-full text-xs table-hover">
@@ -484,7 +496,7 @@ endblock %} {% block content %}
             <h2
                 class="text-sm font-semibold text-blue-400 uppercase tracking-wider mb-5"
             >
-                👤 Staff ({{ staff|length }})
+                Staff ({{ staff|length }})
             </h2>
             {% if staff %}
             <div class="space-y-2 max-h-96 overflow-y-auto pr-2">
@@ -512,7 +524,6 @@ endblock %} {% block content %}
             </div>
             {% else %}
             <div class="empty-state py-6">
-                <span class="text-2xl mb-2">👤</span>
                 <p class="text-gray-500 text-sm">No staff detected</p>
             </div>
             {% endif %}
@@ -524,7 +535,7 @@ endblock %} {% block content %}
             <h2
                 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-5"
             >
-                👥 Community ({{ members|length }})
+                Community ({{ members|length }})
             </h2>
             {% if members %}
             <div class="space-y-1 max-h-96 overflow-y-auto pr-2">
@@ -562,7 +573,6 @@ endblock %} {% block content %}
             </div>
             {% else %}
             <div class="empty-state py-6">
-                <span class="text-2xl mb-2">👥</span>
                 <p class="text-gray-500 text-sm">
                     No community members tracked
                 </p>
@@ -579,7 +589,7 @@ endblock %} {% block content %}
         <h2
             class="text-sm font-semibold text-cyan-400 uppercase tracking-wider mb-5"
         >
-            🔄 Staff Role Changes
+            Staff Role Changes
         </h2>
         <div class="overflow-x-auto">
             <table class="w-full text-xs table-hover">

@@ -184,7 +184,7 @@ endblock %} {% block content %}
                 <h3
                     class="text-sm font-semibold text-purple-400 uppercase tracking-wider mb-4"
                 >
-                    📨 Mention Dynamics
+                    Mention Dynamics
                 </h3>
                 <div class="grid grid-cols-3 gap-4">
                     <div
@@ -227,7 +227,7 @@ endblock %} {% block content %}
                 <h3
                     class="text-sm font-semibold text-orange-400 uppercase tracking-wider mb-4"
                 >
-                    🛡️ Mod Quality Index
+                    Mod Quality Index
                 </h3>
                 <div class="grid grid-cols-4 gap-3">
                     <div
@@ -281,7 +281,6 @@ endblock %} {% block content %}
     <!-- 4. OPERATIONAL LOGS -->
     <div class="mb-8">
         <div class="flex items-center gap-2 mb-4">
-            <span class="text-gray-500 text-lg">📋</span>
             <h2
                 class="text-sm font-bold text-gray-300 uppercase tracking-widest"
             >
@@ -324,7 +323,6 @@ endblock %} {% block content %}
                 </div>
                 {% else %}
                 <div class="empty-state py-6">
-                    <span class="text-2xl mb-2">📋</span>
                     <p class="text-gray-500 text-sm">No tasks assigned</p>
                 </div>
                 {% endif %}
@@ -381,7 +379,7 @@ endblock %} {% block content %}
                                     class="opacity-0 group-hover:opacity-100 text-xs text-yellow-500 hover:text-yellow-400 transition"
                                     title="Correct this case"
                                 >
-                                    ✏️
+                                    [EDIT]
                                 </button>
                             </div>
                         </div>
@@ -411,7 +409,7 @@ endblock %} {% block content %}
                                 onclick="hideCorrection({{ log.id }})"
                                 class="text-gray-500 hover:text-gray-400 text-xs"
                             >
-                                ✕
+                                [X]
                             </button>
                         </div>
                     </div>
@@ -419,7 +417,6 @@ endblock %} {% block content %}
                 </div>
                 {% else %}
                 <div class="empty-state py-6">
-                    <span class="text-2xl mb-2">📈</span>
                     <p class="text-gray-500 text-sm">No score history</p>
                 </div>
                 {% endif %}
@@ -433,7 +430,7 @@ endblock %} {% block content %}
             <h3
                 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-5"
             >
-                📈 Score Trend
+                Score Trend
             </h3>
             <div class="relative" style="height: 200px">
                 <canvas id="scoreTrendChart"></canvas>
@@ -451,7 +448,7 @@ endblock %} {% block content %}
             <h3
                 class="text-sm font-semibold text-red-400 uppercase tracking-wider mb-4"
             >
-                🚨 Behavioral Anomalies
+                Behavioral Anomalies
             </h3>
             <div class="space-y-3">
                 {% for a in anomalies %}
@@ -483,12 +480,13 @@ endblock %} {% block content %}
             <h3
                 class="text-sm font-semibold text-yellow-400 uppercase tracking-wider mb-3"
             >
-                ⚙️ Admin Correction
+                Admin Correction
             </h3>
             <p class="text-xs text-gray-400 leading-relaxed">
-                Click the <span class="text-yellow-500">✏️</span> button next to
-                any score entry in the history to correct it. Only the case's
-                point value can be changed — no arbitrary point additions.
+                Click the <span class="text-yellow-500">[EDIT]</span> button
+                next to any score entry in the history to correct it. Only the
+                case's point value can be changed — no arbitrary point
+                additions.
             </p>
         </div>
     </div>
