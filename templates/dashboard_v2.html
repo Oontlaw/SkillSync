@@ -536,7 +536,7 @@
                                                 color: var(--green);
                                                 font-size: 11px;
                                             "
-                                            >[OK] Confirmed</span
+                                            >&#10003; Confirmed</span
                                         >
                                         {% elif a.feedback == 'dismissed'
                                         %}<span
@@ -544,7 +544,7 @@
                                                 color: var(--text-dim);
                                                 font-size: 11px;
                                             "
-                                            >[X] Dismissed</span
+                                            >&#10007; Dismissed</span
                                         >
                                         {% elif a.anomaly_type == 'ml_anomaly'
                                         %}
@@ -552,13 +552,13 @@
                                             class="ws-feedback-btn"
                                             onclick="feedback('anomaly',{{ a.id }},'confirmed',this)"
                                         >
-                                            [OK]
+                                            &#10003;
                                         </button>
                                         <button
                                             class="ws-feedback-btn"
                                             onclick="feedback('anomaly',{{ a.id }},'dismissed',this)"
                                         >
-                                            [X]
+                                            &#10007;
                                         </button>
                                         {% else %}<span
                                             style="
@@ -696,27 +696,27 @@
                                             color: var(--green);
                                             font-size: 10px;
                                         "
-                                        >[OK] Confirmed</span
+                                        >&#10003; Confirmed</span
                                     >
                                     {% elif br.feedback == 'dismissed' %}<span
                                         style="
                                             color: var(--text-dim);
                                             font-size: 10px;
                                         "
-                                        >[X] Dismissed</span
+                                        >&#10007; Dismissed</span
                                     >
                                     {% else %}
                                     <button
                                         class="ws-feedback-btn"
                                         onclick="feedback('burnout',{{ br.id }},'confirmed',this)"
                                     >
-                                        [OK]
+                                        &#10003;
                                     </button>
                                     <button
                                         class="ws-feedback-btn"
                                         onclick="feedback('burnout',{{ br.id }},'dismissed',this)"
                                     >
-                                        [X]
+                                        &#10007;
                                     </button>
                                     {% endif %}
                                 </div>
@@ -1968,7 +1968,7 @@
               body: JSON.stringify(body)
             });
                 if (btn) {
-                  btn.parentElement.innerHTML = action === 'confirmed' ? '<span style="color:var(--accent);font-size:10px;">[OK] Confirmed</span>' : '<span style="color:#666;font-size:10px;">[X] Dismissed</span>';
+                  btn.parentElement.innerHTML = action === 'confirmed' ? '<span style="color:var(--accent);font-size:10px;">&#10003; Confirmed</span>' : '<span style="color:#666;font-size:10px;">&#10007; Dismissed</span>';
                 }
               }
 
