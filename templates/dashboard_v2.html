@@ -677,14 +677,166 @@
                                             {% for s in br.signals.split(',') %}
                                             <span
                                                 style="
-                                                    margin-right: 4px;
-                                                    font-size: 9px;
-                                                    color: var(--text-dim);
+                                                    display: inline-flex;
+                                                    align-items: center;
+                                                    margin-right: 3px;
+                                                    cursor: help;
                                                 "
-                                                >{{
-                                                {'frequent_anomalies':'ANOM','volume_volatility':'VOL','increasing_reversals':'REV','voice_creep':'VOICE','frequent_corrections':'CORR'}.get(s,'')
-                                                }}</span
                                             >
+                                                {% if s == 'frequent_anomalies'
+                                                %}
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    width="12"
+                                                    height="12"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    stroke-width="2.5"
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    style="color: #f97316"
+                                                    aria-hidden="true"
+                                                >
+                                                    <title>
+                                                        Frequent Anomalies
+                                                    </title>
+                                                    <path
+                                                        d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                                                    />
+                                                    <line
+                                                        x1="12"
+                                                        y1="9"
+                                                        x2="12"
+                                                        y2="13"
+                                                    />
+                                                    <line
+                                                        x1="12"
+                                                        y1="17"
+                                                        x2="12.01"
+                                                        y2="17"
+                                                    />
+                                                </svg>
+                                                {% elif s == 'volume_volatility'
+                                                %}
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    width="12"
+                                                    height="12"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    stroke-width="2.5"
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    style="color: #5865f2"
+                                                    aria-hidden="true"
+                                                >
+                                                    <title>
+                                                        Volume Volatility
+                                                    </title>
+                                                    <line
+                                                        x1="18"
+                                                        y1="20"
+                                                        x2="18"
+                                                        y2="10"
+                                                    />
+                                                    <line
+                                                        x1="12"
+                                                        y1="20"
+                                                        x2="12"
+                                                        y2="4"
+                                                    />
+                                                    <line
+                                                        x1="6"
+                                                        y1="20"
+                                                        x2="6"
+                                                        y2="14"
+                                                    />
+                                                </svg>
+                                                {% elif s ==
+                                                'increasing_reversals' %}
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    width="12"
+                                                    height="12"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    stroke-width="2.5"
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    style="color: #eab308"
+                                                    aria-hidden="true"
+                                                >
+                                                    <title>
+                                                        Increasing Reversals
+                                                    </title>
+                                                    <path
+                                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                                    />
+                                                </svg>
+                                                {% elif s == 'voice_creep' %}
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    width="12"
+                                                    height="12"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    stroke-width="2.5"
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    style="color: #22c55e"
+                                                    aria-hidden="true"
+                                                >
+                                                    <title>Voice Creep</title>
+                                                    <path
+                                                        d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"
+                                                    />
+                                                    <path
+                                                        d="M19 10v2a7 7 0 0 1-14 0v-2"
+                                                    />
+                                                    <line
+                                                        x1="12"
+                                                        y1="19"
+                                                        x2="12"
+                                                        y2="23"
+                                                    />
+                                                    <line
+                                                        x1="8"
+                                                        y1="23"
+                                                        x2="16"
+                                                        y2="23"
+                                                    />
+                                                </svg>
+                                                {% elif s ==
+                                                'frequent_corrections' %}
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    width="12"
+                                                    height="12"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    stroke-width="2.5"
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    style="color: #a855f7"
+                                                    aria-hidden="true"
+                                                >
+                                                    <title>
+                                                        Frequent Corrections
+                                                    </title>
+                                                    <path
+                                                        d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
+                                                    />
+                                                    <path
+                                                        d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
+                                                    />
+                                                </svg>
+                                                {% endif %}
+                                            </span>
                                             {% endfor %}
                                         </div>
                                         {% endif %}
