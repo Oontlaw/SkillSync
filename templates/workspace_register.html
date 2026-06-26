@@ -1,45 +1,148 @@
-{% extends "workspace_base.html" %}
-{% block title %}SkillSync – Register Organisation{% endblock %}
-{% block content %}
-<div class="min-h-screen flex items-center justify-center px-4 py-8">
-  <div class="w-full max-w-sm bg-[#111318] rounded-2xl border border-gray-800/60 p-8 glow">
-    <div class="text-center mb-6">
-      <span class="text-blue-400 text-3xl">⚡</span>
-      <h1 class="text-white text-xl font-bold mt-2">Register Organisation</h1>
+{% extends "workspace_base.html" %} {% block title %}SkillSync — Register
+Organisation{% endblock %} {% block content %}
+<div class="ws-auth">
+    <div class="ws-auth-card" style="max-width: 420px">
+        <div class="ws-auth-brand">SkillSync</div>
+        <div class="ws-auth-sub">Create a new workspace organisation</div>
+
+        {% if error %}
+        <div class="ws-alert ws-alert-error">{{ error }}</div>
+        {% endif %}
+
+        <form method="POST">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}" />
+
+            <div
+                style="
+                    font-size: 10px;
+                    font-weight: 600;
+                    color: var(--text-muted);
+                    text-transform: uppercase;
+                    letter-spacing: 0.08em;
+                    margin-bottom: 10px;
+                "
+            >
+                Organisation
+            </div>
+            <div class="ws-form-group">
+                <label class="ws-label">Organisation Name</label>
+                <input
+                    type="text"
+                    name="org_name"
+                    class="ws-input"
+                    placeholder="Acme Corp"
+                    required
+                />
+            </div>
+            <div class="ws-form-group" style="margin-bottom: 20px">
+                <label class="ws-label"
+                    >Slug
+                    <span
+                        style="
+                            color: var(--text-muted);
+                            font-weight: 400;
+                            text-transform: none;
+                            letter-spacing: 0;
+                        "
+                        >(URL-safe, lowercase)</span
+                    ></label
+                >
+                <input
+                    type="text"
+                    name="slug"
+                    class="ws-input"
+                    placeholder="acme-corp"
+                    required
+                    pattern="[a-z0-9\-]+"
+                    autocomplete="off"
+                />
+            </div>
+
+            <div
+                style="
+                    font-size: 10px;
+                    font-weight: 600;
+                    color: var(--text-muted);
+                    text-transform: uppercase;
+                    letter-spacing: 0.08em;
+                    margin-bottom: 10px;
+                "
+            >
+                Admin Account
+            </div>
+            <div class="ws-form-group">
+                <label class="ws-label">Your Name</label>
+                <input
+                    type="text"
+                    name="name"
+                    class="ws-input"
+                    placeholder="Jane Smith"
+                    required
+                />
+            </div>
+            <div class="ws-form-group">
+                <label class="ws-label">Email</label>
+                <input
+                    type="email"
+                    name="email"
+                    class="ws-input"
+                    placeholder="admin@acme.com"
+                    required
+                    autocomplete="email"
+                />
+            </div>
+            <div class="ws-form-group">
+                <label class="ws-label">Password</label>
+                <input
+                    type="password"
+                    name="password"
+                    class="ws-input"
+                    placeholder="••••••••"
+                    required
+                    autocomplete="new-password"
+                />
+            </div>
+            <div class="ws-form-group" style="margin-bottom: 20px">
+                <label class="ws-label">Confirm Password</label>
+                <input
+                    type="password"
+                    name="confirm"
+                    class="ws-input"
+                    placeholder="••••••••"
+                    required
+                    autocomplete="new-password"
+                />
+            </div>
+
+            <button
+                type="submit"
+                class="ws-btn ws-btn-primary"
+                style="
+                    width: 100%;
+                    justify-content: center;
+                    padding: 10px 14px;
+                    font-size: 13px;
+                "
+            >
+                Create Organisation
+            </button>
+        </form>
+
+        <hr class="ws-divider" />
+        <p
+            style="
+                text-align: center;
+                font-size: 11px;
+                color: var(--text-muted);
+            "
+        >
+            Already have an account?
+            <a
+                href="{{ url_for('workspace.workspace_login') }}"
+                style="color: var(--text-sec)"
+                >Sign in</a
+            >
+        </p>
     </div>
-    {% if error %}
-    <div class="bg-red-900/30 border border-red-800/40 text-red-300 text-sm rounded-lg px-4 py-2 mb-4">{{ error }}</div>
-    {% endif %}
-    <form method="POST" class="space-y-3">
-      <div>
-        <label class="text-gray-400 text-xs uppercase tracking-wide">Organisation Name</label>
-        <input type="text" name="org_name" required class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 transition" placeholder="Acme Inc">
-      </div>
-      <div>
-        <label class="text-gray-400 text-xs uppercase tracking-wide">Slug (url-safe)</label>
-        <input type="text" name="slug" required class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 transition" placeholder="acme">
-      </div>
-      <div>
-        <label class="text-gray-400 text-xs uppercase tracking-wide">Your Name</label>
-        <input type="text" name="name" required class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 transition" placeholder="Jane Doe">
-      </div>
-      <div>
-        <label class="text-gray-400 text-xs uppercase tracking-wide">Email</label>
-        <input type="email" name="email" required class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 transition" placeholder="jane@acme.com">
-      </div>
-      <div>
-        <label class="text-gray-400 text-xs uppercase tracking-wide">Password</label>
-        <input type="password" name="password" required class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 transition" placeholder="••••••••">
-      </div>
-      <div>
-        <label class="text-gray-400 text-xs uppercase tracking-wide">Confirm Password</label>
-        <input type="password" name="confirm" required class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 transition" placeholder="••••••••">
-      </div>
-      <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2.5 rounded-lg transition shadow-lg shadow-blue-600/20">Register</button>
-    </form>
-    <p class="text-gray-500 text-xs text-center mt-4">
-      Already have an account? <a href="{{ url_for('workspace.workspace_login') }}" class="text-blue-400 hover:text-blue-300">Sign in</a>
-    </p>
-  </div>
 </div>
 {% endblock %}

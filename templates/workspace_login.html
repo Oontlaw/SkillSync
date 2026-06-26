@@ -1,36 +1,78 @@
-{% extends "workspace_base.html" %}
-{% block title %}SkillSync – Workspace Login{% endblock %}
-{% block content %}
-<div class="min-h-screen flex items-center justify-center px-4">
-  <div class="w-full max-w-sm bg-[#111318] rounded-2xl border border-gray-800/60 p-8 glow">
-    <div class="text-center mb-6">
-      <span class="text-blue-400 text-3xl">⚡</span>
-      <h1 class="text-white text-xl font-bold mt-2">Workspace Login</h1>
+{% extends "workspace_base.html" %} {% block title %}SkillSync — Sign In{%
+endblock %} {% block content %}
+<div class="ws-auth">
+    <div class="ws-auth-card">
+        <div class="ws-auth-brand">SkillSync</div>
+        <div class="ws-auth-sub">Workforce Intelligence — Workspace</div>
+
+        {% if error %}
+        <div class="ws-alert ws-alert-error">{{ error }}</div>
+        {% endif %}
+
+        <form method="POST">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}" />
+            <div class="ws-form-group">
+                <label class="ws-label">Organisation Slug</label>
+                <input
+                    type="text"
+                    name="slug"
+                    class="ws-input"
+                    placeholder="my-company"
+                    required
+                    autocomplete="organization"
+                />
+            </div>
+            <div class="ws-form-group">
+                <label class="ws-label">Email</label>
+                <input
+                    type="email"
+                    name="email"
+                    class="ws-input"
+                    placeholder="admin@company.com"
+                    required
+                    autocomplete="email"
+                />
+            </div>
+            <div class="ws-form-group" style="margin-bottom: 20px">
+                <label class="ws-label">Password</label>
+                <input
+                    type="password"
+                    name="password"
+                    class="ws-input"
+                    placeholder="••••••••"
+                    required
+                    autocomplete="current-password"
+                />
+            </div>
+            <button
+                type="submit"
+                class="ws-btn ws-btn-primary"
+                style="
+                    width: 100%;
+                    justify-content: center;
+                    padding: 10px 14px;
+                    font-size: 13px;
+                "
+            >
+                Sign in
+            </button>
+        </form>
+
+        <hr class="ws-divider" />
+        <p
+            style="
+                text-align: center;
+                font-size: 11px;
+                color: var(--text-muted);
+            "
+        >
+            No account?
+            <a
+                href="{{ url_for('workspace.workspace_register') }}"
+                style="color: var(--text-sec)"
+                >Register organisation</a
+            >
+        </p>
     </div>
-    {% if error %}
-    <div class="bg-red-900/30 border border-red-800/40 text-red-300 text-sm rounded-lg px-4 py-2 mb-4">{{ error }}</div>
-    {% endif %}
-    <form method="POST" class="space-y-4">
-      <div>
-        <label class="text-gray-400 text-xs uppercase tracking-wide">Organisation Slug</label>
-        <input type="text" name="slug" required class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 transition" placeholder="my-org">
-      </div>
-      <div>
-        <label class="text-gray-400 text-xs uppercase tracking-wide">Email</label>
-        <input type="email" name="email" required class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 transition" placeholder="admin@example.com">
-      </div>
-      <div>
-        <label class="text-gray-400 text-xs uppercase tracking-wide">Password</label>
-        <input type="password" name="password" required class="w-full bg-[#0b0d11] border border-gray-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 transition" placeholder="••••••••">
-      </div>
-      <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2.5 rounded-lg transition shadow-lg shadow-blue-600/20">Sign In</button>
-    </form>
-    <div class="mt-4 pt-4 border-t border-gray-800/60">
-      <a href="{{ url_for('workspace.workspace_magic_login') }}" class="block w-full text-center bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium py-2 rounded-lg transition text-sm">Quick Login (Test Org)</a>
-    </div>
-    <p class="text-gray-500 text-xs text-center mt-4">
-      No account? <a href="{{ url_for('workspace.workspace_register') }}" class="text-blue-400 hover:text-blue-300">Register your organisation</a>
-    </p>
-  </div>
 </div>
 {% endblock %}

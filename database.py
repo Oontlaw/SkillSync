@@ -1,36 +1,38 @@
-from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
-from werkzeug.security import generate_password_hash, check_password_hash
+
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import check_password_hash, generate_password_hash
 
 db = SQLAlchemy()
 
+
 class Worker(db.Model):
-    __tablename__ = 'workers'
+    __tablename__ = "workers"
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(150), unique=True, nullable=False)
     discord_id = db.Column(db.String(50), unique=True, nullable=True, index=True)
-    role = db.Column(db.String(50), default='worker')  # worker / admin / hr
+    role = db.Column(db.String(50), default="worker")  # worker / admin / hr
     score = db.Column(db.Float, default=0.0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    tasks = db.relationship('Task', backref='worker', lazy=True)
-    score_logs = db.relationship('ScoreLog', backref='worker', lazy=True)
+    tasks = db.relationship("Task", backref="worker", lazy=True)
+    score_logs = db.relationship("ScoreLog", backref="worker", lazy=True)
 
     def __repr__(self):
-        return f'<Worker {self.name} | Score: {self.score}>'
+        return f"<Worker {self.name} | Score: {self.score}>"
 
 
 class Organisation(db.Model):
-    __tablename__ = 'organisations'
+    __tablename__ = "organisations"
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(150), nullable=False)
     slug = db.Column(db.String(80), unique=True, nullable=False, index=True)
     email_domain = db.Column(db.String(150), nullable=True)
     api_key = db.Column(db.String(128), unique=True, nullable=False, index=True)
-    plan = db.Column(db.String(30), default='free')
+    plan = db.Column(db.String(30), default="free")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_active = db.Column(db.Boolean, default=True)
 
@@ -38,28 +40,35 @@ class Organisation(db.Model):
     share_anomaly_types = db.Column(db.Boolean, default=True)
     store_task_content = db.Column(db.Boolean, default=False)
 
-    members = db.relationship('OrgMember', backref='organisation', lazy=True)
-    identities = db.relationship('WorkerIdentity', backref='organisation', lazy=True)
+    jira_url = db.Column(db.String(256), nullable=True)
+    jira_email = db.Column(db.String(150), nullable=True)
+    jira_api_token = db.Column(db.Text, nullable=True)
+    jira_project = db.Column(db.String(50), nullable=True)
+
+    members = db.relationship("OrgMember", backref="organisation", lazy=True)
+    identities = db.relationship("WorkerIdentity", backref="organisation", lazy=True)
 
     def __repr__(self):
-        return f'<Organisation {self.slug}>'
+        return f"<Organisation {self.slug}>"
 
 
 class OrgMember(db.Model):
-    __tablename__ = 'org_members'
+    __tablename__ = "org_members"
 
     id = db.Column(db.Integer, primary_key=True)
-    org_id = db.Column(db.Integer, db.ForeignKey('organisations.id'), nullable=False, index=True)
+    org_id = db.Column(
+        db.Integer, db.ForeignKey("organisations.id"), nullable=False, index=True
+    )
     email = db.Column(db.String(150), nullable=False)
     name = db.Column(db.String(150), nullable=False)
-    role = db.Column(db.String(30), default='member')
+    role = db.Column(db.String(30), default="member")
     password_hash = db.Column(db.String(256), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_login = db.Column(db.DateTime, nullable=True)
     is_active = db.Column(db.Boolean, default=True)
 
     __table_args__ = (
-        db.UniqueConstraint('org_id', 'email', name='uq_org_member_email'),
+        db.UniqueConstraint("org_id", "email", name="uq_org_member_email"),
     )
 
     def set_password(self, password):
@@ -69,15 +78,19 @@ class OrgMember(db.Model):
         return check_password_hash(self.password_hash, password)
 
     def __repr__(self):
-        return f'<OrgMember {self.email} @ org={self.org_id}>'
+        return f"<OrgMember {self.email} @ org={self.org_id}>"
 
 
 class WorkerIdentity(db.Model):
-    __tablename__ = 'worker_identities'
+    __tablename__ = "worker_identities"
 
     id = db.Column(db.Integer, primary_key=True)
-    worker_id = db.Column(db.Integer, db.ForeignKey('workers.id'), nullable=True, index=True)
-    org_id = db.Column(db.Integer, db.ForeignKey('organisations.id'), nullable=False, index=True)
+    worker_id = db.Column(
+        db.Integer, db.ForeignKey("workers.id"), nullable=True, index=True
+    )
+    org_id = db.Column(
+        db.Integer, db.ForeignKey("organisations.id"), nullable=False, index=True
+    )
 
     discord_id = db.Column(db.String(50), nullable=True, index=True)
     org_employee_id = db.Column(db.String(100), nullable=True)
@@ -93,22 +106,28 @@ class WorkerIdentity(db.Model):
     consent_federated = db.Column(db.Boolean, default=True)
 
     __table_args__ = (
-        db.UniqueConstraint('org_id', 'discord_id', name='uq_identity_org_discord'),
-        db.UniqueConstraint('org_id', 'org_employee_id', name='uq_identity_org_employee'),
+        db.UniqueConstraint("org_id", "discord_id", name="uq_identity_org_discord"),
+        db.UniqueConstraint(
+            "org_id", "org_employee_id", name="uq_identity_org_employee"
+        ),
     )
 
     def __repr__(self):
-        return f'<WorkerIdentity discord={self.discord_id} org={self.org_id}>'
+        return f"<WorkerIdentity discord={self.discord_id} org={self.org_id}>"
 
 
 class Task(db.Model):
-    __tablename__ = 'tasks'
+    __tablename__ = "tasks"
 
     id = db.Column(db.Integer, primary_key=True)
-    worker_id = db.Column(db.Integer, db.ForeignKey('workers.id'), nullable=False, index=True)
+    worker_id = db.Column(
+        db.Integer, db.ForeignKey("workers.id"), nullable=False, index=True
+    )
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text, nullable=True)
-    status = db.Column(db.String(30), default='pending')  # pending / completed / missed / anomaly
+    status = db.Column(
+        db.String(30), default="pending"
+    )  # pending / completed / missed / anomaly
     points_awarded = db.Column(db.Float, default=0.0)
     assigned_at = db.Column(db.DateTime, default=datetime.utcnow)
     due_at = db.Column(db.DateTime, nullable=True)
@@ -119,47 +138,53 @@ class Task(db.Model):
     source = db.Column(db.String(30), nullable=True)  # jira / trello / webhook
     external_id = db.Column(db.String(100), nullable=True, index=True)
     external_url = db.Column(db.String(500), nullable=True)
-    priority = db.Column(db.String(20), default='medium')  # low / medium / high / critical
+    priority = db.Column(
+        db.String(20), default="medium"
+    )  # low / medium / high / critical
 
     def __repr__(self):
-        return f'<Task {self.title} | {self.status}>'
+        return f"<Task {self.title} | {self.status}>"
 
 
 class ScoreLog(db.Model):
-    __tablename__ = 'score_logs'
+    __tablename__ = "score_logs"
 
     id = db.Column(db.Integer, primary_key=True)
-    worker_id = db.Column(db.Integer, db.ForeignKey('workers.id'), nullable=False, index=True)
-    change = db.Column(db.Float, nullable=False)       # positive or negative
+    worker_id = db.Column(
+        db.Integer, db.ForeignKey("workers.id"), nullable=False, index=True
+    )
+    change = db.Column(db.Float, nullable=False)  # positive or negative
     reason = db.Column(db.String(300), nullable=False)
-    source = db.Column(db.String(50), default='system')  # system / admin / discord
+    source = db.Column(db.String(50), default="system")  # system / admin / discord
     admin_correction = db.Column(db.Boolean, default=False)
     guild_id = db.Column(db.String(50), nullable=True, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     def __repr__(self):
-        return f'<ScoreLog worker={self.worker_id} change={self.change}>'
+        return f"<ScoreLog worker={self.worker_id} change={self.change}>"
 
 
 class CommunityEvent(db.Model):
-    __tablename__ = 'community_events'
+    __tablename__ = "community_events"
 
     id = db.Column(db.Integer, primary_key=True)
     discord_id = db.Column(db.String(50), nullable=False, index=True)
-    event_type = db.Column(db.String(100), nullable=False)  # message / moderation / rule_break / helpful
+    event_type = db.Column(
+        db.String(100), nullable=False
+    )  # message / moderation / rule_break / helpful
     detail = db.Column(db.Text, nullable=True)
     score_impact = db.Column(db.Float, default=0.0)
     recorded_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
-        return f'<CommunityEvent {self.event_type} | discord={self.discord_id}>'
+        return f"<CommunityEvent {self.event_type} | discord={self.discord_id}>"
 
 
 class AdminCorrection(db.Model):
-    __tablename__ = 'admin_corrections'
+    __tablename__ = "admin_corrections"
 
     id = db.Column(db.Integer, primary_key=True)
-    worker_id = db.Column(db.Integer, db.ForeignKey('workers.id'), nullable=False)
+    worker_id = db.Column(db.Integer, db.ForeignKey("workers.id"), nullable=False)
     original_score_change = db.Column(db.Float, nullable=False)
     corrected_score_change = db.Column(db.Float, nullable=False)
     reason = db.Column(db.Text, nullable=False)
@@ -167,11 +192,11 @@ class AdminCorrection(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
-        return f'<AdminCorrection worker={self.worker_id} by={self.corrected_by}>'
+        return f"<AdminCorrection worker={self.worker_id} by={self.corrected_by}>"
 
 
 class MessageRecord(db.Model):
-    __tablename__ = 'message_records'
+    __tablename__ = "message_records"
 
     id = db.Column(db.Integer, primary_key=True)
     discord_id = db.Column(db.String(50), nullable=False, index=True)
@@ -180,18 +205,21 @@ class MessageRecord(db.Model):
     channel_name = db.Column(db.String(100), nullable=True)
     is_public_channel = db.Column(db.Boolean, default=True)
     message_length = db.Column(db.Integer, default=0)
-    message_content = db.Column(db.Text, nullable=True)      # Only stored for public channels
-    hour_of_day = db.Column(db.Integer, nullable=True)       # 0-23
-    day_of_week = db.Column(db.Integer, nullable=True)       # 0=Mon, 6=Sun
+    message_content = db.Column(
+        db.Text, nullable=True
+    )  # Only stored for public channels
+    hour_of_day = db.Column(db.Integer, nullable=True)  # 0-23
+    day_of_week = db.Column(db.Integer, nullable=True)  # 0=Mon, 6=Sun
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     def __repr__(self):
-        return f'<MessageRecord {self.discord_id} | len={self.message_length}>'
+        return f"<MessageRecord {self.discord_id} | len={self.message_length}>"
 
 
 class GuildInfo(db.Model):
     """Stores scanned guild/server information."""
-    __tablename__ = 'guild_info'
+
+    __tablename__ = "guild_info"
 
     id = db.Column(db.Integer, primary_key=True)
     guild_id = db.Column(db.String(50), unique=True, nullable=False, index=True)
@@ -211,7 +239,8 @@ class GuildInfo(db.Model):
 
 class GuildRole(db.Model):
     """Stores role information per guild, including mod-relevant permissions."""
-    __tablename__ = 'guild_roles'
+
+    __tablename__ = "guild_roles"
 
     id = db.Column(db.Integer, primary_key=True)
     guild_id = db.Column(db.String(50), nullable=False, index=True)
@@ -232,18 +261,21 @@ class GuildRole(db.Model):
 
     def is_mod_role(self):
         """Auto-determine if this role grants moderation power."""
-        return any([
-            self.is_admin,
-            self.can_ban,
-            self.can_kick,
-            self.can_manage_guild,
-            self.can_manage_roles,
-        ])
+        return any(
+            [
+                self.is_admin,
+                self.can_ban,
+                self.can_kick,
+                self.can_manage_guild,
+                self.can_manage_roles,
+            ]
+        )
 
 
 class GuildMember(db.Model):
     """Stores member information per guild with staff flags and presence tracking."""
-    __tablename__ = 'guild_members'
+
+    __tablename__ = "guild_members"
 
     id = db.Column(db.Integer, primary_key=True)
     guild_id = db.Column(db.String(50), nullable=False, index=True)
@@ -261,7 +293,7 @@ class GuildMember(db.Model):
     is_online = db.Column(db.Boolean, default=False)
     last_seen_online = db.Column(db.DateTime, nullable=True)
     last_message_at = db.Column(db.DateTime, nullable=True)
-    status = db.Column(db.String(20), default='offline')
+    status = db.Column(db.String(20), default="offline")
     activity_name = db.Column(db.String(100), nullable=True)
     activity_type = db.Column(db.String(20), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -269,14 +301,17 @@ class GuildMember(db.Model):
 
 class GuildChannel(db.Model):
     """Stores channel information per guild."""
-    __tablename__ = 'guild_channels'
+
+    __tablename__ = "guild_channels"
 
     id = db.Column(db.Integer, primary_key=True)
     guild_id = db.Column(db.String(50), nullable=False, index=True)
     channel_id = db.Column(db.String(50), nullable=False)
     name = db.Column(db.String(100), nullable=False)
     topic = db.Column(db.Text, nullable=True)
-    channel_type = db.Column(db.String(20), nullable=False, default='text')  # text, voice, announcement, forum
+    channel_type = db.Column(
+        db.String(20), nullable=False, default="text"
+    )  # text, voice, announcement, forum
     category = db.Column(db.String(100), nullable=True)
     position = db.Column(db.Integer, default=0)
     is_public = db.Column(db.Boolean, default=True)
@@ -284,7 +319,7 @@ class GuildChannel(db.Model):
 
 
 class MentionRecord(db.Model):
-    __tablename__ = 'mention_records'
+    __tablename__ = "mention_records"
 
     id = db.Column(db.Integer, primary_key=True)
     mentioner_id = db.Column(db.String(50), nullable=False, index=True)
@@ -297,11 +332,11 @@ class MentionRecord(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
-        return f'<MentionRecord {self.mentioner_id} -> {self.mentioned_id} reply={self.reply_time_seconds}>'
+        return f"<MentionRecord {self.mentioner_id} -> {self.mentioned_id} reply={self.reply_time_seconds}>"
 
 
 class BehavioralAnomaly(db.Model):
-    __tablename__ = 'behavioral_anomalies'
+    __tablename__ = "behavioral_anomalies"
 
     id = db.Column(db.Integer, primary_key=True)
     discord_id = db.Column(db.String(50), nullable=False, index=True)
@@ -310,18 +345,18 @@ class BehavioralAnomaly(db.Model):
     anomaly_type = db.Column(db.String(50), nullable=False)
     severity = db.Column(db.Float, default=0.0)
     details = db.Column(db.Text, nullable=True)
-    source = db.Column(db.String(30), default='discord', index=True)
+    source = db.Column(db.String(30), default="discord", index=True)
     detected_at = db.Column(db.DateTime, default=datetime.utcnow)
     cleared_at = db.Column(db.DateTime, nullable=True)
     feedback = db.Column(db.String(30), nullable=True, index=True)
     feedback_at = db.Column(db.DateTime, nullable=True)
 
     def __repr__(self):
-        return f'<BehavioralAnomaly {self.anomaly_type} | {self.discord_id} | sev={self.severity}>'
+        return f"<BehavioralAnomaly {self.anomaly_type} | {self.discord_id} | sev={self.severity}>"
 
 
 class PredictionLog(db.Model):
-    __tablename__ = 'prediction_logs'
+    __tablename__ = "prediction_logs"
 
     id = db.Column(db.Integer, primary_key=True)
     model_name = db.Column(db.String(50), nullable=False, index=True)
@@ -337,12 +372,12 @@ class PredictionLog(db.Model):
     was_correct = db.Column(db.Boolean, nullable=True)
 
     def __repr__(self):
-        resolved = 'resolved' if self.was_correct is not None else 'pending'
-        return f'<PredictionLog {self.model_name} | {resolved}>'
+        resolved = "resolved" if self.was_correct is not None else "pending"
+        return f"<PredictionLog {self.model_name} | {resolved}>"
 
 
 class AutoModRule(db.Model):
-    __tablename__ = 'automod_rules'
+    __tablename__ = "automod_rules"
 
     id = db.Column(db.Integer, primary_key=True)
     guild_id = db.Column(db.String(50), nullable=False)
@@ -360,11 +395,11 @@ class AutoModRule(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
-        return f'<AutoModRule {self.name} | {self.trigger_type} -> {self.action_type}>'
+        return f"<AutoModRule {self.name} | {self.trigger_type} -> {self.action_type}>"
 
 
 class VoiceActivity(db.Model):
-    __tablename__ = 'voice_activity'
+    __tablename__ = "voice_activity"
 
     id = db.Column(db.Integer, primary_key=True)
     discord_id = db.Column(db.String(50), nullable=False, index=True)
@@ -380,12 +415,13 @@ class VoiceActivity(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
-        return f'<VoiceActivity {self.discord_id} | {self.duration_seconds}s in {self.channel_name}>'
+        return f"<VoiceActivity {self.discord_id} | {self.duration_seconds}s in {self.channel_name}>"
 
 
 class PingJoinEvent(db.Model):
     """Records when a moderator pings @everyone and new members join within 20 min."""
-    __tablename__ = 'ping_join_events'
+
+    __tablename__ = "ping_join_events"
 
     id = db.Column(db.Integer, primary_key=True)
     guild_id = db.Column(db.String(50), nullable=False, index=True)
@@ -398,14 +434,16 @@ class PingJoinEvent(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
-        return f'<PingJoinEvent {self.moderator_name} | +{self.new_members} in {self.guild_name}>'
+        return f"<PingJoinEvent {self.moderator_name} | +{self.new_members} in {self.guild_name}>"
 
 
 class BurnoutRisk(db.Model):
-    __tablename__ = 'burnout_risks'
+    __tablename__ = "burnout_risks"
 
     id = db.Column(db.Integer, primary_key=True)
-    worker_id = db.Column(db.Integer, db.ForeignKey('workers.id'), nullable=False, index=True)
+    worker_id = db.Column(
+        db.Integer, db.ForeignKey("workers.id"), nullable=False, index=True
+    )
     discord_id = db.Column(db.String(50), nullable=False)
     name = db.Column(db.String(100), nullable=True)
     score = db.Column(db.Float, default=0.0, index=True)
@@ -419,11 +457,11 @@ class BurnoutRisk(db.Model):
     feedback_at = db.Column(db.DateTime, nullable=True)
 
     def __repr__(self):
-        return f'<BurnoutRisk {self.name} | score={self.score}>'
+        return f"<BurnoutRisk {self.name} | score={self.score}>"
 
 
 class AutoModTrigger(db.Model):
-    __tablename__ = 'automod_triggers'
+    __tablename__ = "automod_triggers"
 
     id = db.Column(db.Integer, primary_key=True)
     guild_id = db.Column(db.String(50), nullable=False, index=True)
@@ -438,11 +476,11 @@ class AutoModTrigger(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
-        return f'<AutoModTrigger {self.rule_name} -> {self.user_name} in #{self.channel_name}>'
+        return f"<AutoModTrigger {self.rule_name} -> {self.user_name} in #{self.channel_name}>"
 
 
 class PendingBan(db.Model):
-    __tablename__ = 'pending_bans'
+    __tablename__ = "pending_bans"
 
     id = db.Column(db.Integer, primary_key=True)
     guild_id = db.Column(db.String(50), nullable=False, index=True)
@@ -454,11 +492,11 @@ class PendingBan(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
-        return f'<PendingBan {self.user_name} by {self.banner_name}>'
+        return f"<PendingBan {self.user_name} by {self.banner_name}>"
 
 
 class PendingTimeout(db.Model):
-    __tablename__ = 'pending_timeouts'
+    __tablename__ = "pending_timeouts"
 
     id = db.Column(db.Integer, primary_key=True)
     guild_id = db.Column(db.String(50), nullable=False, index=True)
@@ -469,12 +507,13 @@ class PendingTimeout(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
-        return f'<PendingTimeout {self.mod_name} until {self.until}>'
+        return f"<PendingTimeout {self.mod_name} until {self.until}>"
 
 
 class RoleChangeLog(db.Model):
     """Tracks staff role changes: promotions, demotions, retirement, reactivation."""
-    __tablename__ = 'role_change_log'
+
+    __tablename__ = "role_change_log"
 
     id = db.Column(db.Integer, primary_key=True)
     guild_id = db.Column(db.String(50), nullable=False, index=True)
@@ -483,7 +522,9 @@ class RoleChangeLog(db.Model):
     change_type = db.Column(db.String(20), nullable=False)  # added / removed
     role_id = db.Column(db.String(50), nullable=False)
     role_name = db.Column(db.String(100), nullable=False)
-    change_category = db.Column(db.String(30), nullable=False)  # promotion / demotion / retirement / reactivation / other
+    change_category = db.Column(
+        db.String(30), nullable=False
+    )  # promotion / demotion / retirement / reactivation / other
     was_staff_before = db.Column(db.Boolean, default=False)
     is_staff_now = db.Column(db.Boolean, default=False)
     modifier_id = db.Column(db.String(50), nullable=True)
@@ -491,23 +532,30 @@ class RoleChangeLog(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     def __repr__(self):
-        return f'<RoleChangeLog {self.member_name} {self.change_category} in {self.guild_id}>'
+        return f"<RoleChangeLog {self.member_name} {self.change_category} in {self.guild_id}>"
 
 
 class MemberJoinLeave(db.Model):
     """Tracks member join and leave events for pattern recognition and ML growth prediction."""
-    __tablename__ = 'member_join_leave'
+
+    __tablename__ = "member_join_leave"
 
     id = db.Column(db.Integer, primary_key=True)
     guild_id = db.Column(db.String(50), nullable=False, index=True)
     member_id = db.Column(db.String(50), nullable=False, index=True)
     member_name = db.Column(db.String(100), nullable=False)
     is_bot = db.Column(db.Boolean, default=False)
-    event_type = db.Column(db.String(10), nullable=False, index=True)  # 'join' or 'leave'
-    leave_reason = db.Column(db.String(50), nullable=True)  # 'kick', 'ban', 'leave', 'unknown'
+    event_type = db.Column(
+        db.String(10), nullable=False, index=True
+    )  # 'join' or 'leave'
+    leave_reason = db.Column(
+        db.String(50), nullable=True
+    )  # 'kick', 'ban', 'leave', 'unknown'
     hour_of_day = db.Column(db.Integer, nullable=True)
     day_of_week = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     def __repr__(self):
-        return f'<MemberJoinLeave {self.member_name} {self.event_type} in {self.guild_id}>'
+        return (
+            f"<MemberJoinLeave {self.member_name} {self.event_type} in {self.guild_id}>"
+        )

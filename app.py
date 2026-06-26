@@ -30,7 +30,7 @@ migrate = Migrate(
 )
 
 app.register_blueprint(dashboard_bp)
-app.register_blueprint(dashboard_v2_bp)
+app.register_blueprint(dashboard_v2_bp, url_prefix="/v2")
 app.register_blueprint(auth_bp, url_prefix="/auth")
 app.register_blueprint(api_bp, url_prefix="/api")
 app.register_blueprint(community_bp, url_prefix="/api")

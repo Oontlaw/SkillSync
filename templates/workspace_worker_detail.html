@@ -1,163 +1,476 @@
-{% extends "workspace_base.html" %}
-{% block title %}SkillSync – Worker Detail{% endblock %}
-{% block content %}
-<div class="max-w-7xl mx-auto px-6 py-8">
-  <div class="flex items-center justify-between mb-8">
-    <div>
-      <h1 class="text-2xl font-bold text-white">{{ worker.name if worker else 'Worker' }}</h1>
-      <p class="text-gray-500 text-sm">{{ org_name }}</p>
-    </div>
-    <div class="flex items-center gap-4">
-      <a href="{{ url_for('workspace.workspace_workers') }}" class="text-gray-400 hover:text-white text-sm transition">Workers</a>
-      <a href="{{ url_for('workspace.workspace_dashboard') }}" class="text-gray-400 hover:text-white text-sm transition">Dashboard</a>
-      <form method="POST" action="{{ url_for('workspace.workspace_logout') }}" class="inline">
-        <button type="submit" class="text-gray-500 hover:text-red-400 text-sm transition cursor-pointer">Logout</button>
-      </form>
-    </div>
-  </div>
+{% extends "workspace_base.html" %} {% block title %}{% if worker %}{{
+worker.name }}{% else %}Worker{% endif %} — {{ org_name }}{% endblock %} {%
+block content %}
+<div class="ws-page">
+    <div class="ws-wrap">
+        <!-- Header -->
+        <div class="ws-section ws-flex-between mb-24">
+            <div>
+                <div class="ws-eyebrow">
+                    <a
+                        href="{{ url_for('workspace.workspace_workers') }}"
+                        style="color: var(--text-muted); text-decoration: none"
+                        >Workers</a
+                    >
+                    <span style="margin: 0 6px; color: var(--text-muted)"
+                        >›</span
+                    >
+                    <span>{{ worker.name if worker else 'Detail' }}</span>
+                </div>
+                <div class="ws-title">
+                    {{ worker.name if worker else 'Worker' }}
+                </div>
+                <div class="ws-subtitle">{{ org_name }}</div>
+            </div>
+        </div>
 
-  {% if error %}
-  <div class="bg-red-900/30 border border-red-800/40 text-red-300 text-sm rounded-lg px-4 py-2">{{ error }}</div>
-  {% else %}
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-    <!-- Profile Card -->
-    <div class="bg-[#111318] border border-gray-800/60 rounded-xl p-5 glow">
-      <h2 class="text-white font-semibold mb-3">Identity</h2>
-      <div class="space-y-2 text-sm">
-        <div><span class="text-gray-500">Discord ID:</span> <span class="text-gray-300">{{ identity.discord_id or '-' }}</span></div>
-        <div><span class="text-gray-500">Email:</span> <span class="text-gray-300">{{ identity.email or '-' }}</span></div>
-        <div><span class="text-gray-500">Jira Account:</span> <span class="text-gray-300">{{ identity.jira_account_id or '-' }}</span></div>
-        <div><span class="text-gray-500">Employee ID:</span> <span class="text-gray-300">{{ identity.org_employee_id or '-' }}</span></div>
-        <div><span class="text-gray-500">Community Prior:</span>
-          {% if identity.consent_community_prior %}
-          <span class="text-emerald-400">Consented</span>
-          {% else %}
-          <span class="text-gray-500">Not consented</span>
-          {% endif %}
-        </div>
-        <div><span class="text-gray-500">Federated:</span>
-          {% if identity.consent_federated %}
-          <span class="text-emerald-400">Consented</span>
-          {% else %}
-          <span class="text-gray-500">Not consented</span>
-          {% endif %}
-        </div>
-        <div><span class="text-gray-500">Linked by:</span> <span class="text-gray-300">{{ identity.linked_by }}</span></div>
-      </div>
-    </div>
+        {% if error %}
+        <div class="ws-alert ws-alert-error">{{ error }}</div>
+        {% else %}
 
-    <!-- Community Prior Card -->
-    <div class="bg-[#111318] border border-gray-800/60 rounded-xl p-5 glow">
-      <h2 class="text-white font-semibold mb-3">Community Prior</h2>
-      {% if prior %}
-      <div class="space-y-3 text-sm">
-        <div>
-          <div class="flex justify-between text-gray-400 mb-1">Activity Consistency</div>
-          <div class="w-full bg-gray-800 rounded-full h-2"><div class="bg-blue-500 h-2 rounded-full" style="width: {{ (prior.activity_consistency * 100)|int }}%"></div></div>
-          <span class="text-gray-500 text-xs">{{ "%.2f"|format(prior.activity_consistency) }}</span>
-        </div>
-        <div>
-          <div class="flex justify-between text-gray-400 mb-1">Off-Hours Ratio</div>
-          <div class="w-full bg-gray-800 rounded-full h-2"><div class="bg-purple-500 h-2 rounded-full" style="width: {{ (prior.off_hours_ratio * 100)|int }}%"></div></div>
-          <span class="text-gray-500 text-xs">{{ "%.2f"|format(prior.off_hours_ratio) }}</span>
-        </div>
-        <div>
-          <div class="flex justify-between text-gray-400 mb-1">Anomaly Rate</div>
-          <div class="w-full bg-gray-800 rounded-full h-2"><div class="bg-red-500 h-2 rounded-full" style="width: {{ (prior.anomaly_rate * 100)|int }}%"></div></div>
-          <span class="text-gray-500 text-xs">{{ "%.2f"|format(prior.anomaly_rate) }}</span>
-        </div>
-        <div>
-          <div class="flex justify-between text-gray-400 mb-1">Score Trajectory</div>
-          <div class="w-full bg-gray-800 rounded-full h-2"><div class="bg-emerald-500 h-2 rounded-full" style="width: {{ (prior.score_trajectory * 100)|int }}%"></div></div>
-          <span class="text-gray-500 text-xs">{{ "%.2f"|format(prior.score_trajectory) }}</span>
-        </div>
-        <div>
-          <div class="flex justify-between text-gray-400 mb-1">Recent Activity Ratio</div>
-          <div class="w-full bg-gray-800 rounded-full h-2"><div class="bg-cyan-500 h-2 rounded-full" style="width: {{ (prior.recent_activity_ratio / 2 * 100)|int }}%"></div></div>
-          <span class="text-gray-500 text-xs">{{ "%.2f"|format(prior.recent_activity_ratio) }}</span>
-        </div>
-      </div>
-      {% elif identity.consent_community_prior and worker.discord_id %}
-      <p class="text-gray-500 text-sm">Insufficient message history (<10 messages in 30 days).</p>
-      {% elif not identity.consent_community_prior %}
-      <p class="text-gray-500 text-sm">Community prior has not been consented to.</p>
-      {% else %}
-      <p class="text-gray-500 text-sm">No Discord ID linked to this worker.</p>
-      {% endif %}
-    </div>
+        <!-- 3-column info row -->
+        <div class="ws-grid-3 mb-24">
+            <!-- Identity -->
+            <div class="ws-card">
+                <div class="ws-card-h">
+                    <span class="ws-card-t">Identity</span>
+                </div>
+                <div class="ws-card-b">
+                    <div
+                        style="display: flex; flex-direction: column; gap: 8px"
+                    >
+                        <div>
+                            <div class="ws-label" style="margin-bottom: 1px">
+                                Discord ID
+                            </div>
+                            <div
+                                class="mono"
+                                style="font-size: 12px; color: var(--text-sec)"
+                            >
+                                {{ identity.discord_id or '—' }}
+                            </div>
+                        </div>
+                        <div>
+                            <div class="ws-label" style="margin-bottom: 1px">
+                                Email
+                            </div>
+                            <div
+                                style="font-size: 12px; color: var(--text-sec)"
+                            >
+                                {{ identity.email or '—' }}
+                            </div>
+                        </div>
+                        <div>
+                            <div class="ws-label" style="margin-bottom: 1px">
+                                Jira Account
+                            </div>
+                            <div
+                                class="mono"
+                                style="font-size: 12px; color: var(--text-sec)"
+                            >
+                                {{ identity.jira_account_id or '—' }}
+                            </div>
+                        </div>
+                        <div>
+                            <div class="ws-label" style="margin-bottom: 1px">
+                                Employee ID
+                            </div>
+                            <div
+                                style="font-size: 12px; color: var(--text-sec)"
+                            >
+                                {{ identity.org_employee_id or '—' }}
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 6px; margin-top: 4px">
+                            {% if identity.consent_community_prior %}
+                            <span class="ws-tag ws-tag-green">Prior</span>
+                            {% else %}
+                            <span class="ws-tag ws-tag-muted"
+                                >No prior consent</span
+                            >
+                            {% endif %} {% if identity.consent_federated %}
+                            <span class="ws-tag ws-tag-blue">Federated</span>
+                            {% else %}
+                            <span class="ws-tag ws-tag-muted"
+                                >No fed consent</span
+                            >
+                            {% endif %}
+                        </div>
+                        <div style="margin-top: 2px">
+                            <div class="ws-label" style="margin-bottom: 1px">
+                                Linked by
+                            </div>
+                            <div
+                                style="font-size: 11px; color: var(--text-dim)"
+                            >
+                                {{ identity.linked_by or '—' }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
-    <!-- Stats Card -->
-    <div class="bg-[#111318] border border-gray-800/60 rounded-xl p-5 glow">
-      <h2 class="text-white font-semibold mb-3">Stats</h2>
-      <div class="space-y-2 text-sm">
-        <div><span class="text-gray-500">Current Score:</span>
-          <span class="{% if worker.score > 0 %}text-emerald-400{% elif worker.score < 0 %}text-red-400{% else %}text-gray-400{% endif %}">{{ "%.1f"|format(worker.score) }}</span>
+            <!-- Community Prior -->
+            <div class="ws-card">
+                <div class="ws-card-h">
+                    <span class="ws-card-t">Community Prior</span>
+                </div>
+                <div class="ws-card-b">
+                    {% if prior %}
+                    <div
+                        style="display: flex; flex-direction: column; gap: 12px"
+                    >
+                        <div>
+                            <div
+                                style="
+                                    font-size: 11px;
+                                    color: var(--text-dim);
+                                    margin-bottom: 4px;
+                                "
+                            >
+                                Activity Consistency
+                            </div>
+                            <div class="ws-bar">
+                                <div
+                                    class="ws-bar-fill"
+                                    style="width:{{ (prior.activity_consistency * 100)|int }}%"
+                                ></div>
+                            </div>
+                            <div
+                                style="
+                                    font-size: 10px;
+                                    color: var(--text-muted);
+                                    margin-top: 2px;
+                                "
+                            >
+                                {{ "%.3f"|format(prior.activity_consistency) }}
+                            </div>
+                        </div>
+                        <div>
+                            <div
+                                style="
+                                    font-size: 11px;
+                                    color: var(--text-dim);
+                                    margin-bottom: 4px;
+                                "
+                            >
+                                Off-Hours Ratio
+                            </div>
+                            <div class="ws-bar">
+                                <div
+                                    class="ws-bar-fill"
+                                    style="width:{{ (prior.off_hours_ratio * 100)|int }}%;background:var(--blue)"
+                                ></div>
+                            </div>
+                            <div
+                                style="
+                                    font-size: 10px;
+                                    color: var(--text-muted);
+                                    margin-top: 2px;
+                                "
+                            >
+                                {{ "%.3f"|format(prior.off_hours_ratio) }}
+                            </div>
+                        </div>
+                        <div>
+                            <div
+                                style="
+                                    font-size: 11px;
+                                    color: var(--text-dim);
+                                    margin-bottom: 4px;
+                                "
+                            >
+                                Anomaly Rate
+                            </div>
+                            <div class="ws-bar">
+                                <div
+                                    class="ws-bar-fill"
+                                    style="width:{{ (prior.anomaly_rate * 100)|int }}%;background:var(--red)"
+                                ></div>
+                            </div>
+                            <div
+                                style="
+                                    font-size: 10px;
+                                    color: var(--text-muted);
+                                    margin-top: 2px;
+                                "
+                            >
+                                {{ "%.3f"|format(prior.anomaly_rate) }}
+                            </div>
+                        </div>
+                        <div>
+                            <div
+                                style="
+                                    font-size: 11px;
+                                    color: var(--text-dim);
+                                    margin-bottom: 4px;
+                                "
+                            >
+                                Score Trajectory
+                            </div>
+                            <div class="ws-bar">
+                                <div
+                                    class="ws-bar-fill"
+                                    style="width:{{ (prior.score_trajectory * 100)|int }}%;background:var(--green)"
+                                ></div>
+                            </div>
+                            <div
+                                style="
+                                    font-size: 10px;
+                                    color: var(--text-muted);
+                                    margin-top: 2px;
+                                "
+                            >
+                                {{ "%.3f"|format(prior.score_trajectory) }}
+                            </div>
+                        </div>
+                        <div>
+                            <div
+                                style="
+                                    font-size: 11px;
+                                    color: var(--text-dim);
+                                    margin-bottom: 4px;
+                                "
+                            >
+                                Recent Activity Ratio
+                            </div>
+                            <div class="ws-bar">
+                                <div
+                                    class="ws-bar-fill"
+                                    style="width:{{ [prior.recent_activity_ratio / 2 * 100, 100]|min|int }}%;background:var(--orange)"
+                                ></div>
+                            </div>
+                            <div
+                                style="
+                                    font-size: 10px;
+                                    color: var(--text-muted);
+                                    margin-top: 2px;
+                                "
+                            >
+                                {{ "%.3f"|format(prior.recent_activity_ratio) }}
+                            </div>
+                        </div>
+                    </div>
+                    {% elif identity.consent_community_prior and
+                    worker.discord_id %}
+                    <div class="ws-empty" style="padding: 20px 0">
+                        Insufficient message history<br /><span
+                            style="font-size: 11px"
+                            >Need 10+ messages in 30 days</span
+                        >
+                    </div>
+                    {% elif not identity.consent_community_prior %}
+                    <div class="ws-empty" style="padding: 20px 0">
+                        Community prior not consented
+                    </div>
+                    {% else %}
+                    <div class="ws-empty" style="padding: 20px 0">
+                        No Discord ID linked
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="ws-card">
+                <div class="ws-card-h">
+                    <span class="ws-card-t">Stats</span>
+                </div>
+                <div class="ws-card-b">
+                    <div
+                        style="display: flex; flex-direction: column; gap: 16px"
+                    >
+                        <div>
+                            <div class="ws-label" style="margin-bottom: 4px">
+                                Current Score
+                            </div>
+                            <div
+                                style="
+                                    font-size: 32px;
+                                    font-weight: 800;
+                                    letter-spacing: -0.03em;
+                                    line-height: 1;
+                                "
+                                class="{% if worker.score > 0 %}score-pos{% elif worker.score < 0 %}score-neg{% else %}score-neu{% endif %}"
+                            >
+                                {{ "%+.1f"|format(worker.score) }}
+                            </div>
+                        </div>
+                        <div>
+                            <div class="ws-label" style="margin-bottom: 4px">
+                                Role
+                            </div>
+                            <div
+                                style="font-size: 13px; color: var(--text-sec)"
+                            >
+                                {{ worker.role or '—' }}
+                            </div>
+                        </div>
+                        <div>
+                            <div class="ws-label" style="margin-bottom: 4px">
+                                Tasks
+                            </div>
+                            <div
+                                style="font-size: 13px; color: var(--text-sec)"
+                            >
+                                {{ tasks|length }} recent
+                            </div>
+                        </div>
+                        <div>
+                            <div class="ws-label" style="margin-bottom: 4px">
+                                Score Events
+                            </div>
+                            <div
+                                style="font-size: 13px; color: var(--text-sec)"
+                            >
+                                {{ scores|length }} recent
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
-        <div><span class="text-gray-500">Tasks:</span> <span class="text-gray-300">{{ tasks|length }} (recent 50)</span></div>
-        <div><span class="text-gray-500">Score Logs:</span> <span class="text-gray-300">{{ scores|length }} (recent 30)</span></div>
-      </div>
-    </div>
-  </div>
 
-  <!-- Tasks Table -->
-  {% if tasks %}
-  <div class="bg-[#111318] border border-gray-800/60 rounded-xl p-5 glow mb-6">
-    <h2 class="text-white font-semibold mb-3">Recent Tasks</h2>
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm table-hover">
-        <thead>
-          <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
-            <th class="text-left py-2 pr-4">Title</th>
-            <th class="text-left py-2 pr-4">Status</th>
-            <th class="text-left py-2 pr-4">Source</th>
-            <th class="text-left py-2">Created</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for t in tasks %}
-          <tr class="border-b border-gray-800/20 hover:bg-gray-800/10">
-            <td class="py-2 pr-4 text-gray-300">{{ t.title }}</td>
-            <td class="py-2 pr-4">{{ t.status or '-' }}</td>
-            <td class="py-2 pr-4 text-gray-400">{{ t.source or '-' }}</td>
-            <td class="py-2 text-gray-500 utc-time" data-utc="{{ t.created_at.isoformat() }}">{{ t.created_at }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-  {% endif %}
+        <!-- Tasks Table -->
+        {% if tasks %}
+        <div class="ws-card mb-16">
+            <div class="ws-card-h">
+                <span class="ws-card-t">Recent Tasks</span>
+                <span style="font-size: 10px; color: var(--text-muted)"
+                    >Last 50</span
+                >
+            </div>
+            <div class="ws-card-b np">
+                <div class="ws-tbl-wrap">
+                    <table class="ws-tbl">
+                        <thead>
+                            <tr>
+                                <th>Title</th>
+                                <th>Status</th>
+                                <th>Priority</th>
+                                <th>Source</th>
+                                <th>Created</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for t in tasks %}
+                            <tr>
+                                <td class="bold">
+                                    {% if t.external_url %}
+                                    <a
+                                        href="{{ t.external_url }}"
+                                        target="_blank"
+                                        rel="noopener"
+                                        style="
+                                            color: var(--text);
+                                            text-decoration: none;
+                                        "
+                                        >{{ t.title }}</a
+                                    >
+                                    {% else %} {{ t.title }} {% endif %}
+                                </td>
+                                <td>
+                                    {% if t.status == 'completed' %}
+                                    <span class="ws-tag ws-tag-green"
+                                        >{{ t.status }}</span
+                                    >
+                                    {% elif t.status == 'missed' %}
+                                    <span class="ws-tag ws-tag-red"
+                                        >{{ t.status }}</span
+                                    >
+                                    {% elif t.status == 'pending' %}
+                                    <span class="ws-tag ws-tag-orange"
+                                        >{{ t.status }}</span
+                                    >
+                                    {% else %}
+                                    <span class="ws-tag ws-tag-muted"
+                                        >{{ t.status or '—' }}</span
+                                    >
+                                    {% endif %}
+                                </td>
+                                <td>{{ t.priority or '—' }}</td>
+                                <td>{{ t.source or '—' }}</td>
+                                <td>
+                                    <span
+                                        data-utc="{{ t.created_at.isoformat() }}"
+                                        >{{ t.created_at }}</span
+                                    >
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endif %}
 
-  <!-- Score History -->
-  {% if scores %}
-  <div class="bg-[#111318] border border-gray-800/60 rounded-xl p-5 glow">
-    <h2 class="text-white font-semibold mb-3">Score History</h2>
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm table-hover">
-        <thead>
-          <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
-            <th class="text-left py-2 pr-4">Change</th>
-            <th class="text-left py-2 pr-4">Reason</th>
-            <th class="text-left py-2 pr-4">Source</th>
-            <th class="text-left py-2">Date</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for s in scores %}
-          <tr class="border-b border-gray-800/20 hover:bg-gray-800/10">
-            <td class="py-2 pr-4">
-              <span class="{% if s.change > 0 %}text-emerald-400{% elif s.change < 0 %}text-red-400{% else %}text-gray-400{% endif %}">{{ "%+.1f"|format(s.change) }}</span>
-            </td>
-            <td class="py-2 pr-4 text-gray-400">{{ s.reason }}</td>
-            <td class="py-2 pr-4 text-gray-400">{{ s.source }}</td>
-            <td class="py-2 text-gray-500 utc-time" data-utc="{{ s.created_at.isoformat() }}">{{ s.created_at }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+        <!-- Score History -->
+        {% if scores %}
+        <div class="ws-card">
+            <div class="ws-card-h">
+                <span class="ws-card-t">Score History</span>
+                <span style="font-size: 10px; color: var(--text-muted)"
+                    >Last 30</span
+                >
+            </div>
+            <div class="ws-card-b np">
+                <div class="ws-tbl-wrap">
+                    <table class="ws-tbl">
+                        <thead>
+                            <tr>
+                                <th style="text-align: right">Change</th>
+                                <th>Reason</th>
+                                <th>Source</th>
+                                <th>Corrected</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for s in scores %}
+                            <tr>
+                                <td
+                                    style="text-align: right; font-weight: 700"
+                                    class="{% if s.change > 0 %}score-pos{% elif s.change < 0 %}score-neg{% else %}score-neu{% endif %}"
+                                >
+                                    {{ "%+.1f"|format(s.change) }}
+                                </td>
+                                <td
+                                    style="
+                                        max-width: 220px;
+                                        white-space: nowrap;
+                                        overflow: hidden;
+                                        text-overflow: ellipsis;
+                                    "
+                                >
+                                    {{ s.reason or '—' }}
+                                </td>
+                                <td>{{ s.source or '—' }}</td>
+                                <td>
+                                    {% if s.admin_correction %}
+                                    <span class="ws-tag ws-tag-orange"
+                                        >edited</span
+                                    >
+                                    {% else %}
+                                    <span style="color: var(--text-muted)"
+                                        >—</span
+                                    >
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span
+                                        data-utc="{{ s.created_at.isoformat() }}"
+                                        >{{ s.created_at }}</span
+                                    >
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endif %} {% endif %}{# end error check #}
     </div>
-  </div>
-  {% endif %}
-  {% endif %}
 </div>
 {% endblock %}

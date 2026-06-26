@@ -1,0 +1,167 @@
+{% extends "workspace_base.html" %}
+{% block title %}{{ org_name }} — Members{% endblock %}
+{% block content %}
+<div class="ws-page">
+  <div class="ws-wrap">
+
+    <!-- Header -->
+    <div class="ws-section ws-flex-between mb-24">
+      <div>
+        <div class="ws-eyebrow">Admin</div>
+        <div class="ws-title">Team Members</div>
+        <div class="ws-subtitle">{{ org_name }} — manage workspace access</div>
+      </div>
+      <button class="ws-btn ws-btn-primary" onclick="togglePanel()">+ Invite Member</button>
+    </div>
+
+    <!-- Error from query param -->
+    {% if request.args.get('error') %}
+    <div class="ws-alert ws-alert-error mb-16">{{ request.args.get('error') }}</div>
+    {% endif %}
+
+    <!-- Invite Panel -->
+    <div class="ws-panel" id="invite-panel">
+      <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:16px">Invite New Member</div>
+      <form method="POST" action="{{ url_for('workspace.workspace_members_invite') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}"/>
+        <div class="ws-grid-3" style="gap:12px;margin-bottom:12px">
+          <div class="ws-form-group" style="margin-bottom:0">
+            <label class="ws-label">Name</label>
+            <input type="text" name="name" class="ws-input" placeholder="Jane Smith" required/>
+          </div>
+          <div class="ws-form-group" style="margin-bottom:0">
+            <label class="ws-label">Email</label>
+            <input type="email" name="email" class="ws-input" placeholder="jane@company.com" required/>
+          </div>
+          <div class="ws-form-group" style="margin-bottom:0">
+            <label class="ws-label">Role</label>
+            <select name="role" class="ws-select">
+              <option value="member">Member</option>
+              <option value="hr">HR</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <div class="ws-form-group" style="margin-bottom:0">
+            <label class="ws-label">Password</label>
+            <input type="password" name="password" class="ws-input" placeholder="••••••••" required/>
+          </div>
+        </div>
+        <div class="ws-flex gap-8">
+          <button type="submit" class="ws-btn ws-btn-primary">Send Invite</button>
+          <button type="button" class="ws-btn" onclick="togglePanel()">Cancel</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Members Table -->
+    <div class="ws-card">
+      <div class="ws-card-b np">
+        {% if members %}
+        <div class="ws-tbl-wrap">
+          <table class="ws-tbl">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Joined</th>
+                <th>Last Login</th>
+                <th style="width:160px">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for m in members %}
+              <tr id="member-row-{{ m.id }}">
+                <td class="bold">
+                  {{ m.name }}
+                  {% if m.id == current_member_id %}
+                  <span class="ws-tag ws-tag-white" style="margin-left:6px;vertical-align:middle">you</span>
+                  {% endif %}
+                </td>
+                <td class="mono">{{ m.email }}</td>
+                <td>
+                  {% if m.role == 'admin' %}
+                  <span class="ws-tag ws-tag-white">admin</span>
+                  {% elif m.role == 'hr' %}
+                  <span class="ws-tag ws-tag-blue">hr</span>
+                  {% else %}
+                  <span class="ws-tag ws-tag-muted">member</span>
+                  {% endif %}
+                </td>
+                <td><span data-utc="{{ m.created_at.isoformat() }}">{{ m.created_at }}</span></td>
+                <td>
+                  {% if m.last_login %}
+                  <span data-utc="{{ m.last_login.isoformat() }}">{{ m.last_login }}</span>
+                  {% else %}
+                  <span style="color:var(--text-muted)">Never</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <div class="ws-flex gap-8">
+                    <select class="ws-select" style="width:90px;padding:4px 8px;font-size:11px" onchange="changeRole({{ m.id }}, this.value)" {% if m.id == current_member_id %}disabled{% endif %}>
+                      <option value="member" {% if m.role == 'member' %}selected{% endif %}>member</option>
+                      <option value="hr" {% if m.role == 'hr' %}selected{% endif %}>hr</option>
+                      <option value="admin" {% if m.role == 'admin' %}selected{% endif %}>admin</option>
+                    </select>
+                    {% if m.id != current_member_id %}
+                    <button class="ws-btn ws-btn-sm ws-btn-danger" onclick="removeMember({{ m.id }})">Remove</button>
+                    {% endif %}
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="ws-empty">No members found</div>
+        {% endif %}
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CSRF = {{ csrf_token | tojson }};
+
+function togglePanel() {
+  const p = document.getElementById('invite-panel');
+  p.classList.toggle('open');
+}
+
+function changeRole(memberId, newRole) {
+  fetch(`/workspace/members/${memberId}/role`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+    body: JSON.stringify({ role: newRole }),
+  })
+  .then(r => r.json())
+  .then(res => {
+    if (res.ok) wsToast('Role updated', 'success');
+    else wsToast(res.error || 'Error', 'error');
+  })
+  .catch(() => wsToast('Network error', 'error'));
+}
+
+function removeMember(memberId) {
+  if (!confirm('Remove this member from the workspace?')) return;
+  fetch(`/workspace/members/${memberId}/remove`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+    body: '{}',
+  })
+  .then(r => r.json())
+  .then(res => {
+    if (res.ok) {
+      const row = document.getElementById('member-row-' + memberId);
+      if (row) row.remove();
+      wsToast('Member removed', 'success');
+    } else wsToast(res.error || 'Error', 'error');
+  })
+  .catch(() => wsToast('Network error', 'error'));
+}
+</script>
+{% endblock %}

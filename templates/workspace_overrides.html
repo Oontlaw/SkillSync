@@ -1,0 +1,241 @@
+{% extends "workspace_base.html" %}
+{% block title %}{{ org_name }} — Overrides{% endblock %}
+{% block content %}
+<div class="ws-page">
+  <div class="ws-wrap">
+
+    <!-- Header -->
+    <div class="ws-section ws-flex-between mb-24">
+      <div>
+        <div class="ws-eyebrow">Admin</div>
+        <div class="ws-title">Overrides</div>
+        <div class="ws-subtitle">Anomaly review and score corrections — {{ org_name }}</div>
+      </div>
+      <div class="ws-flex gap-8">
+        {% if ml_accuracy is not none %}
+        <span class="ws-tag ws-tag-blue">ML {{ "%.0f"|format(ml_accuracy) }}% accuracy</span>
+        {% endif %}
+        {% if total_corrections_used > 0 %}
+        <span class="ws-tag ws-tag-muted">{{ total_corrections_used }} correction{{ 's' if total_corrections_used != 1 }}</span>
+        {% endif %}
+        <button class="ws-btn ws-btn-sm" id="retrain-btn" onclick="doRetrain()">Retrain Model</button>
+      </div>
+    </div>
+
+    <!-- Anomalies -->
+    <div class="ws-section mb-24">
+      <div class="ws-card">
+        <div class="ws-card-h">
+          <span class="ws-card-t">Active Anomalies</span>
+          <span style="font-size:10px;color:var(--text-muted)">Uncleared behavioral flags</span>
+        </div>
+        <div class="ws-card-b np">
+          {% if anomalies %}
+          <div class="ws-tbl-wrap">
+            <table class="ws-tbl">
+              <thead>
+                <tr>
+                  <th>Worker</th>
+                  <th>Type</th>
+                  <th>Severity</th>
+                  <th>Source</th>
+                  <th>Detected</th>
+                  <th>Feedback</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in anomalies %}
+                <tr>
+                  <td class="bold">{{ item.worker_name }}</td>
+                  <td>{{ item.anomaly.anomaly_type or '—' }}</td>
+                  <td>
+                    {% set sev = item.anomaly.severity or 0 %}
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <div class="ws-bar" style="width:60px">
+                        <div class="ws-bar-fill" style="width:{{ [sev * 100, 100]|min|int }}%;background:{% if sev > 0.7 %}var(--red){% elif sev > 0.4 %}var(--orange){% else %}var(--text-dim){% endif %}"></div>
+                      </div>
+                      <span style="font-size:10px;color:var(--text-muted)">{{ "%.2f"|format(sev) }}</span>
+                    </div>
+                  </td>
+                  <td>{{ item.anomaly.source or '—' }}</td>
+                  <td><span data-utc="{{ item.anomaly.detected_at.isoformat() }}">{{ item.anomaly.detected_at }}</span></td>
+                  <td>
+                    {% if item.anomaly.feedback == 'confirmed' %}
+                    <span class="ws-tag ws-tag-red">Confirmed</span>
+                    {% elif item.anomaly.feedback == 'dismissed' %}
+                    <span class="ws-tag ws-tag-muted">Dismissed</span>
+                    {% else %}
+                    <span style="color:var(--text-muted)">—</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div class="ws-empty">No active anomalies</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Score Logs (Correctable) -->
+    <div class="ws-section mb-24">
+      <div class="ws-card">
+        <div class="ws-card-h">
+          <span class="ws-card-t">Score Corrections</span>
+          <span style="font-size:10px;color:var(--text-muted)">Last 100 score events — click Correct to override</span>
+        </div>
+        <div class="ws-card-b np">
+          {% if score_logs %}
+          <div class="ws-tbl-wrap">
+            <table class="ws-tbl">
+              <thead>
+                <tr>
+                  <th>Worker</th>
+                  <th style="text-align:right">Change</th>
+                  <th>Reason</th>
+                  <th>Source</th>
+                  <th>Date</th>
+                  <th style="width:80px"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in score_logs %}
+                <tr>
+                  <td class="bold">{{ item.worker_name }}</td>
+                  <td style="text-align:right;font-weight:700" class="{% if item.log.change > 0 %}score-pos{% elif item.log.change < 0 %}score-neg{% else %}score-neu{% endif %}">
+                    {{ "%+.1f"|format(item.log.change) }}
+                    {% if item.log.admin_correction %}
+                    <span class="ws-tag ws-tag-orange" style="margin-left:4px;vertical-align:middle">edited</span>
+                    {% endif %}
+                  </td>
+                  <td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ item.log.reason or '—' }}</td>
+                  <td>{{ item.log.source or '—' }}</td>
+                  <td><span data-utc="{{ item.log.created_at.isoformat() }}">{{ item.log.created_at }}</span></td>
+                  <td>
+                    <button class="ws-btn ws-btn-sm" onclick="toggleCorrect({{ item.log.id }})">Correct</button>
+                  </td>
+                </tr>
+                <tr id="correct-row-{{ item.log.id }}" style="display:none">
+                  <td colspan="6" style="padding:0 14px 12px">
+                    <div class="ws-correct-form open">
+                      <div class="ws-correct-row">
+                        <input type="number" step="0.1" class="ws-input" id="new-change-{{ item.log.id }}" placeholder="{{ item.log.change }}" style="width:90px"/>
+                        <input type="text" class="ws-input reason" id="reason-{{ item.log.id }}" placeholder="Reason for correction"/>
+                        <button class="ws-btn ws-btn-primary ws-btn-sm" onclick="submitCorrect({{ item.log.id }})">Apply</button>
+                        <button class="ws-btn ws-btn-sm" onclick="toggleCorrect({{ item.log.id }})">Cancel</button>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div class="ws-empty">No score logs found for this organisation</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Corrections -->
+    {% if recent_corrections %}
+    <div class="ws-section">
+      <div class="ws-card">
+        <div class="ws-card-h">
+          <span class="ws-card-t">Recent Corrections</span>
+          <span style="font-size:10px;color:var(--text-muted)">Last 20</span>
+        </div>
+        <div class="ws-card-b np">
+          <div class="ws-tbl-wrap">
+            <table class="ws-tbl">
+              <thead>
+                <tr>
+                  <th>Worker</th>
+                  <th style="text-align:right">Original</th>
+                  <th style="text-align:right">Corrected</th>
+                  <th>Reason</th>
+                  <th>By</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in recent_corrections %}
+                <tr>
+                  <td class="bold">{{ item.worker_name }}</td>
+                  <td style="text-align:right" class="{% if item.correction.original_change > 0 %}score-pos{% elif item.correction.original_change < 0 %}score-neg{% else %}score-neu{% endif %}">
+                    {{ "%+.1f"|format(item.correction.original_change) }}
+                  </td>
+                  <td style="text-align:right;font-weight:700" class="{% if item.correction.corrected_change > 0 %}score-pos{% elif item.correction.corrected_change < 0 %}score-neg{% else %}score-neu{% endif %}">
+                    {{ "%+.1f"|format(item.correction.corrected_change) }}
+                  </td>
+                  <td style="max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ item.correction.reason or '—' }}</td>
+                  <td>{{ item.correction.corrected_by or '—' }}</td>
+                  <td><span data-utc="{{ item.correction.created_at.isoformat() }}">{{ item.correction.created_at }}</span></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CSRF = {{ csrf_token | tojson }};
+
+function toggleCorrect(id) {
+  const row = document.getElementById('correct-row-' + id);
+  row.style.display = row.style.display === 'none' ? '' : 'none';
+}
+
+function submitCorrect(id) {
+  const newChange = parseFloat(document.getElementById('new-change-' + id).value);
+  const reason = document.getElementById('reason-' + id).value.trim();
+  if (isNaN(newChange)) { wsToast('Enter a valid number', 'error'); return; }
+  fetch('{{ url_for("workspace.workspace_override_correct") }}', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+    body: JSON.stringify({ case_id: id, new_change: newChange, reason }),
+  })
+  .then(r => r.json())
+  .then(res => {
+    if (res.ok) { wsToast('Correction applied', 'success'); setTimeout(() => location.reload(), 800); }
+    else wsToast(res.error || 'Error', 'error');
+  })
+  .catch(() => wsToast('Network error', 'error'));
+}
+
+function doRetrain() {
+  const btn = document.getElementById('retrain-btn');
+  btn.disabled = true;
+  btn.textContent = 'Retraining…';
+  fetch('{{ url_for("workspace.workspace_override_retrain") }}', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+    body: '{}',
+  })
+  .then(r => r.json())
+  .then(res => {
+    btn.disabled = false;
+    btn.textContent = 'Retrain Model';
+    if (res.ok) wsToast('Retrain complete', 'success');
+    else wsToast(res.error || 'Error', 'error');
+  })
+  .catch(() => {
+    btn.disabled = false;
+    btn.textContent = 'Retrain Model';
+    wsToast('Network error', 'error');
+  });
+}
+</script>
+{% endblock %}

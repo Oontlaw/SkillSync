@@ -1,67 +1,213 @@
-{% extends "workspace_base.html" %}
-{% block title %}SkillSync – {{ org_name }} Workspace{% endblock %}
-{% block content %}
-<div class="max-w-7xl mx-auto px-6 py-8">
-  <div class="flex items-center justify-between mb-8">
-    <div>
-      <h1 class="text-2xl font-bold text-white">{{ org_name }}</h1>
-      <p class="text-gray-500 text-sm">Workspace Dashboard</p>
-    </div>
-    <div class="flex items-center gap-4">
-      <a href="{{ url_for('workspace.workspace_workers') }}" class="text-gray-400 hover:text-white text-sm transition">Workers</a>
-      <a href="{{ url_for('workspace.workspace_identities') }}" class="text-gray-400 hover:text-white text-sm transition">Identities</a>
-      <a href="{{ url_for('workspace.workspace_settings') }}" class="text-gray-400 hover:text-white text-sm transition">Settings</a>
-      <form method="POST" action="{{ url_for('workspace.workspace_logout') }}" class="inline">
-        <button type="submit" class="text-gray-500 hover:text-red-400 text-sm transition cursor-pointer">Logout</button>
-      </form>
-    </div>
-  </div>
+{% extends "workspace_base.html" %} {% block title %}{{ org_name }} —
+Dashboard{% endblock %} {% block content %}
+<div class="ws-page">
+    <div class="ws-wrap">
+        <!-- Header -->
+        <div class="ws-section ws-flex-between mb-24">
+            <div>
+                <div class="ws-eyebrow">Workspace</div>
+                <div class="ws-title">{{ org_name }}</div>
+                <div class="ws-subtitle">
+                    Dashboard — <span id="today-date"></span>
+                </div>
+            </div>
+        </div>
 
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-    <div class="bg-[#111318] border border-gray-800/60 rounded-xl p-5 glow">
-      <p class="text-gray-400 text-xs uppercase tracking-wide mb-1">Total Workers</p>
-      <p class="text-3xl font-bold text-white">{{ total_workers }}</p>
-    </div>
-    <div class="bg-[#111318] border border-gray-800/60 rounded-xl p-5 glow">
-      <p class="text-gray-400 text-xs uppercase tracking-wide mb-1">Total Tasks</p>
-      <p class="text-3xl font-bold text-white">{{ total_tasks }}</p>
-    </div>
-    <div class="bg-[#111318] border border-gray-800/60 rounded-xl p-5 glow">
-      <p class="text-gray-400 text-xs uppercase tracking-wide mb-1">Recent Anomalies</p>
-      <p class="text-3xl font-bold text-white">{{ recent_anomalies|length }}</p>
-    </div>
-  </div>
+        <!-- Stat Grid -->
+        <div class="ws-stat-grid mb-24">
+            <div class="ws-stat">
+                <div class="ws-stat-label">Workers</div>
+                <div class="ws-stat-num">{{ total_workers }}</div>
+            </div>
+            <div class="ws-stat">
+                <div class="ws-stat-label">Total Tasks</div>
+                <div class="ws-stat-num">{{ total_tasks }}</div>
+            </div>
+            <div class="ws-stat">
+                <div class="ws-stat-label">Team Members</div>
+                <div class="ws-stat-num">{{ total_members }}</div>
+            </div>
+            <div class="ws-stat">
+                <div class="ws-stat-label">Active Anomalies</div>
+                <div
+                    class="ws-stat-num {% if anomaly_count > 0 %}crit{% endif %}"
+                >
+                    {{ anomaly_count }}
+                </div>
+            </div>
+            <div class="ws-stat">
+                <div class="ws-stat-label">Tasks Done</div>
+                <div class="ws-stat-num ok">{{ tasks_completed }}</div>
+            </div>
+            <div class="ws-stat">
+                <div class="ws-stat-label">Tasks Missed</div>
+                <div
+                    class="ws-stat-num {% if tasks_missed > 0 %}warn{% endif %}"
+                >
+                    {{ tasks_missed }}
+                </div>
+            </div>
+        </div>
 
-  {% if recent_anomalies %}
-  <div class="bg-[#111318] border border-gray-800/60 rounded-xl p-5 glow">
-    <h2 class="text-white font-semibold mb-3">Recent Work Engine Anomalies</h2>
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead>
-          <tr class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40">
-            <th class="text-left py-2 pr-4">Type</th>
-            <th class="text-left py-2 pr-4">Severity</th>
-            <th class="text-left py-2 pr-4">Details</th>
-            <th class="text-left py-2">Detected</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for a in recent_anomalies %}
-          <tr class="border-b border-gray-800/20 hover:bg-gray-800/10">
-            <td class="py-2 pr-4 text-gray-300">{{ a.anomaly_type }}</td>
-            <td class="py-2 pr-4">{{ a.severity }}</td>
-            <td class="py-2 pr-4 text-gray-400">{{ a.details }}</td>
-            <td class="py-2 text-gray-500 utc-time" data-utc="{{ a.detected_at.isoformat() }}">{{ a.detected_at }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+        <!-- Two-column: Chart + Top Workers -->
+        <div class="ws-grid-2 mb-24">
+            <!-- Score Trend -->
+            <div class="ws-card">
+                <div class="ws-card-h">
+                    <span class="ws-card-t">Score Trend</span>
+                    <span style="font-size: 10px; color: var(--text-muted)"
+                        >Last 30 days</span
+                    >
+                </div>
+                <div class="ws-card-b">
+                    {% if score_chart_labels %}
+                    <div class="ws-chart">
+                        <canvas id="scoreChart"></canvas>
+                    </div>
+                    {% else %}
+                    <div class="ws-empty">No score data yet</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Top Workers -->
+            <div class="ws-card">
+                <div class="ws-card-h">
+                    <span class="ws-card-t">Top Workers</span>
+                    <a
+                        href="{{ url_for('workspace.workspace_leaderboard') }}"
+                        style="
+                            font-size: 11px;
+                            color: var(--text-dim);
+                            text-decoration: none;
+                        "
+                        >Full leaderboard →</a
+                    >
+                </div>
+                <div class="ws-card-b np">
+                    {% if top_workers %}
+                    <div class="ws-tbl-wrap">
+                        <table class="ws-tbl">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Name</th>
+                                    <th>Role</th>
+                                    <th style="text-align: right">Score</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in top_workers %}
+                                <tr>
+                                    <td style="color: var(--text-muted)">
+                                        {{ loop.index }}
+                                    </td>
+                                    <td class="bold">
+                                        <a
+                                            href="{{ url_for('workspace.workspace_worker_detail', worker_id=item.worker.id) }}"
+                                            style="
+                                                color: inherit;
+                                                text-decoration: none;
+                                            "
+                                            >{{ item.worker.name }}</a
+                                        >
+                                    </td>
+                                    <td>{{ item.worker.role or '—' }}</td>
+                                    <td
+                                        style="
+                                            text-align: right;
+                                            font-weight: 700;
+                                        "
+                                        class="{% if item.score > 0 %}score-pos{% elif item.score < 0 %}score-neg{% else %}score-neu{% endif %}"
+                                    >
+                                        {{ "%+.0f"|format(item.score) }}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="ws-empty">No workers linked yet</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Activity Feed -->
+        <div class="ws-card">
+            <div class="ws-card-h">
+                <span class="ws-card-t">Recent Activity</span>
+                <span style="font-size: 10px; color: var(--text-muted)"
+                    >Last 10 score events</span
+                >
+            </div>
+            <div class="ws-card-b">
+                {% if recent_activity %} {% for item in recent_activity %}
+                <div class="ws-feed">
+                    <div
+                        class="ws-feed-dot {% if item.change > 0 %}pos{% elif item.change < 0 %}neg{% endif %}"
+                    ></div>
+                    <div style="flex: 1; min-width: 0">
+                        <div class="ws-feed-name">{{ item.worker_name }}</div>
+                        <div class="ws-feed-reason">
+                            {{ item.reason or item.source or '—' }}
+                        </div>
+                        <div
+                            class="ws-feed-meta"
+                            data-utc="{{ item.created_at.isoformat() }}"
+                        >
+                            {{ item.created_at }}
+                        </div>
+                    </div>
+                    <div
+                        class="ws-feed-score {% if item.change > 0 %}score-pos{% elif item.change < 0 %}score-neg{% else %}score-neu{% endif %}"
+                    >
+                        {{ "%+.1f"|format(item.change) }}
+                    </div>
+                </div>
+                {% endfor %} {% else %}
+                <div class="ws-empty">No recent activity</div>
+                {% endif %}
+            </div>
+        </div>
     </div>
-  </div>
-  {% else %}
-  <div class="bg-[#111318] border border-gray-800/60 rounded-xl p-8 glow text-center">
-    <p class="text-gray-500">No work engine anomalies yet. Anomalies from Discord activity will appear here once linked to workers.</p>
-  </div>
-  {% endif %}
 </div>
+{% endblock %} {% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const dateEl = document.getElementById('today-date');
+      if (dateEl) dateEl.textContent = new Date().toLocaleDateString(undefined, {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+
+      const labels = {{ score_chart_labels | tojson }};
+      const data = {{ score_chart_data | tojson }};
+      if (labels.length > 0) {
+        new Chart(document.getElementById('scoreChart'), {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              label: 'Net Score',
+              data,
+              borderColor: '#f0f0f0',
+              backgroundColor: 'rgba(240,240,240,0.04)',
+              fill: true,
+              tension: 0.3,
+              pointRadius: 2,
+              borderWidth: 1.5
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { ticks: { color: '#444', font: { size: 10 }, maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.04)' } },
+              y: { ticks: { color: '#444', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } }
+            }
+          }
+        });
+      }
+    });
+</script>
 {% endblock %}
