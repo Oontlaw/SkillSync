@@ -675,9 +675,14 @@
                                             "
                                         >
                                             {% for s in br.signals.split(',') %}
-                                            <span style="margin-right: 4px"
+                                            <span
+                                                style="
+                                                    margin-right: 4px;
+                                                    font-size: 9px;
+                                                    color: var(--text-dim);
+                                                "
                                                 >{{
-                                                {'frequent_anomalies':'⚠️','volume_volatility':'📊','increasing_reversals':'🔄','voice_creep':'🎙️','frequent_corrections':'📝'}.get(s,'')
+                                                {'frequent_anomalies':'ANOM','volume_volatility':'VOL','increasing_reversals':'REV','voice_creep':'VOICE','frequent_corrections':'CORR'}.get(s,'')
                                                 }}</span
                                             >
                                             {% endfor %}
@@ -1602,7 +1607,7 @@
                                     text-transform: uppercase;
                                     letter-spacing: 0.05em;
                                 "
-                                >🔄 Correction Loop</span
+                                >Correction Loop</span
                             >
                             <div class="ws-grid-2" style="margin-top: 12px">
                                 <div>
@@ -1719,7 +1724,7 @@
                                     text-transform: uppercase;
                                     letter-spacing: 0.05em;
                                 "
-                                >🔄 Correction Loop</span
+                                >Correction Loop</span
                             >
                             <p
                                 style="
@@ -1830,7 +1835,7 @@
                                     font-weight: 600;
                                     color: var(--red);
                                 "
-                                >⚠ Drift Detected</span
+                                >Drift Detected</span
                             >
                             <ul
                                 style="
