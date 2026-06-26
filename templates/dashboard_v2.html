@@ -1,870 +1,2033 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>SkillSync — Workforce Intelligence</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet"/>
-  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard_v2.css') }}"/>
-
-</head>
-<body>
-<div class="bg-glow" aria-hidden="true"></div>
-<div class="page page-pad">
-
-<!-- NAV -->
-<header class="topbar">
-  <a href="/v2/" class="topbar-brand"><span class="topbar-mark">S</span>SkillSync</a>
-  <nav class="topbar-nav" aria-label="Dashboard sections">
-    <a href="#overview">Overview</a>
-    <a href="#analytics">Analytics</a>
-    <a href="#alerts">Alerts</a>
-    <a href="#ml">ML</a>
-    <a href="#guilds">Guilds</a>
-    <a href="#operations">Ops</a>
-  </nav>
-  <div class="topbar-right">
-    <div class="topbar-select">
-      <select onchange="if(this.value)window.location=this.value" aria-label="Guild">
-        <option value="/v2/">Dashboard</option>
-        {% if accessible_guilds %}
-        {% for g in accessible_guilds %}
-        <option value="/guild/{{ g.id }}">{{ g.name }}</option>
-        {% endfor %}
-        {% endif %}
-      </select>
-    </div>
-    <div class="topbar-user">
-      <span class="topbar-user-name">{{ user['name'] if user else 'User' }}</span>
-      {% if user and user.get('avatar') %}
-      <img src="https://cdn.discordapp.com/avatars/{{ user['id'] }}/{{ user['avatar'] }}.png" alt=""/>
-      {% elif user %}
-      <span class="initial">{{ user['name'][:1] }}</span>
-      {% endif %}
-      <form method="POST" action="/auth/logout" style="display:inline;margin:0">
-        <button type="submit" class="topbar-logout">Logout</button>
-      </form>
-    </div>
-  </div>
-</header>
-
-<!-- DRIFT BANNER -->
-{% if health_drift_detected %}
-<div class="wrap rv">
-<div class="drift">
-  <span class="drift-icon">&#9888;</span>
-  <div>
-    <div class="drift-t">Model drift detected</div>
-    <div class="drift-r">{% for r in health_drift_reasons %}&bull; {{ r }}<br/>{% endfor %}</div>
-  </div>
-</div></div>
-{% endif %}
-
-<!-- HERO / OVERVIEW -->
-<section id="overview" class="hero wrap rv">
-  <div class="badge-live"><span class="dot"></span> Live monitoring &middot; {{ total_guilds }} guilds</div>
-  <h1 class="hero-title">
-    <span class="hero-muted">Workforce intelligence</span><br/>
-    <span class="hero-bold">that decides in real time.</span>
-  </h1>
-  <p class="hero-desc">
-    <span data-live="total_members">{{ total_members_tracked }}</span> tracked members,
-    <span data-live="total_online_pct">{{ (total_online_members / total_members_tracked * 100)|round|int if total_members_tracked > 0 else 0 }}</span>% online
-    {% if ml_last_train %}&middot; last trained {{ ml_last_train[:10] }}{% endif %}
-  </p>
-  <div class="hero-actions">
-    {% if ml_status %}
-    <button onclick="retrainModel('all',this)" class="btn-cta btn-cta-primary">&#x21BB; Retrain models</button>
-    {% endif %}
-    <a href="#analytics" class="btn-cta btn-cta-ghost">View analytics &darr;</a>
-  </div>
-  {% if ml_status %}
-  <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-bottom:28px">
-    {% set aok = ml_status.get('anomaly',{}).get('trained',False) %}
-    {% set fok = ml_status.get('forecast',{}).get('trained',False) %}
-    {% set bok = ml_status.get('burnout',{}).get('trained',False) %}
-    <span class="tag {{ 'tag-green' if aok else 'tag-muted' }}">Anomaly {{ '&#10003;'|safe if aok else '&#9679;'|safe }}</span>
-    <span class="tag {{ 'tag-cyan' if fok else 'tag-muted' }}">Forecast {{ '&#10003;'|safe if fok else '&#9679;'|safe }}</span>
-    <span class="tag {{ 'tag-purple' if bok else 'tag-muted' }}">Burnout {{ '&#10003;'|safe if bok else '&#9679;'|safe }}</span>
-  </div>
-  {% endif %}
-  <div class="card-glow" style="padding:24px 28px;text-align:left">
-    <div class="sg">
-      <div class="sg-item"><div class="sg-label">Workers</div><div class="sg-num blue count-up" data-target="{{ total_workers }}">{{ total_workers }}</div></div>
-      <div class="sg-item"><div class="sg-label">Tasks</div><div class="sg-num count-up" data-target="{{ total_tasks }}">{{ total_tasks }}</div></div>
-      <div class="sg-item"><div class="sg-label">Messages</div><div class="sg-num count-up" data-target="{{ total_messages_logged }}">{{ total_messages_logged }}</div></div>
-      <div class="sg-item"><div class="sg-label">Mod Actions</div><div class="sg-num orange count-up" data-target="{{ total_moderation_actions }}">{{ total_moderation_actions }}</div></div>
-      <div class="sg-item"><div class="sg-label">Voice Hours</div><div class="sg-num count-up" data-target="{{ total_voice_hours }}">{{ total_voice_hours }}h</div></div>
-      <div class="sg-item"><div class="sg-label">Ext. Tasks</div><div class="sg-num count-up" data-target="{{ work_external_tasks }}">{{ work_external_tasks }}</div></div>
-    </div>
-  </div>
-</section>
-
-<!-- LIVE METRICS -->
-<div class="wrap rv section" style="padding-top:0">
-  <div class="mb">
-    <div class="mb-item">
-      <div class="mb-num count-up" data-target="{{ total_members_tracked }}">{{ total_members_tracked }}</div>
-      <div class="mb-label">Members Tracked</div>
-    </div>
-    <div class="mb-item">
-      <div class="mb-num ok count-up" data-target="{{ total_online_members }}">{{ total_online_members }}</div>
-      <div class="mb-label">Online Now</div>
-    </div>
-    <div class="mb-item">
-      <div class="mb-num count-up" data-target="{{ total_staff_tracked }}">{{ total_staff_tracked }}</div>
-      <div class="mb-label">Staff</div>
-    </div>
-    <div class="mb-item">
-      <div class="mb-num count-up" data-target="{{ total_guilds }}">{{ total_guilds }}</div>
-      <div class="mb-label">Guilds</div>
-    </div>
-    <div class="mb-item">
-      <div class="mb-num {{ 'crit' if anomalies else '' }} count-up" data-target="{{ anomalies|length }}">{{ anomalies|length }}</div>
-      <div class="mb-label">Anomalies</div>
-    </div>
-    <div class="mb-item">
-      <div class="mb-num {{ 'warn' if burnout_risks else '' }} count-up" data-target="{{ burnout_risks|length }}">{{ burnout_risks|length }}</div>
-      <div class="mb-label">At Risk</div>
-    </div>
-  </div>
-</div>
-
-<!-- ANALYTICS -->
-<section id="analytics" class="wrap rv section">
-  <div class="section-eyebrow">Analytics</div>
-  <h2 class="section-title"><span class="muted">Activity &amp; growth</span> <span class="bold">across every server.</span></h2>
-  <p class="section-desc">Message volume, voice participation, and member growth in one place.</p>
-</section>
-
-<div class="wrap rv" style="padding-top:16px">
-<div class="grid grid-2 gap-20">
-  <!-- LEFT: Main charts -->
-  <div class="space-y-4">
-    {% if daily_volume %}
-    <div class="card">
-      <div class="card-h"><span class="card-t">Message Volume &middot; 7 days</span></div>
-      <div class="card-b"><div class="chart-box" style="height:180px"><canvas id="volumeChart"></canvas></div></div>
-    </div>
-    {% endif %}
-    {% if guild_hourly and guild_hourly.keys()|length > 0 %}
-    <div class="card">
-      <div class="card-h"><span class="card-t">Guild Activity Comparison</span></div>
-      <div class="card-b"><div class="chart-box" style="height:220px"><canvas id="compareChart"></canvas></div></div>
-    </div>
-    {% endif %}
-    <div class="grid grid-3 gap-12">
-      <div class="card">
-        <div class="card-h"><span class="card-t">Community vs Staff</span></div>
-        <div class="card-b"><div class="chart-box" style="height:120px"><canvas id="staffChart"></canvas></div></div>
-      </div>
-      <div class="card">
-        <div class="card-h"><span class="card-t">Score Sources</span></div>
-        <div class="card-b"><div class="chart-box" style="height:120px"><canvas id="sourcesChart"></canvas></div></div>
-      </div>
-      <div class="card">
-        <div class="card-h"><span class="card-t">Hourly Activity</span></div>
-        <div class="card-b"><div class="chart-box" style="height:120px"><canvas id="hourlyChart"></canvas></div></div>
-      </div>
-    </div>
-  </div>
-  <!-- RIGHT: Side panels -->
-  <div class="space-y-4">
-    <div class="card">
-      <div class="card-h"><span class="card-t">Voice &amp; Moderation</span></div>
-      <div class="card-b">
-        <div class="grid grid-2 gap-16">
-          <div>
-            <div class="text-[10px] sil">Voice Hours</div>
-            <div class="text-xl font-extrabold" style="margin-top:2px">{{ total_voice_hours }}h</div>
-          </div>
-          <div>
-            <div class="text-[10px] sil">Mod Actions</div>
-            <div class="text-xl font-extrabold" style="margin-top:2px">{{ total_moderation_actions }}</div>
-          </div>
-        </div>
-        <hr class="border-t" style="margin:14px 0"/>
-        <div class="grid grid-3 gap-12">
-          <div class="text-center">
-            <div class="text-[10px] sil">Joins</div>
-            <div class="text-lg font-bold" style="color:var(--green);margin-top:3px">+{{ total_joins_7d }}</div>
-          </div>
-          <div class="text-center">
-            <div class="text-[10px] sil">Leaves</div>
-            <div class="text-lg font-bold" style="color:var(--red);margin-top:3px">&minus;{{ total_leaves_7d }}</div>
-          </div>
-          <div class="text-center">
-            <div class="text-[10px] sil">Net</div>
-            {% set net = total_joins_7d - total_leaves_7d %}
-            <div class="text-lg font-bold" style="color:{{ 'var(--green)' if net >= 0 else 'var(--red)' }};margin-top:3px">{{ net }}</div>
-          </div>
-        </div>
-        <div class="chart-box" style="height:100px;margin-top:10px"><canvas id="growthChart"></canvas></div>
-      </div>
-    </div>
-    {% if ml_status and ml_status.get('federated',{}).get('trained') %}
-    {% set fed = ml_status['federated'] %}
-    <div class="card">
-      <div class="card-h"><span class="card-t">Federated Learning</span></div>
-      <div class="card-b">
-        <div class="grid grid-2 gap-16">
-          <div>
-            <div class="text-[10px] sil">Global Acc</div>
-            <div class="text-xl font-extrabold" style="color:var(--cyan);margin-top:2px">{{ "%.1f"|format(fed.get('mean_global_accuracy',0)*100) }}%</div>
-          </div>
-          <div>
-            <div class="text-[10px] sil">Local Acc</div>
-            <div class="text-xl font-extrabold" style="color:var(--green);margin-top:2px">{{ "%.1f"|format(fed.get('mean_local_accuracy',0)*100) }}%</div>
-          </div>
-        </div>
-        <div class="text-[10px] sil" style="margin-top:6px">{{ fed.get('rounds',0) }} rounds &middot; {{ fed.get('num_clients',0) }} clients</div>
-        {% if fed.get('history',[])|length > 1 %}
-        <div class="chart-box" style="height:80px;margin-top:10px"><canvas id="fedChart"></canvas></div>
-        {% endif %}
-      </div>
-    </div>
-    {% endif %}
-    {% if most_active %}
-    <div class="card">
-      <div class="card-h"><span class="card-t">Most Active Users</span></div>
-      <div class="card-b">
-        {% for a in most_active %}
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0">
-          <span style="font-size:13px;font-weight:500">{{ a.name }}</span>
-          <span style="font-size:12px;font-weight:700;color:var(--accent)">{{ a.count }}</span>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-    {% endif %}
-  </div>
-</div>
-</div>
-
-<!-- 4. ANOMALIES & BURNOUT -->
-{% if anomalies or burnout_risks %}
-<section id="alerts" class="wrap rv section">
-  <div class="section-eyebrow">Intelligence alerts</div>
-  <h2 class="section-title"><span class="muted">Anomalies &amp; burnout</span> <span class="bold">requiring review.</span></h2>
-  <p class="section-desc">Flagged behavior patterns and staff wellness signals from ML detection.</p>
-</section>
-
-<div class="wrap rv" style="padding-top:16px">
-<div class="grid grid-2 gap-20">
-  <!-- Anomalies -->
-  <div>
-    {% if anomalies %}
-    <div class="card">
-      <div class="card-h">
-        <span class="card-t">Behavioral Anomalies <span style="color:var(--red)">&middot; {{ anomalies|length }}</span></span>
-        <div style="display:flex;gap:14px;align-items:center">
-          {% if anomaly_precision and anomaly_precision.precision is not none %}
-          <span class="text-[10px] sil">Precision: <strong style="color:var(--accent)">{{ anomaly_precision.precision_pct }}%</strong> <span style="color:var(--text-muted)">({{ anomaly_precision.confirmed }}/{{ anomaly_precision.total_with_feedback }})</span></span>
-          {% endif %}
-          <span class="text-[10px] sil">48h</span>
-        </div>
-      </div>
-      <div class="card-b" style="padding-top:8px">
-        <div class="t-scroll">
-          <table class="tbl">
-            <thead><tr><th>User</th><th>Type</th><th>Severity</th><th>Feedback</th><th style="text-align:right">Detected</th></tr></thead>
-            <tbody>
-              {% for a in anomalies %}
-              <tr id="anomaly-row-{{ a.id }}">
-                <td style="font-weight:600">{{ a.discord_id[:12] if a.discord_id else 'N/A' }}</td>
-                <td><span class="tag {{ 'tag-purple' if a.anomaly_type == 'ml_anomaly' else 'tag-orange' }}">{{ a.anomaly_type }}</span></td>
-                <td>
-                  <div class="sbar">
-                    <div class="sbar-track"><div class="sbar-fill" style="width:{{ a.severity }}%;background:{% if a.severity >= 60 %}var(--red){% elif a.severity >= 25 %}var(--orange){% else %}var(--green){% endif %}"></div></div>
-                    <span style="font-size:12px;font-weight:700">{{ a.severity }}</span>
-                  </div>
-                </td>
-                <td class="feedback-cell">
-                  {% if a.feedback == 'confirmed' %}
-                  <span style="font-size:11px;color:var(--green);font-weight:600">&#10003;</span>
-                  {% elif a.feedback == 'dismissed' %}
-                  <span style="font-size:11px;color:var(--text-muted);font-weight:600">&#10005;</span>
-                  {% elif a.anomaly_type == 'ml_anomaly' %}
-                  <div style="display:flex;gap:4px">
-                    <button onclick="feedback('anomaly',{{ a.id }},'confirmed',this)" class="fb fb-ok" title="Confirm">&#10003;</button>
-                    <button onclick="feedback('anomaly',{{ a.id }},'dismissed',this)" class="fb fb-no" title="Dismiss">&#10005;</button>
-                  </div>
-                  {% else %}
-                  <span class="text-[10px] sil">&mdash;</span>
-                  {% endif %}
-                </td>
-                <td style="text-align:right;font-size:11px;white-space:nowrap;color:var(--text-dim)">{{ a.detected_at.strftime('%H:%M %b %d') if a.detected_at else 'N/A' }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-    {% else %}
-    <div class="card"><div class="card-b"><div class="empty-s">No recent anomalies</div></div></div>
-    {% endif %}
-  </div>
-  <!-- Burnout -->
-  <div>
-    {% if burnout_risks %}
-    <div class="card">
-      <div class="card-h">
-        <span class="card-t">Staff Burnout <span style="color:var(--orange)">&middot; {{ burnout_risks|length }}</span></span>
-        {% if burnout_precision and burnout_precision.precision is not none %}
-        <span class="text-[10px] sil">Prec: <strong style="color:var(--accent)">{{ burnout_precision.precision_pct }}%</strong></span>
-        {% endif %}
-      </div>
-      <div class="card-b" id="burnout-list">
-        {% for br in burnout_risks %}
-        <div class="bo" id="burnout-card-{{ br.id }}">
-          <div class="bo-s" style="background:{% if br.score >= 60 %}var(--red-bg);color:var(--red){% elif br.score >= 25 %}var(--orange-bg);color:var(--orange){% else %}var(--green-bg);color:var(--green){% endif %}">{{ "%.0f"|format(br.score) }}</div>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:600">{{ br.name }}</div>
-            {% if br.signals %}
-            <div style="font-size:10px;color:var(--text-muted);margin-top:2px">
-              {% for s in br.signals.split(',') %}
-              <span style="display:inline-block;margin-right:4px">{{ {'frequent_anomalies':'&#9888;','volume_volatility':'&#128202;','increasing_reversals':'&#128260;','voice_creep':'&#127908;','frequent_corrections':'&#128221;'}.get(s,'') }}</span>
-              {% endfor %}
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SkillSync v2</title>
+        <style>
+            @font-face {
+                font-family: "Cal Sans UI";
+                src: url('{{ url_for("static", filename="fonts/CalSansUI.woff2") }}')
+                    format("woff2-variations");
+                font-weight: 300 700;
+                font-style: normal;
+                font-display: swap;
+            }
+        </style>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <script>
+            const csrfToken = "{{ csrf_token }}";
+        </script>
+        <style>
+            :root {
+                --bg: #0d1117;
+                --bg-card: #161b22;
+                --bg-elevated: #1c2128;
+                --bg-hover: rgba(255, 255, 255, 0.03);
+                --border: rgba(255, 255, 255, 0.06);
+                --text: #e6edf3;
+                --text-sec: #7d8590;
+                --text-dim: #484f58;
+                --accent: var(--accent);
+                --accent-bg: rgba(88, 166, 255, 0.1);
+                --green: #3fb950;
+                --green-bg: rgba(63, 185, 80, 0.1);
+                --red: #f85149;
+                --red-bg: rgba(248, 81, 73, 0.1);
+                --orange: #d29922;
+                --orange-bg: rgba(210, 153, 34, 0.1);
+                --blue: var(--accent);
+                --blue-bg: rgba(88, 166, 255, 0.1);
+                --purple: #bc8cff;
+                --purple-bg: rgba(188, 140, 255, 0.1);
+            }
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            body {
+                font-family: "Cal Sans UI", "Inter", sans-serif;
+                background: var(--bg);
+                color: var(--text);
+                padding-top: 52px;
+            }
+            #cursor-glow {
+                position: fixed;
+                inset: 0;
+                pointer-events: none;
+                z-index: 9999;
+                background: radial-gradient(
+                    500px circle at var(--cx, 50%) var(--cy, 50%),
+                    rgba(88, 166, 255, 0.04),
+                    rgba(255, 255, 255, 0.02) 30%,
+                    transparent 65%
+                );
+            }
+            .ws-page {
+                position: relative;
+            }
+            .ws-nav {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 48px;
+                background: rgba(13, 17, 23, 0.95);
+                border-bottom: 1px solid var(--border);
+                backdrop-filter: blur(12px);
+                z-index: 100;
+                display: flex;
+                align-items: center;
+                padding: 0 24px;
+                gap: 24px;
+            }
+            .ws-nav-brand {
+                font-family: "Cal Sans UI", sans-serif;
+                font-variation-settings: "GEOM" 100;
+                font-size: 16px;
+                font-weight: 800;
+                color: var(--text);
+                text-decoration: none;
+            }
+            .ws-nav-links {
+                display: flex;
+                gap: 8px;
+            }
+            .ws-nav-link {
+                font-size: 12px;
+                font-weight: 500;
+                color: var(--text-dim);
+                text-decoration: none;
+                padding: 6px 12px;
+                border-radius: 6px;
+                transition: all 0.15s;
+                cursor: pointer;
+            }
+            .ws-nav-link:hover,
+            .ws-nav-link.active {
+                color: var(--text);
+                background: var(--bg-hover);
+            }
+            .ws-page {
+                max-width: 1200px;
+                margin: 0 auto;
+                padding: 0 24px 48px;
+            }
+            .ws-section {
+                margin-bottom: 32px;
+            }
+            .ws-eyebrow {
+                font-size: 10px;
+                font-weight: 600;
+                color: var(--text-dim);
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                margin-bottom: 8px;
+            }
+            .ws-title {
+                font-family: "Cal Sans UI", sans-serif;
+                font-variation-settings: "GEOM" 80;
+                font-size: 24px;
+                font-weight: 800;
+                color: var(--text);
+                margin-bottom: 4px;
+            }
+            .ws-subtitle {
+                font-size: 13px;
+                color: var(--text-sec);
+                margin-bottom: 24px;
+            }
+            .ws-card {
+                background: var(--bg-card);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                padding: 20px;
+                margin-bottom: 16px;
+            }
+            .ws-stat-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+                gap: 12px;
+                margin-bottom: 24px;
+            }
+            .ws-stat {
+                background: var(--bg-card);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                padding: 14px;
+            }
+            .ws-stat-value {
+                font-family: "Cal Sans UI", sans-serif;
+                font-variation-settings: "GEOM" 80;
+                font-size: 22px;
+                font-weight: 800;
+                color: var(--text);
+                margin-bottom: 2px;
+            }
+            .ws-stat-label {
+                font-size: 11px;
+                color: var(--text-dim);
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+            }
+            .ws-table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            .ws-table th {
+                font-size: 11px;
+                font-weight: 600;
+                color: var(--text-dim);
+                text-align: left;
+                padding: 10px 14px;
+                border-bottom: 1px solid var(--border);
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+            }
+            .ws-table td {
+                padding: 10px 14px;
+                border-bottom: 1px solid var(--border);
+                font-size: 12px;
+            }
+            .ws-table tr:hover td {
+                background: var(--bg-elevated);
+            }
+            .ws-tag {
+                font-size: 10px;
+                font-weight: 500;
+                padding: 3px 7px;
+                border-radius: 4px;
+                display: inline-block;
+            }
+            .ws-tag.green {
+                background: var(--green-bg);
+                color: var(--green);
+            }
+            .ws-tag.red {
+                background: var(--red-bg);
+                color: var(--red);
+            }
+            .ws-tag.orange {
+                background: var(--orange-bg);
+                color: var(--orange);
+            }
+            .ws-tag.blue {
+                background: var(--blue-bg);
+                color: var(--blue);
+            }
+            .ws-tag.purple {
+                background: var(--purple-bg);
+                color: var(--purple);
+            }
+            .ws-tag.cyan {
+                background: rgba(88, 166, 255, 0.1);
+                color: var(--accent);
+            }
+            .ws-chart-box {
+                height: 200px;
+                position: relative;
+                margin-top: 12px;
+                background: transparent;
+            }
+            .ws-chart-sm {
+                height: 140px;
+                position: relative;
+                margin-top: 8px;
+                background: transparent;
+            }
+            .ws-btn {
+                font-size: 11px;
+                font-weight: 500;
+                padding: 5px 11px;
+                border-radius: 6px;
+                border: 1px solid var(--border);
+                background: var(--bg-card);
+                color: var(--text);
+                cursor: pointer;
+                transition: all 0.15s;
+            }
+            .ws-btn:hover {
+                background: var(--bg-hover);
+            }
+            .ws-btn.primary {
+                background: var(--accent);
+                color: #000;
+                border: none;
+                font-weight: 600;
+            }
+            .ws-btn.primary:hover {
+                opacity: 0.85;
+            }
+            .ws-btn.danger {
+                background: var(--red);
+                color: #000;
+                border-color: var(--red);
+            }
+            .ws-grid-2 {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 16px;
+            }
+            .ws-grid-3 {
+                display: grid;
+                grid-template-columns: 1fr 1fr 1fr;
+                gap: 16px;
+            }
+            .ws-grid-8-4 {
+                display: grid;
+                grid-template-columns: 2fr 1fr;
+                gap: 16px;
+            }
+            .ws-guild-card {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 12px 14px;
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                background: var(--bg-card);
+                margin-bottom: 8px;
+                transition: all 0.15s;
+            }
+            .ws-guild-card:hover {
+                background: var(--bg-hover);
+            }
+            .ws-avatar {
+                width: 32px;
+                height: 32px;
+                border-radius: 6px;
+                background: rgba(88, 166, 255, 0.1);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: var(--blue);
+                font-weight: 700;
+                font-size: 13px;
+            }
+            .ws-feed-item {
+                display: flex;
+                gap: 12px;
+                padding: 10px 0;
+                border-bottom: 1px solid var(--border);
+            }
+            .ws-feed-item:last-child {
+                border-bottom: none;
+            }
+            .ws-dot {
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: var(--blue);
+                margin-top: 4px;
+                flex-shrink: 0;
+            }
+            .ws-severity {
+                display: inline-block;
+                width: 60px;
+                height: 4px;
+                border-radius: 2px;
+                vertical-align: middle;
+                margin-right: 6px;
+            }
+            .ws-severity.high {
+                background: var(--red);
+            }
+            .ws-severity.med {
+                background: var(--orange);
+            }
+            .ws-severity.low {
+                background: var(--blue);
+            }
+            .ws-feedback-btn {
+                cursor: pointer;
+                padding: 2px 6px;
+                border-radius: 4px;
+                font-size: 11px;
+                border: 1px solid var(--border);
+                background: transparent;
+                color: var(--text-sec);
+                transition: all 0.15s;
+            }
+            .ws-feedback-btn:hover {
+                background: var(--bg-hover);
+                color: var(--text);
+            }
+            .ws-scroll {
+                max-height: 320px;
+                overflow-y: auto;
+            }
+            .ws-scroll::-webkit-scrollbar {
+                width: 4px;
+            }
+            .ws-scroll::-webkit-scrollbar-thumb {
+                background: var(--border);
+                border-radius: 2px;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="cursor-glow"></div>
+        <nav class="ws-nav">
+            <a href="/v2/" class="ws-nav-brand"
+                >SkillSync <span style="color: var(--text-dim)">v2</span></a
+            >
+            <div class="ws-nav-links">
+                <a href="#overview" class="ws-nav-link active">Overview</a>
+                <a href="#alerts" class="ws-nav-link">Alerts</a>
+                <a href="#analytics" class="ws-nav-link">Analytics</a>
+                <a href="#guilds" class="ws-nav-link">Guilds</a>
+                <a href="#ml" class="ws-nav-link">ML</a>
             </div>
-            {% endif %}
-          </div>
-          <div class="feedback-cell" style="shrink-0">
-            {% if br.feedback == 'confirmed' %}
-            <span style="font-size:11px;color:var(--green);font-weight:600">&#10003;</span>
-            {% elif br.feedback == 'dismissed' %}
-            <span style="font-size:11px;color:var(--text-muted);font-weight:600">&#10005;</span>
-            {% else %}
-            <div style="display:flex;gap:4px">
-              <button onclick="feedback('burnout',{{ br.id }},'confirmed',this)" class="fb fb-ok" title="Confirm">&#10003;</button>
-              <button onclick="feedback('burnout',{{ br.id }},'dismissed',this)" class="fb fb-no" title="Dismiss">&#10005;</button>
-            </div>
-            {% endif %}
-          </div>
+        </nav>
+
+        <div class="ws-page">
+            <!-- ===== OVERVIEW ===== -->
+            <section id="overview" class="ws-section">
+                <div class="ws-eyebrow">Overview</div>
+                <h1 class="ws-title">Dashboard</h1>
+                <p class="ws-subtitle">
+                    Workforce intelligence for your Discord communities.
+                </p>
+
+                <div class="ws-stat-grid">
+                    <div class="ws-stat">
+                        <div class="ws-stat-value">{{ total_workers }}</div>
+                        <div class="ws-stat-label">Workers</div>
+                    </div>
+                    <div class="ws-stat">
+                        <div class="ws-stat-value">{{ total_guilds }}</div>
+                        <div class="ws-stat-label">Guilds</div>
+                    </div>
+                    <div class="ws-stat">
+                        <div class="ws-stat-value">
+                            {{ total_messages_logged }}
+                        </div>
+                        <div class="ws-stat-label">Messages</div>
+                    </div>
+                    <div class="ws-stat">
+                        <div class="ws-stat-value">
+                            {{ total_voice_hours }}h
+                        </div>
+                        <div class="ws-stat-label">Voice Hours</div>
+                    </div>
+                    <div class="ws-stat">
+                        <div class="ws-stat-value">
+                            {{ total_moderation_actions }}
+                        </div>
+                        <div class="ws-stat-label">Mod Actions</div>
+                    </div>
+                    <div class="ws-stat">
+                        <div class="ws-stat-value">{{ anomalies|length }}</div>
+                        <div class="ws-stat-label">Anomalies</div>
+                    </div>
+                    <div class="ws-stat">
+                        <div class="ws-stat-value" data-live="total_members">
+                            {{ total_members_tracked }}
+                        </div>
+                        <div class="ws-stat-label">Members</div>
+                    </div>
+                    <div class="ws-stat">
+                        <div class="ws-stat-value" data-live="total_online">
+                            {{ total_online_members }}
+                        </div>
+                        <div class="ws-stat-label">Online</div>
+                    </div>
+                    <div class="ws-stat">
+                        <div class="ws-stat-value">
+                            {{ total_staff_tracked }}
+                        </div>
+                        <div class="ws-stat-label">Staff</div>
+                    </div>
+                    <div class="ws-stat">
+                        <div class="ws-stat-value">{{ total_tasks }}</div>
+                        <div class="ws-stat-label">Tasks</div>
+                    </div>
+                    <div class="ws-stat">
+                        <div class="ws-stat-value">{{ total_corrections }}</div>
+                        <div class="ws-stat-label">Corrections</div>
+                    </div>
+                    <div class="ws-stat">
+                        <div class="ws-stat-value">
+                            {{ unique_users_tracked }}
+                        </div>
+                        <div class="ws-stat-label">Unique Users</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===== ALERTS ===== -->
+            <section id="alerts" class="ws-section">
+                <div class="ws-eyebrow">Alerts</div>
+                <h2 class="ws-title">Intelligence Alerts</h2>
+                <p class="ws-subtitle">
+                    Behavioral anomalies and staff burnout risks.
+                </p>
+
+                <div class="ws-grid-8-4">
+                    <!-- Anomalies -->
+                    <div class="ws-card">
+                        <div
+                            style="
+                                display: flex;
+                                align-items: center;
+                                justify-content: space-between;
+                                margin-bottom: 12px;
+                            "
+                        >
+                            <span
+                                style="
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: var(--red);
+                                    text-transform: uppercase;
+                                    letter-spacing: 0.05em;
+                                "
+                                >Behavioral Anomalies</span
+                            >
+                            {% if anomaly_precision and
+                            anomaly_precision.precision is not none %}
+                            <span
+                                style="font-size: 10px; color: var(--text-dim)"
+                                >Precision:
+                                <b style="color: var(--blue)"
+                                    >{{ anomaly_precision.precision_pct }}%</b
+                                >
+                                ({{ anomaly_precision.confirmed }}/{{
+                                anomaly_precision.total_with_feedback }})</span
+                            >
+                            {% endif %}
+                        </div>
+                        {% if anomalies %}
+                        <table class="ws-table">
+                            <thead>
+                                <tr>
+                                    <th>User</th>
+                                    <th>Type</th>
+                                    <th>Severity</th>
+                                    <th>Feedback</th>
+                                    <th>Detected</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for a in anomalies %}
+                                <tr>
+                                    <td style="font-weight: 500">
+                                        {{ a.discord_id[:12] if a.discord_id
+                                        else 'N/A' }}
+                                    </td>
+                                    <td>
+                                        <span
+                                            class="ws-tag {{ 'purple' if a.anomaly_type == 'ml_anomaly' else 'orange' }}"
+                                            >{{ a.anomaly_type }}</span
+                                        >
+                                    </td>
+                                    <td>
+                                        <div
+                                            class="ws-severity {% if a.severity >= 60 %}high{% elif a.severity >= 25 %}med{% else %}low{% endif %}"
+                                        ></div>
+                                        <span style="font-size: 11px"
+                                            >{{ a.severity }}</span
+                                        >
+                                    </td>
+                                    <td>
+                                        {% if a.feedback == 'confirmed' %}<span
+                                            style="
+                                                color: var(--green);
+                                                font-size: 11px;
+                                            "
+                                            >✓ Confirmed</span
+                                        >
+                                        {% elif a.feedback == 'dismissed'
+                                        %}<span
+                                            style="
+                                                color: var(--text-dim);
+                                                font-size: 11px;
+                                            "
+                                            >✕ Dismissed</span
+                                        >
+                                        {% elif a.anomaly_type == 'ml_anomaly'
+                                        %}
+                                        <button
+                                            class="ws-feedback-btn"
+                                            onclick="feedback('anomaly',{{ a.id }},'confirmed',this)"
+                                        >
+                                            ✓
+                                        </button>
+                                        <button
+                                            class="ws-feedback-btn"
+                                            onclick="feedback('anomaly',{{ a.id }},'dismissed',this)"
+                                        >
+                                            ✕
+                                        </button>
+                                        {% else %}<span
+                                            style="
+                                                color: var(--text-dim);
+                                                font-size: 10px;
+                                            "
+                                            >—</span
+                                        >{% endif %}
+                                    </td>
+                                    <td
+                                        style="
+                                            color: var(--text-dim);
+                                            font-size: 11px;
+                                        "
+                                    >
+                                        {{ a.detected_at.strftime('%H:%M %b %d')
+                                        if a.detected_at else 'N/A' }}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        {% else %}
+                        <div
+                            style="
+                                text-align: center;
+                                padding: 24px 0;
+                                color: var(--text-dim);
+                                font-size: 13px;
+                            "
+                        >
+                            No anomalies detected in the last 48h.
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Burnout -->
+                    <div class="ws-card">
+                        <div
+                            style="
+                                display: flex;
+                                align-items: center;
+                                justify-content: space-between;
+                                margin-bottom: 12px;
+                            "
+                        >
+                            <span
+                                style="
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: var(--orange);
+                                    text-transform: uppercase;
+                                    letter-spacing: 0.05em;
+                                "
+                                >Staff Burnout</span
+                            >
+                            {% if burnout_precision and
+                            burnout_precision.precision is not none %}
+                            <span
+                                style="font-size: 10px; color: var(--text-dim)"
+                                >Precision:
+                                <b style="color: var(--blue)"
+                                    >{{ burnout_precision.precision_pct }}%</b
+                                ></span
+                            >
+                            {% endif %}
+                        </div>
+                        {% if burnout_risks %}
+                        <div
+                            style="
+                                display: flex;
+                                flex-direction: column;
+                                gap: 8px;
+                            "
+                        >
+                            {% for br in burnout_risks %}
+                            <div
+                                style="
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: space-between;
+                                    padding: 10px 12px;
+                                    border: 1px solid var(--border);
+                                    border-radius: 6px;
+                                "
+                            >
+                                <div
+                                    style="
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 10px;
+                                    "
+                                >
+                                    <span
+                                        style="font-size:18px;font-weight:800;{% if br.score >= 60 %}color:var(--red){% elif br.score >= 25 %}color:var(--orange){% else %}color:var(--green){% endif %}"
+                                        >{{ "%.0f"|format(br.score) }}</span
+                                    >
+                                    <div>
+                                        <div
+                                            style="
+                                                font-size: 12px;
+                                                font-weight: 500;
+                                                color: var(--text);
+                                            "
+                                        >
+                                            {{ br.name }}
+                                        </div>
+                                        {% if br.signals %}
+                                        <div
+                                            style="
+                                                font-size: 10px;
+                                                color: var(--text-dim);
+                                                margin-top: 2px;
+                                            "
+                                        >
+                                            {% for s in br.signals.split(',') %}
+                                            <span style="margin-right: 4px"
+                                                >{{
+                                                {'frequent_anomalies':'⚠️','volume_volatility':'📊','increasing_reversals':'🔄','voice_creep':'🎙️','frequent_corrections':'📝'}.get(s,'')
+                                                }}</span
+                                            >
+                                            {% endfor %}
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div>
+                                    {% if br.feedback == 'confirmed' %}<span
+                                        style="
+                                            color: var(--green);
+                                            font-size: 10px;
+                                        "
+                                        >✓ Confirmed</span
+                                    >
+                                    {% elif br.feedback == 'dismissed' %}<span
+                                        style="
+                                            color: var(--text-dim);
+                                            font-size: 10px;
+                                        "
+                                        >✕ Dismissed</span
+                                    >
+                                    {% else %}
+                                    <button
+                                        class="ws-feedback-btn"
+                                        onclick="feedback('burnout',{{ br.id }},'confirmed',this)"
+                                    >
+                                        ✓
+                                    </button>
+                                    <button
+                                        class="ws-feedback-btn"
+                                        onclick="feedback('burnout',{{ br.id }},'dismissed',this)"
+                                    >
+                                        ✕
+                                    </button>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div
+                            style="
+                                text-align: center;
+                                padding: 24px 0;
+                                color: var(--text-dim);
+                                font-size: 13px;
+                            "
+                        >
+                            No burnout risks detected.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===== ANALYTICS ===== -->
+            <section id="analytics" class="ws-section">
+                <div class="ws-eyebrow">Analytics</div>
+                <h2 class="ws-title">Analytics Hub</h2>
+                <p class="ws-subtitle">
+                    Activity patterns across your communities.
+                </p>
+
+                <div class="ws-grid-8-4">
+                    <div
+                        style="display: flex; flex-direction: column; gap: 16px"
+                    >
+                        <!-- Guild Activity -->
+                        <div class="ws-card">
+                            <div
+                                style="
+                                    display: flex;
+                                    justify-content: space-between;
+                                    align-items: center;
+                                    margin-bottom: 8px;
+                                "
+                            >
+                                <span
+                                    style="
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        color: var(--text-sec);
+                                        text-transform: uppercase;
+                                        letter-spacing: 0.05em;
+                                    "
+                                    >Guild Activity Comparison</span
+                                >
+                            </div>
+                            <p
+                                style="
+                                    font-size: 11px;
+                                    color: var(--text-dim);
+                                    margin-bottom: 8px;
+                                "
+                            >
+                                Peak hours per server — timezone distribution
+                            </p>
+                            {% if guild_hourly and guild_hourly.keys()|length >
+                            0 %}
+                            <div class="ws-chart-box">
+                                <canvas id="compareChart"></canvas>
+                            </div>
+                            {% else %}
+                            <div
+                                style="
+                                    text-align: center;
+                                    padding: 32px 0;
+                                    color: var(--text-dim);
+                                    font-size: 13px;
+                                "
+                            >
+                                No activity data available.
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Mini charts row -->
+                        <div class="ws-grid-3">
+                            <div class="ws-card">
+                                <span
+                                    style="
+                                        font-size: 10px;
+                                        font-weight: 600;
+                                        color: var(--text-dim);
+                                        text-transform: uppercase;
+                                        letter-spacing: 0.05em;
+                                    "
+                                    >Community vs Staff</span
+                                >
+                                <div class="ws-chart-sm">
+                                    <canvas id="staffChart"></canvas>
+                                </div>
+                            </div>
+                            <div class="ws-card">
+                                <span
+                                    style="
+                                        font-size: 10px;
+                                        font-weight: 600;
+                                        color: var(--text-dim);
+                                        text-transform: uppercase;
+                                        letter-spacing: 0.05em;
+                                    "
+                                    >Score Sources</span
+                                >
+                                <div class="ws-chart-sm">
+                                    <canvas id="sourcesChart"></canvas>
+                                </div>
+                            </div>
+                            <div class="ws-card">
+                                <span
+                                    style="
+                                        font-size: 10px;
+                                        font-weight: 600;
+                                        color: var(--text-dim);
+                                        text-transform: uppercase;
+                                        letter-spacing: 0.05em;
+                                    "
+                                    >Aggregate Hourly</span
+                                >
+                                <div class="ws-chart-sm">
+                                    <canvas id="hourlyChart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Daily Volume -->
+                        {% if daily_volume %}
+                        <div class="ws-card">
+                            <span
+                                style="
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: var(--text-sec);
+                                    text-transform: uppercase;
+                                    letter-spacing: 0.05em;
+                                "
+                                >Message Volume (7 days)</span
+                            >
+                            <div class="ws-chart-box">
+                                <canvas id="volumeChart"></canvas>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Right side: Growth + Federated -->
+                    <div
+                        style="display: flex; flex-direction: column; gap: 16px"
+                    >
+                        <!-- Server Growth -->
+                        <div class="ws-card">
+                            <div
+                                style="
+                                    display: flex;
+                                    justify-content: space-between;
+                                    align-items: center;
+                                    margin-bottom: 12px;
+                                "
+                            >
+                                <span
+                                    style="
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        color: var(--green);
+                                        text-transform: uppercase;
+                                        letter-spacing: 0.05em;
+                                    "
+                                    >Server Growth</span
+                                >
+                                <span
+                                    style="
+                                        font-size: 10px;
+                                        color: var(--text-dim);
+                                    "
+                                    >7d</span
+                                >
+                            </div>
+                            <div class="ws-grid-3" style="margin-bottom: 12px">
+                                <div
+                                    style="
+                                        text-align: center;
+                                        padding: 8px;
+                                        border: 1px solid var(--border);
+                                        border-radius: 6px;
+                                    "
+                                >
+                                    <div
+                                        style="
+                                            font-size: 10px;
+                                            color: var(--text-dim);
+                                            text-transform: uppercase;
+                                        "
+                                    >
+                                        Joins
+                                    </div>
+                                    <div
+                                        style="
+                                            font-size: 18px;
+                                            font-weight: 800;
+                                            color: var(--green);
+                                        "
+                                    >
+                                        +{{ total_joins_7d }}
+                                    </div>
+                                </div>
+                                <div
+                                    style="
+                                        text-align: center;
+                                        padding: 8px;
+                                        border: 1px solid var(--border);
+                                        border-radius: 6px;
+                                    "
+                                >
+                                    <div
+                                        style="
+                                            font-size: 10px;
+                                            color: var(--text-dim);
+                                            text-transform: uppercase;
+                                        "
+                                    >
+                                        Leaves
+                                    </div>
+                                    <div
+                                        style="
+                                            font-size: 18px;
+                                            font-weight: 800;
+                                            color: var(--red);
+                                        "
+                                    >
+                                        -{{ total_leaves_7d }}
+                                    </div>
+                                </div>
+                                <div
+                                    style="
+                                        text-align: center;
+                                        padding: 8px;
+                                        border: 1px solid var(--border);
+                                        border-radius: 6px;
+                                    "
+                                >
+                                    <div
+                                        style="
+                                            font-size: 10px;
+                                            color: var(--text-dim);
+                                            text-transform: uppercase;
+                                        "
+                                    >
+                                        Net
+                                    </div>
+                                    {% set net_growth = total_joins_7d -
+                                    total_leaves_7d %}
+                                    <div
+                                        style="font-size:18px;font-weight:800;{% if net_growth >= 0 %}color:var(--green){% else %}color:var(--red){% endif %}"
+                                    >
+                                        {{ "+" if net_growth > 0 }}{{ net_growth
+                                        }}
+                                    </div>
+                                </div>
+                            </div>
+                            <div style="height: 120px">
+                                <canvas id="growthChart"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Federated Learning -->
+                        {% if ml_status and ml_status.get('federated',
+                        {}).get('trained') %} {% set fed =
+                        ml_status['federated'] %}
+                        <div class="ws-card">
+                            <div
+                                style="
+                                    display: flex;
+                                    justify-content: space-between;
+                                    align-items: center;
+                                    margin-bottom: 12px;
+                                "
+                            >
+                                <span
+                                    style="
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        color: var(--accent);
+                                        text-transform: uppercase;
+                                        letter-spacing: 0.05em;
+                                    "
+                                    >FedAvg Learning</span
+                                >
+                                <span
+                                    style="
+                                        font-size: 10px;
+                                        color: var(--text-dim);
+                                    "
+                                    >{{ fed.get('rounds',0) }} rounds</span
+                                >
+                            </div>
+                            <div class="ws-grid-2" style="margin-bottom: 12px">
+                                <div
+                                    style="
+                                        padding: 8px;
+                                        border: 1px solid var(--border);
+                                        border-radius: 6px;
+                                    "
+                                >
+                                    <div
+                                        style="
+                                            font-size: 10px;
+                                            color: var(--text-dim);
+                                            text-transform: uppercase;
+                                        "
+                                    >
+                                        Global Acc
+                                    </div>
+                                    <div
+                                        style="
+                                            font-size: 16px;
+                                            font-weight: 800;
+                                            color: var(--accent);
+                                        "
+                                    >
+                                        {{
+                                        "%.1f"|format(fed.get('mean_global_accuracy',0)*100)
+                                        }}%
+                                    </div>
+                                </div>
+                                <div
+                                    style="
+                                        padding: 8px;
+                                        border: 1px solid var(--border);
+                                        border-radius: 6px;
+                                    "
+                                >
+                                    <div
+                                        style="
+                                            font-size: 10px;
+                                            color: var(--text-dim);
+                                            text-transform: uppercase;
+                                        "
+                                    >
+                                        Local Acc
+                                    </div>
+                                    <div
+                                        style="
+                                            font-size: 16px;
+                                            font-weight: 800;
+                                            color: var(--green);
+                                        "
+                                    >
+                                        {{
+                                        "%.1f"|format(fed.get('mean_local_accuracy',0)*100)
+                                        }}%
+                                    </div>
+                                </div>
+                            </div>
+                            {% if fed.get('history',[])|length > 1 %}
+                            <div style="height: 80px; margin-bottom: 12px">
+                                <canvas id="fedChart"></canvas>
+                            </div>
+                            {% endif %}
+                            <div class="ws-scroll">
+                                <table class="ws-table" style="font-size: 10px">
+                                    <thead>
+                                        <tr>
+                                            <th>Guild</th>
+                                            <th style="text-align: right">
+                                                Global
+                                            </th>
+                                            <th style="text-align: right">
+                                                Baseline
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for c in fed['clients'] %}
+                                        <tr>
+                                            <td style="color: var(--text)">
+                                                {{ c.guild_id[:8] }}
+                                            </td>
+                                            <td
+                                                style="text-align:right;{% if c.global_accuracy >= 0.7 %}color:var(--green){% else %}color:var(--text-sec){% endif %}"
+                                            >
+                                                {{
+                                                "%.1f"|format(c.global_accuracy*100)
+                                                }}%
+                                            </td>
+                                            <td
+                                                style="
+                                                    text-align: right;
+                                                    color: var(--text-dim);
+                                                "
+                                            >
+                                                {{
+                                                "%.1f"|format(c.get('baseline_accuracy',0)*100)
+                                                }}%
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        {% elif ml_status and
+                        ml_status.get('federated',{}).get('trained') == false %}
+                        <div
+                            class="ws-card"
+                            style="text-align: center; padding: 24px"
+                        >
+                            <span
+                                style="
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: var(--accent);
+                                    text-transform: uppercase;
+                                    letter-spacing: 0.05em;
+                                "
+                                >FedAvg Learning</span
+                            >
+                            <p
+                                style="
+                                    font-size: 12px;
+                                    color: var(--text-dim);
+                                    margin-top: 8px;
+                                "
+                            >
+                                Waiting for 2+ guilds with activity to begin
+                                training.
+                            </p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===== GUILDS & OPERATIONS ===== -->
+            <section id="guilds" class="ws-section">
+                <div class="ws-eyebrow">Operations</div>
+                <h2 class="ws-title">Operational Overview</h2>
+                <p class="ws-subtitle">
+                    Server registry, live activity, and leaderboard.
+                </p>
+
+                <div class="ws-grid-8-4">
+                    <!-- Guild Cards -->
+                    <div class="ws-card">
+                        <div
+                            style="
+                                display: flex;
+                                justify-content: space-between;
+                                align-items: center;
+                                margin-bottom: 12px;
+                            "
+                        >
+                            <span
+                                style="
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: var(--text-sec);
+                                    text-transform: uppercase;
+                                    letter-spacing: 0.05em;
+                                "
+                                >Server Registry</span
+                            >
+                            <div
+                                style="
+                                    display: flex;
+                                    gap: 12px;
+                                    font-size: 10px;
+                                    color: var(--text-dim);
+                                "
+                            >
+                                <span
+                                    >Tracked:
+                                    <b style="color: var(--text)"
+                                        >{{ total_guilds }}</b
+                                    ></span
+                                >
+                                <span
+                                    >Members:
+                                    <b style="color: var(--text)"
+                                        >{{ total_members_tracked }}</b
+                                    ></span
+                                >
+                                <span
+                                    >Staff:
+                                    <b style="color: var(--blue)"
+                                        >{{ total_staff_tracked }}</b
+                                    ></span
+                                >
+                            </div>
+                        </div>
+                        {% if guilds %}
+                        <div
+                            style="
+                                display: grid;
+                                grid-template-columns: 1fr 1fr;
+                                gap: 8px;
+                            "
+                        >
+                            {% for guild in guilds %}
+                            <div class="ws-guild-card">
+                                <div
+                                    style="
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 10px;
+                                        overflow: hidden;
+                                    "
+                                >
+                                    <div class="ws-avatar">
+                                        {{ guild.name[:1] }}
+                                    </div>
+                                    <div style="min-width: 0">
+                                        <div
+                                            style="
+                                                font-size: 12px;
+                                                font-weight: 500;
+                                                color: var(--text);
+                                                white-space: nowrap;
+                                                overflow: hidden;
+                                                text-overflow: ellipsis;
+                                            "
+                                        >
+                                            {{ guild.name }}
+                                        </div>
+                                        <div
+                                            style="
+                                                font-size: 10px;
+                                                color: var(--text-dim);
+                                            "
+                                        >
+                                            ID: {{ guild.guild_id }}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div
+                                    style="
+                                        display: flex;
+                                        gap: 8px;
+                                        font-size: 10px;
+                                    "
+                                >
+                                    <span style="color: var(--text-dim)"
+                                        >{{
+                                        guild_member_count_map.get(guild.guild_id,
+                                        guild.member_count) }}</span
+                                    >
+                                    <span
+                                        style="color: var(--green)"
+                                        data-live="guild_online"
+                                        data-guild-id="{{ guild.guild_id }}"
+                                        >{{
+                                        guild_online_map.get(guild.guild_id,0)
+                                        }} online</span
+                                    >
+                                    >
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div
+                            style="
+                                text-align: center;
+                                padding: 24px 0;
+                                color: var(--text-dim);
+                                font-size: 13px;
+                            "
+                        >
+                            No guilds available.
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Live Activity -->
+                    <div class="ws-card">
+                        <span
+                            style="
+                                font-size: 12px;
+                                font-weight: 600;
+                                color: var(--text-sec);
+                                text-transform: uppercase;
+                                letter-spacing: 0.05em;
+                            "
+                            >Live Activity</span
+                        >
+                        {% if recent_logs %}
+                        <div class="ws-scroll" style="margin-top: 12px">
+                            {% for log in recent_logs %}
+                            <div class="ws-feed-item">
+                                <div class="ws-dot"></div>
+                                <div style="min-width: 0; flex: 1">
+                                    <div
+                                        style="
+                                            font-size: 12px;
+                                            font-weight: 500;
+                                            color: var(--text);
+                                        "
+                                    >
+                                        {{ log.worker.name }}
+                                    </div>
+                                    <div
+                                        style="
+                                            font-size: 10px;
+                                            color: var(--text-dim);
+                                            white-space: nowrap;
+                                            overflow: hidden;
+                                            text-overflow: ellipsis;
+                                        "
+                                    >
+                                        {{ log.reason[:60] }}
+                                    </div>
+                                    <div
+                                        style="
+                                            display: flex;
+                                            justify-content: space-between;
+                                            margin-top: 4px;
+                                        "
+                                    >
+                                        <span
+                                            style="
+                                                font-size: 10px;
+                                                color: var(--text-dim);
+                                            "
+                                            >{{ log.source }}{% if
+                                            log.guild_name %} · {{
+                                            log.guild_name }}{% endif %}</span
+                                        >
+                                        <span
+                                            style="font-size:10px;font-weight:700;{% if log.change >= 0 %}color:var(--green){% else %}color:var(--red){% endif %}"
+                                            >{{ "+" if log.change >= 0 }}{{
+                                            log.change }} pts</span
+                                        >
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div
+                            style="
+                                text-align: center;
+                                padding: 24px 0;
+                                color: var(--text-dim);
+                                font-size: 13px;
+                            "
+                        >
+                            No recent activities.
+                        </div>
+                        {% endif %} {% if most_active %}
+                        <div
+                            style="
+                                margin-top: 16px;
+                                padding-top: 16px;
+                                border-top: 1px solid var(--border);
+                            "
+                        >
+                            <span
+                                style="
+                                    font-size: 10px;
+                                    font-weight: 600;
+                                    color: var(--text-dim);
+                                    text-transform: uppercase;
+                                    letter-spacing: 0.05em;
+                                "
+                                >Most Active Users</span
+                            >
+                            <div
+                                style="
+                                    margin-top: 8px;
+                                    display: flex;
+                                    flex-direction: column;
+                                    gap: 6px;
+                                "
+                            >
+                                {% for active in most_active %}
+                                <div
+                                    style="
+                                        display: flex;
+                                        justify-content: space-between;
+                                    "
+                                >
+                                    <span
+                                        style="
+                                            font-size: 11px;
+                                            color: var(--text);
+                                        "
+                                        >{{ active.name }}</span
+                                    >
+                                    <span
+                                        style="
+                                            font-size: 11px;
+                                            font-weight: 600;
+                                            color: var(--blue);
+                                        "
+                                        >{{ active.count }}</span
+                                    >
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Leaderboard -->
+                {% if leaderboard_data %}
+                <div class="ws-card" style="margin-top: 16px">
+                    <span
+                        style="
+                            font-size: 12px;
+                            font-weight: 600;
+                            color: var(--text-sec);
+                            text-transform: uppercase;
+                            letter-spacing: 0.05em;
+                        "
+                        >🏆 Global Leaderboard</span
+                    >
+                    <div style="margin-top: 12px">
+                        <table class="ws-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 32px">#</th>
+                                    <th>Guild</th>
+                                    <th>Name</th>
+                                    <th>Role</th>
+                                    <th style="text-align: right">Score</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for entry in leaderboard_data %}
+                                <tr>
+                                    <td style="color: var(--text-dim)">
+                                        {{ loop.index }}
+                                    </td>
+                                    <td style="color: var(--text-dim)">
+                                        {{ entry.guild_name }}
+                                    </td>
+                                    <td
+                                        style="
+                                            font-weight: 500;
+                                            color: var(--text);
+                                        "
+                                    >
+                                        {{ entry.worker.name }}
+                                    </td>
+                                    <td>
+                                        <span
+                                            class="ws-tag {{ 'purple' if entry.worker.role == 'admin' else 'blue' if entry.worker.role == 'hr' else '' }}"
+                                            >{{ entry.worker.role }}</span
+                                        >
+                                    </td>
+                                    <td
+                                        style="text-align:right;font-weight:700;{% if entry.score >= 0 %}color:var(--green){% else %}color:var(--red){% endif %}"
+                                    >
+                                        {{ entry.score }} pts
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {% endif %}
+            </section>
+
+            <!-- ===== ML & SYSTEM ===== -->
+            <section id="ml" class="ws-section">
+                <div class="ws-eyebrow">System</div>
+                <h2 class="ws-title">ML Models & Integrations</h2>
+                <p class="ws-subtitle">
+                    Model status, training history, and work engine sync.
+                </p>
+
+                <div class="ws-grid-8-4">
+                    <!-- Training History -->
+                    {% if ml_status and ml_status.training_history %}
+                    <div class="ws-card">
+                        <div
+                            style="
+                                display: flex;
+                                justify-content: space-between;
+                                align-items: center;
+                                margin-bottom: 12px;
+                            "
+                        >
+                            <span
+                                style="
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: var(--text-sec);
+                                    text-transform: uppercase;
+                                    letter-spacing: 0.05em;
+                                "
+                                >Training History</span
+                            >
+                            <span
+                                style="font-size: 10px; color: var(--text-dim)"
+                                >Last {{ ml_status.training_history|length }}
+                                runs</span
+                            >
+                        </div>
+                        <div class="ws-scroll">
+                            <table class="ws-table" style="font-size: 10px">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th style="text-align: center">Anom</th>
+                                        <th style="text-align: center">Burn</th>
+                                        <th style="text-align: center">Corr</th>
+                                        <th style="text-align: center">Fore</th>
+                                        <th style="text-align: center">Fed</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for run in
+                                    ml_status.training_history|reverse %}
+                                    <tr>
+                                        <td style="color: var(--text-dim)">
+                                            {{ run.trained_at[:10] if
+                                            run.trained_at else 'N/A' }}
+                                        </td>
+                                        <td style="text-align: center">
+                                            <span
+                                                class="ws-tag {{ 'green' if run.anomaly and run.anomaly.status == 'trained' else 'red' if run.anomaly and run.anomaly.status == 'error' else '' }}"
+                                                >{{ run.anomaly.status if
+                                                run.anomaly else 'N/A' }}</span
+                                            >
+                                        </td>
+                                        <td style="text-align: center">
+                                            <span
+                                                class="ws-tag {{ 'green' if run.burnout and run.burnout.status == 'trained' else 'red' if run.burnout and run.burnout.status == 'error' else '' }}"
+                                                >{{ run.burnout.status if
+                                                run.burnout else 'N/A' }}</span
+                                            >
+                                        </td>
+                                        <td style="text-align: center">
+                                            <span
+                                                class="ws-tag {{ 'green' if run.corrector and run.corrector.status == 'trained' else 'orange' if run.corrector and run.corrector.status == 'skipped' else 'red' if run.corrector and run.corrector.status == 'error' else '' }}"
+                                                >{{ run.corrector.status if
+                                                run.corrector else 'N/A'
+                                                }}</span
+                                            >
+                                        </td>
+                                        <td style="text-align: center">
+                                            <span
+                                                class="ws-tag {{ 'blue' if run.forecast and run.forecast.guilds else 'red' if run.forecast and run.forecast.status == 'error' else '' }}"
+                                                >{{ run.forecast.guilds if
+                                                run.forecast and
+                                                run.forecast.guilds else 'N/A'
+                                                }}g</span
+                                            >
+                                        </td>
+                                        <td style="text-align: center">
+                                            <span
+                                                class="ws-tag {{ 'cyan' if run.federated and run.federated.trained else 'red' if run.federated and run.federated.status == 'error' else '' }}"
+                                                >{{ run.federated.rounds if
+                                                run.federated and
+                                                run.federated.rounds else 'N/A'
+                                                }}r</span
+                                            >
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <div
+                        style="display: flex; flex-direction: column; gap: 16px"
+                    >
+                        <!-- Corrector Loop -->
+                        {% if ml_corrector_stats and ml_corrector_stats.status
+                        == 'trained' %}
+                        <div class="ws-card">
+                            <span
+                                style="
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: var(--accent);
+                                    text-transform: uppercase;
+                                    letter-spacing: 0.05em;
+                                "
+                                >🔄 Correction Loop</span
+                            >
+                            <div class="ws-grid-2" style="margin-top: 12px">
+                                <div>
+                                    <div
+                                        style="
+                                            font-size: 10px;
+                                            color: var(--text-dim);
+                                            text-transform: uppercase;
+                                        "
+                                    >
+                                        Corrections
+                                    </div>
+                                    <div
+                                        style="
+                                            font-size: 18px;
+                                            font-weight: 800;
+                                            color: var(--text);
+                                        "
+                                    >
+                                        {{
+                                        ml_corrector_stats.get('corrections_used',0)
+                                        }}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div
+                                        style="
+                                            font-size: 10px;
+                                            color: var(--text-dim);
+                                            text-transform: uppercase;
+                                        "
+                                    >
+                                        R² Score
+                                    </div>
+                                    <div
+                                        style="
+                                            font-size: 18px;
+                                            font-weight: 800;
+                                            color: var(--accent);
+                                        "
+                                    >
+                                        {{
+                                        "%.3f"|format(ml_corrector_stats.get('r2_score',0))
+                                        }}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div
+                                        style="
+                                            font-size: 10px;
+                                            color: var(--text-dim);
+                                            text-transform: uppercase;
+                                        "
+                                    >
+                                        Accuracy
+                                    </div>
+                                    <div
+                                        style="
+                                            font-size: 18px;
+                                            font-weight: 800;
+                                            color: var(--green);
+                                        "
+                                    >
+                                        {{
+                                        "%.1f"|format(ml_corrector_stats.get('classifier_accuracy',0)*100)
+                                        }}%
+                                    </div>
+                                </div>
+                                <div>
+                                    <div
+                                        style="
+                                            font-size: 10px;
+                                            color: var(--text-dim);
+                                            text-transform: uppercase;
+                                        "
+                                    >
+                                        Features
+                                    </div>
+                                    <div
+                                        style="
+                                            font-size: 18px;
+                                            font-weight: 800;
+                                            color: var(--text-sec);
+                                        "
+                                    >
+                                        {{
+                                        ml_corrector_stats.get('n_features',0)
+                                        }}
+                                    </div>
+                                </div>
+                            </div>
+                            <p
+                                style="
+                                    font-size: 10px;
+                                    color: var(--text-dim);
+                                    margin-top: 12px;
+                                "
+                            >
+                                Model predicts score deltas from admin
+                                correction history.
+                            </p>
+                        </div>
+                        {% elif ml_corrector_stats and ml_corrector_stats.status
+                        == 'skipped' %}
+                        <div
+                            class="ws-card"
+                            style="text-align: center; padding: 24px"
+                        >
+                            <span
+                                style="
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: var(--accent);
+                                    text-transform: uppercase;
+                                    letter-spacing: 0.05em;
+                                "
+                                >🔄 Correction Loop</span
+                            >
+                            <p
+                                style="
+                                    font-size: 12px;
+                                    color: var(--text-dim);
+                                    margin-top: 8px;
+                                "
+                            >
+                                {{ ml_corrector_stats.get('reason','Waiting for
+                                more admin corrections...') }}
+                            </p>
+                        </div>
+                        {% endif %}
+
+                        <!-- Work Engine -->
+                        {% if work_recent_syncs %}
+                        <div class="ws-card">
+                            <div
+                                style="
+                                    display: flex;
+                                    justify-content: space-between;
+                                    align-items: center;
+                                    margin-bottom: 12px;
+                                "
+                            >
+                                <span
+                                    style="
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        color: var(--accent);
+                                        text-transform: uppercase;
+                                        letter-spacing: 0.05em;
+                                    "
+                                    >🔗 Work Engine</span
+                                >
+                                <span
+                                    style="
+                                        font-size: 10px;
+                                        color: var(--text-dim);
+                                    "
+                                    >{{ work_sources }} sources</span
+                                >
+                            </div>
+                            <div class="ws-scroll">
+                                <table class="ws-table" style="font-size: 10px">
+                                    <thead>
+                                        <tr>
+                                            <th>Task</th>
+                                            <th>Source</th>
+                                            <th style="text-align: center">
+                                                Status
+                                            </th>
+                                            <th style="text-align: right">
+                                                Pts
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for t in work_recent_syncs %}
+                                        <tr>
+                                            <td
+                                                style="
+                                                    color: var(--text);
+                                                    max-width: 100px;
+                                                    white-space: nowrap;
+                                                    overflow: hidden;
+                                                    text-overflow: ellipsis;
+                                                "
+                                            >
+                                                {{ t.title[:30] }}
+                                            </td>
+                                            <td>
+                                                <span
+                                                    class="ws-tag {{ 'blue' if t.source == 'jira' else 'purple' }}"
+                                                    >{{ t.source }}</span
+                                                >
+                                            </td>
+                                            <td style="text-align: center">
+                                                <span
+                                                    class="ws-tag {{ 'green' if t.status == 'completed' else 'red' if t.status == 'missed' else 'orange' }}"
+                                                    >{{ t.status }}</span
+                                                >
+                                            </td>
+                                            <td
+                                                style="text-align:right;font-weight:700;{% if t.points_awarded and t.points_awarded > 0 %}color:var(--green){% elif t.points_awarded and t.points_awarded < 0 %}color:var(--red){% else %}color:var(--text-dim){% endif %}"
+                                            >
+                                                {{ "+" if t.points_awarded and
+                                                t.points_awarded > 0 }}{{
+                                                t.points_awarded or 0 }}
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Health Drift -->
+                        {% if health_drift_detected %}
+                        <div
+                            class="ws-card"
+                            style="border-left: 3px solid var(--red)"
+                        >
+                            <span
+                                style="
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                    color: var(--red);
+                                "
+                                >⚠ Drift Detected</span
+                            >
+                            <ul
+                                style="
+                                    margin-top: 8px;
+                                    font-size: 10px;
+                                    color: var(--text-dim);
+                                    padding-left: 16px;
+                                "
+                            >
+                                {% for reason in health_drift_reasons %}
+                                <li>{{ reason }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        {% endif %}
+
+                        <!-- Retrain -->
+                        <button
+                            class="ws-btn primary"
+                            onclick="retrainModel()"
+                            style="width: 100%"
+                        >
+                            Retrain All Models
+                        </button>
+                    </div>
+                </div>
+            </section>
         </div>
-        {% endfor %}
-      </div>
-    </div>
-    {% else %}
-    <div class="card"><div class="card-b"><div class="empty-s">No staff at risk</div></div></div>
-    {% endif %}
-  </div>
-</div>
-</div>
-{% endif %}
 
-<!-- 5. ML MODELS -->
-<section id="ml" class="wrap rv section">
-  <div class="section-eyebrow">Machine learning</div>
-  <h2 class="section-title"><span class="muted">Five models</span> <span class="bold">powering decisions.</span></h2>
-  <p class="section-desc">Detection, forecasting, federated learning, and growth prediction.</p>
-</section>
+        <script>
+              // Dark chart defaults
+              const chartOpts = {
+                            responsive: true, maintainAspectRatio: false,
+                            plugins: { legend: { labels: { color: '#999', font: { family: "Cal Sans UI", size: 10 } } } },
+                            scales: {
+                              x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#999', font: { family: "Cal Sans UI", size: 9 } } },
+                              y: { grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true, ticks: { color: '#999', font: { family: "Cal Sans UI", size: 9 } } }
+                            }
+              };
 
-<div class="wrap rv" style="padding-top:16px">
-<div class="card">
-  {% set a_s = ml_status.get('anomaly',{}) %}
-  {% set b_s = ml_status.get('burnout',{}) %}
-  {% set f_s = ml_status.get('forecast',{}) %}
-  {% set fd_s = ml_status.get('federated',{}) %}
-  {% set g_s = ml_status.get('growth',{}) %}
-  <div class="ml-list">
-    <div class="ml-row">
-      <div class="ml-num">01</div>
-      <div class="ml-body"><div class="ml-name">Anomaly Detection</div><div class="ml-meta">{% if a_s.get('trained') %}Trained &middot; {{ a_s.get('n_samples',0) }} samples &middot; {{ "%.1f"|format(a_s.get('accuracy',0)) }}% acc{% else %}Insufficient data{% endif %}</div></div>
-      <div class="ml-actions">
-        {% if a_s.get('trained') %}<span class="tag tag-green">Active</span>{% else %}<span class="tag tag-muted">Idle</span>{% endif %}
-        <button onclick="retrainModel('all',this)" class="btn">Retrain</button>
-      </div>
-    </div>
-    <div class="ml-row">
-      <div class="ml-num">02</div>
-      <div class="ml-body"><div class="ml-name">Burnout Detection</div><div class="ml-meta">{% if b_s.get('trained') %}Trained &middot; {{ b_s.get('n_staff',0) }} staff &middot; {{ "%.1f"|format(b_s.get('accuracy',0)) }}% acc{% else %}Waiting for data{% endif %}</div></div>
-      <div class="ml-actions">
-        {% if b_s.get('trained') %}<span class="tag tag-purple">Active</span>{% else %}<span class="tag tag-muted">Idle</span>{% endif %}
-        <button onclick="retrainModel('all',this)" class="btn">Retrain</button>
-      </div>
-    </div>
-    <div class="ml-row">
-      <div class="ml-num">03</div>
-      <div class="ml-body"><div class="ml-name">Activity Forecast</div><div class="ml-meta">{% if f_s.get('guild_count',0) > 0 %}{{ f_s.get('guild_count',0) }} guilds &middot; Rolling predictions &middot; {{ f_s.get('accuracy_pct','N/A') }}% acc{% else %}No forecast data{% endif %}</div></div>
-      <div class="ml-actions">
-        {% if f_s.get('guild_count',0) > 0 %}<span class="tag tag-cyan">{{ f_s.get('guild_count',0) }}g</span>{% else %}<span class="tag tag-muted">No data</span>{% endif %}
-        <button onclick="retrainModel('all',this)" class="btn">Retrain</button>
-      </div>
-    </div>
-    <div class="ml-row">
-      <div class="ml-num">04</div>
-      <div class="ml-body"><div class="ml-name">Federated Learning</div><div class="ml-meta">{% if fd_s.get('trained') %}{{ fd_s.get('rounds',0) }} rounds &middot; {{ fd_s.get('num_clients',0) }} clients &middot; {{ "%.1f"|format(fd_s.get('mean_global_accuracy',0)*100) }}% global{% else %}Not yet trained{% endif %}</div></div>
-      <div class="ml-actions">
-        {% if fd_s.get('trained') %}<span class="tag tag-blue">{{ "%.1f"|format(fd_s.get('mean_global_accuracy',0)*100) }}%</span>{% else %}<span class="tag tag-muted">Untrained</span>{% endif %}
-        <button onclick="retrainModel('federated',this)" class="btn">Train</button>
-      </div>
-    </div>
-    <div class="ml-row" style="border-bottom:0">
-      <div class="ml-num">05</div>
-      <div class="ml-body"><div class="ml-name">Growth Forecast</div><div class="ml-meta">{% if g_s.get('guild_count',0) > 0 %}{{ g_s.get('guild_count',0) }} guilds with growth models{% else %}No growth data{% endif %}</div></div>
-      <div class="ml-actions">
-        {% if g_s.get('guild_count',0) > 0 %}<span class="tag tag-green">{{ g_s.get('guild_count',0) }}g</span>{% else %}<span class="tag tag-muted">No data</span>{% endif %}
-        <button onclick="retrainModel('all',this)" class="btn">Retrain</button>
-      </div>
-    </div>
-  </div>
-  {% if health_drift_detected %}
-  <div style="padding:12px 20px;font-size:11px;color:var(--red);border-top:1px solid var(--border-light);background:var(--red-bg)">
-    <strong>&#9888; Drift detected.</strong> Auto-retrain on next heartbeat.
-    {% for r in health_drift_reasons %}<div style="margin-top:2px;color:rgba(239,68,68,0.6)">&bull; {{ r }}</div>{% endfor %}
-  </div>
-  {% endif %}
-</div>
-</div>
+              // Guild Activity Comparison
+              const guildNames = {{ guild_hourly.keys()|list|tojson }};
+              const guildColors = ['#58a6ff','#3fb950','#d29922','#bc8cff','#f85149','#58a6ff'];
+              if (guildNames.length > 0) {
+                const hours = Array.from({length:24},(_,i)=>i);
+                const datasets = guildNames.map((name,i) => ({
+                  label: name,
+                  data: hours.map(h => ({{ guild_hourly|tojson }})[name] ? ({{ guild_hourly|tojson }})[name][h] || 0 : 0),
+                  borderColor: guildColors[i % guildColors.length],
+                  backgroundColor: 'transparent',
+                  tension: 0.3, pointRadius: 2
+                }));
+                new Chart(document.getElementById('compareChart'), { type: 'line', data: { labels: hours, datasets }, options: { ...chartOpts, plugins: { ...chartOpts.plugins, legend: { ...chartOpts.plugins.legend, position: 'top' } } } });
+              }
 
-<!-- 6. GUILDS -->
-{% if guilds %}
-<section id="guilds" class="wrap rv section">
-  <div class="section-eyebrow">Server registry</div>
-  <h2 class="section-title"><span class="muted">{{ total_guilds }} guilds</span> <span class="bold">under watch.</span></h2>
-  <p class="section-desc">{{ total_members_tracked }} members tracked &middot; {{ total_staff_tracked }} staff</p>
-</section>
+              // Community vs Staff
+              new Chart(document.getElementById('staffChart'), {
+                type: 'doughnut',
+                data: { labels: ['Community','Staff'], datasets: [{ data: [{{ total_messages_logged }}, {{ total_staff_tracked }}], backgroundColor: ['#58a6ff','#d29922'], borderWidth: 0 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#999', font: { family: "Cal Sans UI", size: 9 } } } } }
+              });
 
-<div class="wrap rv" style="padding-top:16px">
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
-  {% for guild in guilds %}
-  <a href="/guild/{{ guild.guild_id }}" class="g-card">
-    <div style="display:flex;align-items:center;gap:12px">
-      <div style="width:36px;height:36px;border-radius:8px;background:var(--accent-glow);display:flex;align-items:center;justify-content:center;color:var(--accent);font-size:14px;font-weight:800;flex-shrink:0">{{ guild.name[:1] }}</div>
-      <div>
-        <div class="g-card-name">{{ guild.name }}</div>
-        <div class="g-card-id">ID: {{ guild.guild_id[:12] }}</div>
-      </div>
-    </div>
-    <div class="g-card-stats">
-      <span class="g-card-stat">Members <strong>{{ guild_member_count_map.get(guild.guild_id,guild.member_count) }}</strong></span>
-      <span class="g-card-stat">Online <strong class="online" data-live="guild_online" data-guild-id="{{ guild.guild_id }}">{{ guild_online_map.get(guild.guild_id,0) }}</strong></span>
-    </div>
-  </a>
-  {% endfor %}
-</div>
-</div>
-{% endif %}
+              // Score Sources
+              const srcLabels = {{ score_sources.keys()|list|tojson }};
+              const srcData = {{ score_sources.values()|list|tojson }};
+              if (srcLabels.length > 0) {
+                new Chart(document.getElementById('sourcesChart'), {
+                  type: 'doughnut',
+                  data: { labels: srcLabels, datasets: [{ data: srcData, backgroundColor: ['#58a6ff','#3fb950','#d29922'], borderWidth: 0 }] },
+                  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#999', font: { family: "Cal Sans UI", size: 9 } } } } }
+                });
+              }
 
-<!-- 7. OPERATIONS -->
-<section id="operations" class="wrap rv section">
-  <div class="section-eyebrow">Operations</div>
-  <h2 class="section-title"><span class="muted">Moderation &amp; sync</span> <span class="bold">in real time.</span></h2>
-  <p class="section-desc">Recent activity feed, leaderboard, and work engine syncs.</p>
-</section>
+              // Hourly Activity
+              const rawHourly = {{ hourly_activity|tojson }};
+              const hourlyData = hours.map(h => rawHourly[String(h)] || 0);
+              new Chart(document.getElementById('hourlyChart'), {
+                type: 'bar',
+                data: { labels: Array.from({length:24},(_,i)=>i), datasets: [{ data: hourlyData, backgroundColor: '#58a6ff', borderWidth: 0, borderRadius: 3 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false }, ticks: { color: '#999', font: { family: "Cal Sans UI", size: 8 } } }, y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#999', font: { family: "Cal Sans UI", size: 9 } } } } }
+              });
 
-<div class="wrap rv" style="padding-top:16px">
-<div class="grid grid-2 gap-20">
-  <!-- Activity -->
-  <div class="card">
-    <div class="card-h"><span class="card-t">Recent Activity</span></div>
-    <div class="card-b">
-      {% if recent_logs %}
-      <div style="max-height:360px;overflow-y:auto">
-        {% for log in recent_logs %}
-        <div class="feed">
-          <div class="feed-dot"></div>
-          <div class="feed-b">
-            <div class="feed-n">{{ log.worker.name }}</div>
-            <div class="feed-r">{{ log.reason[:60] }}</div>
-            <div class="feed-m">{{ log.source }}{% if log.guild_name %} &middot; {{ log.guild_name }}{% endif %} <span style="font-weight:700;{% if log.change >= 0 %}color:var(--green){% else %}color:var(--red){% endif %}">{% if log.change >= 0 %}+{% endif %}{{ log.change }}</span></div>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-      {% else %}
-      <div class="empty-s">No recent activity</div>
-      {% endif %}
-    </div>
-  </div>
-  <!-- Leaderboard + Work -->
-  <div class="space-y-4">
-    {% if leaderboard_data %}
-    <div class="card">
-      <div class="card-h"><span class="card-t">Leaderboard</span><span class="text-[10px] sil">Top 10</span></div>
-      <div class="card-b" style="padding-top:8px">
-        <div class="t-scroll">
-          <table class="tbl" style="font-size:12px">
-            <thead><tr><th style="width:32px">#</th><th>Name</th><th>Role</th><th>Guild</th><th style="text-align:right">Score</th></tr></thead>
-            <tbody>
-              {% for entry in leaderboard_data[:10] %}
-              <tr>
-                <td style="color:{% if loop.index == 1 %}var(--orange){% elif loop.index == 2 %}var(--text-sec){% elif loop.index == 3 %}var(--orange){% endif %};font-weight:700">{{ loop.index }}</td>
-                <td><a href="/worker/{{ entry.worker.id }}" style="font-weight:600;color:var(--text);text-decoration:none">{{ entry.worker.name }}</a></td>
-                <td><span class="tag {{ 'tag-blue' if entry.worker.role == 'admin' else 'tag-muted' }}">{{ entry.worker.role }}</span></td>
-                <td class="sil">{{ entry.guild_name[:12] }}</td>
-                <td style="text-align:right;font-weight:700;color:{% if entry.score >= 0 %}var(--green){% else %}var(--red){% endif %}">{{ entry.score }} pts</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-    {% endif %}
-    {% if work_recent_syncs %}
-    <div class="card">
-      <div class="card-h"><span class="card-t">Work Engine</span><span class="text-[10px] sil">{{ work_sources }} sources</span></div>
-      <div class="card-b" style="padding-top:8px">
-        <div class="t-scroll">
-          <table class="tbl" style="font-size:11px">
-            <thead><tr><th>Task</th><th>Source</th><th style="text-align:center">Status</th><th style="text-align:right">Pts</th></tr></thead>
-            <tbody>
-              {% for t in work_recent_syncs[:8] %}
-              <tr>
-                <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ t.title[:30] }}</td>
-                <td><span class="tag {{ 'tag-blue' if t.source == 'jira' else 'tag-purple' }}">{{ t.source }}</span></td>
-                <td style="text-align:center"><span class="tag {{ 'tag-green' if t.status == 'completed' else 'tag-red' if t.status == 'missed' else 'tag-orange' }}">{{ t.status }}</span></td>
-                <td style="text-align:right;font-weight:600;color:{% if t.points_awarded and t.points_awarded > 0 %}var(--green){% elif t.points_awarded and t.points_awarded < 0 %}var(--red){% else %}var(--text-dim){% endif %}">{{ "+" if t.points_awarded and t.points_awarded > 0 }}{{ t.points_awarded or 0 }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-    {% endif %}
-  </div>
-</div>
-</div>
+              // Daily Volume
+              {% if daily_volume %}
+              const days = {{ daily_volume.keys()|list|tojson }};
+              const volData = {{ daily_volume.values()|list|tojson }};
+              new Chart(document.getElementById('volumeChart'), {
+                type: 'line',
+                data: { labels: days, datasets: [{ data: volData, borderColor: '#58a6ff', backgroundColor: 'rgba(201,144,61,0.08)', fill: true, tension: 0.3, pointRadius: 3, pointBackgroundColor: '#58a6ff' }] },
+                options: { ...chartOpts, plugins: { legend: { display: false } } }
+              });
+              {% endif %}
 
-<!-- 8. TRAINING & CORRECTIONS -->
-<section class="wrap rv section">
-  <div class="section-eyebrow">History</div>
-  <h2 class="section-title"><span class="muted">Training &amp; corrections</span> <span class="bold">over time.</span></h2>
-  <p class="section-desc">ML training runs and correction loop performance.</p>
-</section>
+              // Growth Chart
+              const growthLabels = Array.from({length:24},(_,i)=>i);
+              const joinsData = growthLabels.map(h => ({{ hourly_joins_7d|tojson }})[String(h)] || 0);
+              const leavesData = growthLabels.map(h => ({{ hourly_leaves_7d|tojson }})[String(h)] || 0);
+              new Chart(document.getElementById('growthChart'), {
+                type: 'line',
+                data: { labels: growthLabels, datasets: [
+                  { label: 'Joins', data: joinsData, borderColor: '#58a6ff', backgroundColor: 'transparent', tension: 0.3, pointRadius: 1 },
+                  { label: 'Leaves', data: leavesData, borderColor: '#d29922', backgroundColor: 'transparent', tension: 0.3, pointRadius: 1 }
+                ]},
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#999', font: { family: "Cal Sans UI", size: 8 } } } } }
+              });
 
-<div class="wrap rv" style="padding-top:16px;padding-bottom:40px">
-<div class="grid grid-2 gap-20">
-  {% if ml_status and ml_status.training_history %}
-  <div class="card">
-    <div class="card-h"><span class="card-t">Training History</span><span class="text-[10px] sil">{{ ml_status.training_history|length }} runs</span></div>
-    <div class="card-b" style="padding-top:8px">
-      <div class="t-scroll" style="max-height:260px;overflow-y:auto">
-        <table class="tbl" style="font-size:11px">
-          <thead><tr style="position:sticky;top:0;background:var(--bg-card)"><th>Date</th><th style="text-align:center">Anom</th><th style="text-align:center">Burn</th><th style="text-align:center">Corr</th><th style="text-align:center">Fore</th><th style="text-align:center">Fed</th></tr></thead>
-          <tbody>
-            {% for run in ml_status.training_history|reverse %}
-            <tr>
-              <td class="text-[10px] sil">{{ run.trained_at[:10] if run.trained_at else 'N/A' }}</td>
-              <td style="text-align:center">{% set anom = run.anomaly %}<span class="tag" style="font-size:9px;background:{% if anom and anom.status == 'trained' %}var(--green-bg);color:var(--green){% elif anom and anom.status == 'error' %}var(--red-bg);color:var(--red){% else %}rgba(255,255,255,0.04);color:var(--text-muted){% endif %}">{{ anom.status if anom else 'N/A' }}</span></td>
-              <td style="text-align:center">{% set burn = run.burnout %}<span class="tag" style="font-size:9px;background:{% if burn and burn.status == 'trained' %}var(--green-bg);color:var(--green){% elif burn and burn.status == 'error' %}var(--red-bg);color:var(--red){% else %}rgba(255,255,255,0.04);color:var(--text-muted){% endif %}">{{ burn.status if burn else 'N/A' }}</span></td>
-              <td style="text-align:center">{% set corr = run.corrector %}<span class="tag" style="font-size:9px;background:{% if corr and corr.status == 'trained' %}var(--green-bg);color:var(--green){% elif corr and corr.status == 'error' %}var(--red-bg);color:var(--red){% elif corr and corr.status == 'skipped' %}var(--orange-bg);color:var(--orange){% else %}rgba(255,255,255,0.04);color:var(--text-muted){% endif %}">{{ corr.status if corr else 'N/A' }}</span></td>
-              <td style="text-align:center">{% set fore = run.forecast %}<span class="tag" style="font-size:9px;background:{% if fore and fore.guilds %}var(--green-bg);color:var(--green){% elif fore and fore.status == 'error' %}var(--red-bg);color:var(--red){% else %}rgba(255,255,255,0.04);color:var(--text-muted){% endif %}">{{ fore.guilds if fore and fore.guilds else 'N/A' }}g</span></td>
-              <td style="text-align:center">{% set fed = run.federated %}<span class="tag" style="font-size:9px;background:{% if fed and fed.trained %}var(--cyan-bg);color:var(--cyan){% elif fed and fed.status == 'error' %}var(--red-bg);color:var(--red){% else %}rgba(255,255,255,0.04);color:var(--text-muted){% endif %}">{{ fed.rounds if fed and fed.rounds else 'N/A' }}r</span></td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-  {% endif %}
-  {% if ml_corrector_stats and ml_corrector_stats.status == 'trained' %}
-  <div class="card">
-    <div class="card-h"><span class="card-t">Correction Loop</span></div>
-    <div class="card-b">
-      <div class="grid grid-2 gap-16">
-        <div><div class="text-[10px] sil">Corrections</div><div class="text-xl font-extrabold" style="margin-top:2px">{{ ml_corrector_stats.get('corrections_used',0) }}</div></div>
-        <div><div class="text-[10px] sil">R&sup2; Score</div><div class="text-xl font-extrabold" style="color:var(--cyan);margin-top:2px">{{ "%.3f"|format(ml_corrector_stats.get('r2_score',0)) }}</div></div>
-        <div><div class="text-[10px] sil">Accuracy</div><div class="text-xl font-extrabold" style="color:var(--green);margin-top:2px">{{ "%.1f"|format(ml_corrector_stats.get('classifier_accuracy',0)*100) }}%</div></div>
-        <div><div class="text-[10px] sil">Features</div><div class="text-xl font-extrabold" style="margin-top:2px">{{ ml_corrector_stats.get('n_features',0) }}</div></div>
-      </div>
-      <p class="text-[10px] sil" style="margin-top:14px;line-height:1.5">Model predicts score deltas from admin correction history &mdash; precision increases with more samples.</p>
-    </div>
-  </div>
-  {% elif ml_corrector_stats and ml_corrector_stats.status == 'skipped' %}
-  <div class="card">
-    <div class="card-h"><span class="card-t">Correction Loop</span></div>
-    <div class="card-b"><div class="empty-s">{{ ml_corrector_stats.get('reason', 'Waiting for more admin corrections...') }}</div></div>
-  </div>
-  {% endif %}
-</div>
-</div>
+              // Federated Chart
+              {% if ml_status and ml_status.get('federated',{}).get('trained') and ml_status.federated.get('history',[])|length > 1 %}
+              {% set fed = ml_status.federated %}
+              {% set fed_history = fed.get('history',[]) %}
+              const fedRounds = {{ fed_history|length }};
+              const fedGlobal = [{% for h in fed_history %}{{ h.get('global_accuracy',0) }}{{ ',' if not loop.last }}{% endfor %}];
+              const fedLocal = [{% for h in fed_history %}{{ h.get('mean_local_accuracy',0) }}{{ ',' if not loop.last }}{% endfor %}];
+              new Chart(document.getElementById('fedChart'), {
+                type: 'line',
+                data: { labels: Array.from({length:fedRounds},(_,i)=>i+1), datasets: [
+                  { label: 'Global', data: fedGlobal, borderColor: '#58a6ff', backgroundColor: 'transparent', tension: 0.3, pointRadius: 2 },
+                  { label: 'Local', data: fedLocal, borderColor: '#3fb950', backgroundColor: 'transparent', tension: 0.3, pointRadius: 2 }
+                ]},
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#999', font: { family: "Cal Sans UI", size: 8 }, boxWidth: 8 } } }, scales: { x: { display: false }, y: { beginAtZero: true, max: 1, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#999', font: { family: "Cal Sans UI", size: 8 }, callback: v => (v*100)+'%' } } } }
+              });
+              {% endif %}
 
-<!-- FOOTER -->
-<div class="band-full">
-  <div class="wrap band-full-inner">
-    SkillSync &mdash; Smart Workforce Intelligence &middot; Dashboard v2
-    &middot; <a href="/">Classic view</a>
-  </div>
-</div>
+              // Feedback
+              async function feedback(type, id, action, btn) {
+            const body = type === 'anomaly' ? { anomaly_id: id, feedback: action } : { risk_id: id, feedback: action };
+            const r = await fetch('/v2/' + type + '-feedback', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+              body: JSON.stringify(body)
+            });
+                if (btn) {
+                  btn.parentElement.innerHTML = action === 'confirmed' ? '<span style="color:var(--accent);font-size:10px;">✓ Confirmed</span>' : '<span style="color:#666;font-size:10px;">✕ Dismissed</span>';
+                }
+              }
 
-</div><!-- /.page -->
+              // Retrain
+              async function retrainModel() {
+                const r = await fetch('/api/observer/ml/retrain', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+                  body: JSON.stringify({ trigger: 'manual' })
+                });
+                if (r.ok) {
+                  showToast('Retraining models...');
+                  setTimeout(() => window.location.reload(), 2000);
+                } else {
+                  showToast('Failed to trigger retrain');
+                }
+              }
 
-<!-- TOAST -->
-<div class="toast" id="toast"></div>
+              // Cursor glow
+              document.addEventListener('mousemove', e => {
+                  const glow = document.getElementById('cursor-glow');
+                  glow.style.setProperty('--cx', e.clientX + 'px');
+                  glow.style.setProperty('--cy', e.clientY + 'px');
+              });
 
-<script>
-var csrfToken = {{ csrf_token | tojson }};
-var originalFetch = window.fetch.bind(window);
-window.fetch = function(resource, options) {
-  var opts = options ? Object.assign({}, options) : {};
-  var method = (opts.method || 'GET').toUpperCase();
-  if (!['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method)) {
-    opts.headers = new Headers(opts.headers || {});
-    opts.headers.set('X-CSRF-Token', csrfToken);
-  }
-  return originalFetch(resource, opts);
-};
-document.addEventListener('DOMContentLoaded', function() {
-  document.querySelectorAll('form[method="POST"], form[method="post"]').forEach(function(form) {
-    if (form.querySelector('input[name="_csrf_token"]')) return;
-    var input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = '_csrf_token';
-    input.value = csrfToken;
-    form.appendChild(input);
-  });
-});
+              // Live polling
+              async function refreshOnlineCounts() {
+                try {
+                  const r = await fetch('/v2/_live');
+                  if (!r.ok) return;
+                  const data = await r.json();
+                  const total = data.total_members_tracked || 0;
+                  const online = data.total_online_members || 0;
+                  document.querySelectorAll('[data-live="total_members"]').forEach(el => { el.textContent = total; });
+                  document.querySelectorAll('[data-live="total_online"]').forEach(el => { el.textContent = online; });
+                  document.querySelectorAll('[data-live="guild_online"]').forEach(el => {
+                    const gid = el.dataset.guildId;
+                    el.textContent = (data.guild_online_map && data.guild_online_map[gid] != null ? data.guild_online_map[gid] : 0) + ' online';
+                  });
+                } catch {}
+              }
+              setInterval(refreshOnlineCounts, 10000);
+              refreshOnlineCounts();
 
-var font = 'Inter, sans-serif';
-var gridC = 'rgba(255,255,255,0.05)';
-var tickC = '#7a7a82';
+              // Toast
+              function showToast(msg) {
+                const t = document.createElement('div');
+                t.textContent = msg;
+                Object.assign(t.style, { position:'fixed', bottom:'24px', right:'24px', padding:'10px 16px', borderRadius:'6px', background:'#161b22', color:'#e6edf3', border:'1px solid rgba(255,255,255,0.1)', zIndex:1000, fontSize:'12px', fontWeight:500, opacity:0, transform:'translateY(10px)', transition:'all 0.3s ease' });
+                document.body.appendChild(t);
+                requestAnimationFrame(() => { t.style.opacity = '1'; t.style.transform = 'translateY(0)'; });
+                setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateY(10px)'; setTimeout(() => t.remove(), 300); }, 2500);
+              }
 
-function darkChart(ctx, cfg, opts) {
-  opts = opts || {};
-  cfg.options.responsive = true;
-  cfg.options.maintainAspectRatio = true;
-  if (cfg.options.plugins && cfg.options.plugins.legend) {
-    cfg.options.plugins.legend.labels = cfg.options.plugins.legend.labels || {};
-    cfg.options.plugins.legend.labels.color = tickC;
-    cfg.options.plugins.legend.labels.font = { family: font, size: 10 };
-  }
-  if (cfg.options.scales) {
-    [cfg.options.scales.x, cfg.options.scales.y].forEach(function(scale) {
-      if (scale) {
-        scale.ticks = scale.ticks || {};
-        scale.ticks.color = tickC; scale.ticks.font = { family: font, size: 10 };
-        scale.grid = scale.grid || {}; scale.grid.color = gridC;
-      }
-    });
-  }
-  return new Chart(ctx, cfg);
-}
-
-function showToast(msg, type) {
-  var t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className = 'toast show ' + (type === 'error' ? 'err' : type === 'success' ? 'ok' : '');
-  setTimeout(function() { t.classList.remove('show'); }, 3000);
-}
-
-function shiftHourly(data) {
-  var offset = new Date().getTimezoneOffset();
-  var oh = -offset / 60;
-  var shifted = {};
-  for (var h in data) {
-    var lh = Math.floor((parseInt(h) + oh + 24) % 24);
-    shifted[lh] = (shifted[lh] || 0) + data[h];
-  }
-  return shifted;
-}
-
-// CHARTS
-var hours = Array.from({length: 24}, function(_, i) { return i + ':00'; });
-
-{% if guild_hourly and guild_hourly.keys()|length > 0 %}
-var guildHourly = {{ guild_hourly | tojson }};
-Object.keys(guildHourly).forEach(function(gid) { guildHourly[gid] = shiftHourly(guildHourly[gid]); });
-var guildNames = {{ guild_name_map | tojson }};
-var gColors = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#a78bfa','#ec4899','#22d3ee','#84cc16'];
-darkChart(document.getElementById('compareChart'), {
-  type: 'line', data: {
-    labels: hours,
-    datasets: Object.keys(guildHourly).map(function(gid, i) { return {
-      label: guildNames[gid] || gid,
-      data: hours.map(function(_, h) { return guildHourly[gid][h] || 0; }),
-      borderColor: gColors[i % gColors.length],
-      backgroundColor: gColors[i % gColors.length] + '20',
-      fill: false, tension: 0.3, pointRadius: 2, pointHitRadius: 5,
-    };})
-  },
-  options: {
-    plugins: { legend: { position: 'bottom', labels: { font: { family: font, size: 9 }, boxWidth: 10, padding: 6 } } },
-    scales: { x: { ticks: { maxTicksLimit: 12 } }, y: { beginAtZero: true } }
-  }
-});
-{% endif %}
-
-var rawHourly = {{ hourly_activity | tojson }};
-var hourlyData = shiftHourly(rawHourly);
-darkChart(document.getElementById('hourlyChart'), {
-  type: 'bar', data: { labels: hours, datasets: [{ label: 'Messages', data: hours.map(function(_, i) { return hourlyData[i] || 0; }), backgroundColor: 'rgba(59,130,246,0.5)', borderColor: '#3b82f6', borderWidth: 1, borderRadius: 3 }] },
-  options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 6 } }, y: { beginAtZero: true } } }
-});
-
-var tMembers = {{ total_members_tracked }}, tStaff = {{ total_staff_tracked }};
-darkChart(document.getElementById('staffChart'), {
-  type: 'doughnut', data: { labels: ['Community', 'Staff'], datasets: [{ data: [Math.max(0, tMembers - tStaff), tStaff], backgroundColor: ['rgba(100,116,139,0.4)', '#3b82f6'], borderWidth: 0 }] },
-  options: { plugins: { legend: { position: 'bottom', labels: { font: { family: font, size: 9 }, boxWidth: 10 } } } }
-});
-
-var sources = {{ score_sources | tojson }};
-var sLabels = Object.keys(sources);
-darkChart(document.getElementById('sourcesChart'), {
-  type: 'doughnut', data: { labels: sLabels, datasets: [{ data: sLabels.map(function(k) { return sources[k]; }), backgroundColor: ['#3b82f6','#22c55e','#f59e0b','#a78bfa'], borderWidth: 0 }] },
-  options: { plugins: { legend: { position: 'bottom', labels: { font: { family: font, size: 9 }, boxWidth: 10 } } } }
-});
-
-{% if daily_volume %}
-var days = {{ daily_volume | tojson }};
-darkChart(document.getElementById('volumeChart'), {
-  type: 'line', data: { labels: Object.keys(days), datasets: [{ label: 'Messages', data: Object.values(days), borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.08)', fill: true, tension: 0.3, pointRadius: 3, pointBackgroundColor: '#3b82f6' }] },
-  options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { font: { size: 9 } } }, y: { beginAtZero: true } } }
-});
-{% endif %}
-
-{% if ml_status and ml_status.get('federated',{}).get('history',[])|length > 1 %}
-{% set fed_h = ml_status['federated']['history'] %}
-var fedHistory = {{ fed_h | tojson }};
-var fedRounds = fedHistory.map(function(h) { return h.round; });
-var fedGlobal = fedHistory.map(function(h) { return (h.mean_global_accuracy || 0) * 100; });
-var fedLocal = fedHistory.map(function(h) { return (h.mean_local_accuracy || 0) * 100; });
-var fedBaseline = fedHistory.map(function(h) { return (h.baseline_accuracy || 0) * 100; });
-darkChart(document.getElementById('fedChart'), {
-  type: 'line', data: {
-    labels: fedRounds,
-    datasets: [
-      { label: 'Global Acc', data: fedGlobal, borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,0.1)', fill: false, tension: 0.3, pointRadius: 4 },
-      { label: 'Local Acc', data: fedLocal, borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.1)', fill: false, tension: 0.3, pointRadius: 4 },
-      { label: 'Baseline', data: fedBaseline, borderColor: '#475569', backgroundColor: 'rgba(71,85,105,0.05)', fill: false, tension: 0, pointRadius: 3, borderDash: [4, 4] },
-    ]
-  },
-  options: {
-    plugins: { legend: { position: 'bottom', labels: { font: { family: font, size: 9 }, boxWidth: 8, padding: 4 } } },
-    scales: { x: { title: { display: true, text: 'Round', color: tickC, font: { family: font, size: 9 } } }, y: { beginAtZero: true, max: 100, ticks: { callback: function(v) { return v + '%'; } } } }
-  }
-});
-{% endif %}
-
-var hj7 = {{ hourly_joins_7d | tojson }};
-var hl7 = {{ hourly_leaves_7d | tojson }};
-darkChart(document.getElementById('growthChart'), {
-  type: 'line', data: {
-    labels: hours,
-    datasets: [
-      { label: 'Joins', data: hours.map(function(_, h) { return hj7[h] || 0; }), borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.08)', fill: true, tension: 0.3, pointRadius: 2, pointBackgroundColor: '#22c55e' },
-      { label: 'Leaves', data: hours.map(function(_, h) { return hl7[h] || 0; }), borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.08)', fill: true, tension: 0.3, pointRadius: 2, pointBackgroundColor: '#ef4444' }
-    ]
-  },
-  options: { plugins: { legend: { position: 'bottom', labels: { font: { family: font, size: 9 }, boxWidth: 8, padding: 4 } } }, scales: { x: { ticks: { maxTicksLimit: 6 } }, y: { beginAtZero: true } } }
-});
-
-// FEEDBACK
-async function feedback(type, id, verdict, btn) {
-  var orig = btn.innerHTML;
-  btn.innerHTML = '&#8987;';
-  btn.disabled = true;
-  try {
-    var url = type === 'anomaly' ? '/v2/ml/anomaly-feedback' : '/v2/ml/burnout-feedback';
-    var key = type === 'anomaly' ? 'anomaly_id' : 'risk_id';
-    var r = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ [key]: id, feedback: verdict }),
-    });
-    var data = await r.json();
-    if (data.status === 'ok') {
-      var cell = btn.closest('.feedback-cell');
-      cell.innerHTML = verdict === 'confirmed'
-        ? '<span style="font-size:11px;color:#22c55e;font-weight:600">&#10003;</span>'
-        : '<span style="font-size:11px;color:#64748b;font-weight:600">&#10005;</span>';
-    } else {
-      btn.innerHTML = '&#10007;';
-      setTimeout(function() { btn.innerHTML = orig; btn.disabled = false; }, 2000);
-    }
-  } catch(e) {
-    btn.innerHTML = '&#10007;';
-    setTimeout(function() { btn.innerHTML = orig; btn.disabled = false; }, 2000);
-  }
-}
-
-// LIVE POLLING
-async function refreshOnlineCounts() {
-  try {
-    var r = await fetch('/v2/_live');
-    if (!r.ok) return;
-    var data = await r.json();
-    var total = data.total_members_tracked || 0;
-    var online = data.total_online_members || 0;
-    var pct = total > 0 ? (online / total * 100).toFixed(0) : '0';
-    document.querySelectorAll('[data-live="total_members"]').forEach(function(el) { el.textContent = total; });
-    document.querySelectorAll('[data-live="total_online_pct"]').forEach(function(el) { el.textContent = pct; });
-    document.querySelectorAll('[data-live="guild_online"]').forEach(function(el) {
-      el.textContent = (data.guild_online_map && data.guild_online_map[el.dataset.guildId] != null ? data.guild_online_map[el.dataset.guildId] : 0);
-    });
-  } catch(e) {}
-}
-setInterval(refreshOnlineCounts, 10000);
-refreshOnlineCounts();
-
-// RETRAIN
-async function retrainModel(model, btn) {
-  var orig = btn.innerHTML;
-  btn.innerHTML = '&#8987;';
-  btn.disabled = true;
-  try {
-    var url, payload;
-    if (model === 'federated') {
-      url = '/v2/ml/federated-train';
-      payload = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days: 30 }) };
-    } else {
-      url = '/v2/ml/retrain';
-      payload = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trigger: 'manual' }) };
-    }
-    var r = await fetch(url, payload);
-    var data = await r.json();
-    if (model === 'all') { Object.keys(data).forEach(function(k) { if (k !== 'trained_at') location.reload(); }); }
-    location.reload();
-  } catch(e) {
-    btn.innerHTML = '&#10007;';
-    setTimeout(function() { btn.innerHTML = orig; btn.disabled = false; }, 2000);
-  }
-}
-
-// COUNTER ANIMATION
-document.addEventListener('DOMContentLoaded', function() {
-  var counters = document.querySelectorAll('.count-up');
-  if (!counters.length) return;
-  var obs = new IntersectionObserver(function(entries) {
-    entries.forEach(function(entry) {
-      if (!entry.isIntersecting) return;
-      var el = entry.target;
-      var target = parseFloat(el.dataset.target || el.textContent.replace(/[^0-9.-]/g, ''));
-      var suffix = el.dataset.suffix || '';
-      var duration = 900;
-      var start = performance.now();
-      function update(now) {
-        var p = Math.min((now - start) / duration, 1);
-        var eased = 1 - Math.pow(1 - p, 3);
-        el.textContent = (target * eased).toFixed(target % 1 === 0 ? 0 : 1) + suffix;
-        if (p < 1) requestAnimationFrame(update);
-      }
-      requestAnimationFrame(update);
-      obs.unobserve(el);
-    });
-  }, { threshold: 0.4 });
-  counters.forEach(function(c) { obs.observe(c); });
-});
-
-// REVEAL
-document.addEventListener('DOMContentLoaded', function() {
-  var els = document.querySelectorAll('.rv');
-  if (!els.length || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    els.forEach(function(el) { el.classList.add('in'); });
-    return;
-  }
-  var ro = new IntersectionObserver(function(entries) {
-    entries.forEach(function(entry) {
-      if (entry.isIntersecting) { entry.target.classList.add('in'); ro.unobserve(entry.target); }
-    });
-  }, { threshold: 0.06 });
-  els.forEach(function(el) { ro.observe(el); });
-});
-</script>
-</body>
+              // Smooth scroll nav
+              document.querySelectorAll('.ws-nav-link').forEach(link => {
+                link.addEventListener('click', e => {
+                  e.preventDefault();
+                  document.querySelectorAll('.ws-nav-link').forEach(l => l.classList.remove('active'));
+                  link.classList.add('active');
+                  const target = document.querySelector(link.getAttribute('href'));
+                  if (target) target.scrollIntoView({ behavior: 'smooth' });
+                });
+              });
+        </script>
+    </body>
 </html>
