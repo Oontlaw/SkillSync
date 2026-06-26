@@ -825,9 +825,37 @@ def workspace_settings_regen_key():
 @workspace_bp.route("/settings/sync", methods=["POST"])
 @ws_admin_required
 def workspace_settings_sync():
+    """Trigger a Jira poll and sync for this org using org-level credentials."""
     try:
-        return jsonify(
-            {"ok": True, "message": "Sync triggered — bot will poll Jira on next cycle"}
-        )
+        from work_engine.connector_jira import poll_and_sync_for_org
+
+        org_id = session["ws_org_id"]
+        org = db.session.get(Organisation, org_id)
+        if not org:
+            return jsonify({"error": "Organisation not found"}), 404
+        result = poll_and_sync_for_org(org)
+        return jsonify({"ok": True, **result})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@workspace_bp.route("/workers/<int:worker_id>/burnout")
+@ws_admin_required
+def workspace_worker_burnout(worker_id):
+    """Return work burnout risk for a worker (task-data only)."""
+    from ml.work_anomaly import detect_work_burnout
+
+    org_id = session["ws_org_id"]
+    result = detect_work_burnout(worker_id, org_id)
+    return jsonify(result)
+
+
+@workspace_bp.route("/scan/anomalies", methods=["POST"])
+@ws_admin_required
+def workspace_scan_anomalies():
+    """Trigger a work anomaly scan for this org."""
+    from ml.work_anomaly import run_org_scan
+
+    org_id = session["ws_org_id"]
+    results = run_org_scan(org_id)
+    return jsonify({"ok": True, "anomalies": results})
