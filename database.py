@@ -370,6 +370,7 @@ class PredictionLog(db.Model):
     prediction_time = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     outcome_time = db.Column(db.DateTime, nullable=True)
     was_correct = db.Column(db.Boolean, nullable=True)
+    hour_error_history = db.Column(db.JSON, nullable=True)
 
     def __repr__(self):
         resolved = "resolved" if self.was_correct is not None else "pending"
