@@ -103,3 +103,4 @@ simple_restart.ps1
 start_bot.bat
 start_flask.bat
 v2_start.sh
+nul

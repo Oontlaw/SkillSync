@@ -1,11 +1,17 @@
 from datetime import datetime, timezone
+
 from bot_core.api_client import api_post
-from bot_core.logging import log
 from bot_core.config import (
-    MAX_BUFFER_SIZE, MESSAGE_BUFFER_LIMIT, PRESENCE_BUFFER_LIMIT,
-    JOIN_BUFFER_LIMIT, JOIN_LEAVE_BUFFER_LIMIT, MEMBER_PRESENCE_BUFFER_LIMIT,
-    MENTION_BUFFER_LIMIT, VOICE_BUFFER_LIMIT,
+    JOIN_BUFFER_LIMIT,
+    JOIN_LEAVE_BUFFER_LIMIT,
+    MAX_BUFFER_SIZE,
+    MEMBER_PRESENCE_BUFFER_LIMIT,
+    MENTION_BUFFER_LIMIT,
+    MESSAGE_BUFFER_LIMIT,
+    PRESENCE_BUFFER_LIMIT,
+    VOICE_BUFFER_LIMIT,
 )
+from bot_core.logging import log
 
 # ── Prefix cache: { guild_id: [prefixes] } ──
 prefix_cache = {}
@@ -21,13 +27,16 @@ voice_buffer = []
 heartbeat_channel_id = None
 bot_start_time = None
 
+
 def set_heartbeat_channel(channel_id):
     global heartbeat_channel_id
     heartbeat_channel_id = channel_id
 
+
 def set_bot_start_time(t):
     global bot_start_time
     bot_start_time = t
+
 
 # ── Active @everyone/@here pings: { guild_id: {...} } ──
 active_pings = {}
@@ -39,9 +48,11 @@ pending_timeouts = {}
 # ── AutoMod alert channels: { guild_id: { channel_id: [rule_name, ...] } } ──
 automod_alert_channels = {}
 
+
 def set_automod_alert_channels(channels):
     global automod_alert_channels
     automod_alert_channels = channels
+
 
 # ── Staff activity proximity ──
 last_staff_activity = {}
@@ -51,14 +62,18 @@ last_staff_activity = {}
 # Flushed to API as a simple count to update GuildInfo.online_count.
 online_members = {}  # dict[str, set[int]]
 
+
 def track_online(guild_id: str, member_id: int):
     online_members.setdefault(guild_id, set()).add(member_id)
+
 
 def track_offline(guild_id: str, member_id: int):
     online_members.get(guild_id, set()).discard(member_id)
 
+
 def seed_online_set(guild_id: str, member_ids: list):
     online_members[guild_id] = set(member_ids)
+
 
 # ── Behavioral message buffer ──
 message_buffer = []
@@ -83,32 +98,39 @@ mention_buffer = []
 ml_retrain_counter = 0
 forecast_counter = 0
 
+
 def set_ml_retrain_counter(val):
     global ml_retrain_counter
     ml_retrain_counter = val
+
 
 def inc_ml_retrain_counter():
     global ml_retrain_counter
     ml_retrain_counter += 1
     return ml_retrain_counter
 
+
 def inc_forecast_counter():
     global forecast_counter
     forecast_counter += 1
     return forecast_counter
 
+
 def reset_forecast_counter():
     global forecast_counter
     forecast_counter = 0
+
 
 # ── Retrain-on-correction flag ──
 _correction_retrain_needed = False
 _correction_retrain_count = 0
 
+
 def request_retrain():
     """Signal that a correction-feedback retrain is needed (called after admin correction)."""
     global _correction_retrain_needed
     _correction_retrain_needed = True
+
 
 def consume_retrain_request():
     """Check and clear the retrain flag. Returns True if retrain was requested."""
@@ -127,11 +149,14 @@ async def flush_message_buffer():
         return
     batch = message_buffer[:]
     try:
-        await api_post('/observer/messages', batch)
-        message_buffer = []
-        log(f'FLUSHED {len(batch)} messages to behavioral log')
+        result = await api_post("/observer/messages", batch)
+        if result is not None:
+            message_buffer = []
+            log(f"FLUSHED {len(batch)} messages to behavioral log")
+        else:
+            log(f"FLUSH FAILED {len(batch)} messages (API returned None)")
     except Exception as e:
-        log(f'FLUSH FAILED {len(batch)} messages: {e}')
+        log(f"FLUSH FAILED {len(batch)} messages: {e}")
         # Keep batch in buffer for retry
 
 
@@ -142,11 +167,14 @@ async def flush_presence_buffer():
         return
     batch = presence_buffer[:]
     try:
-        await api_post('/observer/activity', {'batch': True, 'updates': batch})
-        presence_buffer = []
-        log(f'FLUSHED {len(batch)} presence updates')
+        result = await api_post("/observer/activity", {"batch": True, "updates": batch})
+        if result is not None:
+            presence_buffer = []
+            log(f"FLUSHED {len(batch)} presence updates")
+        else:
+            log(f"FLUSH FAILED {len(batch)} presence updates (API returned None)")
     except Exception as e:
-        log(f'FLUSH FAILED {len(batch)} presence updates: {e}')
+        log(f"FLUSH FAILED {len(batch)} presence updates: {e}")
         # Keep batch in buffer for retry
 
 
@@ -157,11 +185,16 @@ async def flush_voice_buffer():
         return
     batch = voice_buffer[:]
     try:
-        await api_post('/observer/voice-activity', {'batch': True, 'sessions': batch})
-        voice_buffer = []
-        log(f'FLUSHED {len(batch)} voice sessions')
+        result = await api_post(
+            "/observer/voice-activity", {"batch": True, "sessions": batch}
+        )
+        if result is not None:
+            voice_buffer = []
+            log(f"FLUSHED {len(batch)} voice sessions")
+        else:
+            log(f"FLUSH FAILED {len(batch)} voice sessions (API returned None)")
     except Exception as e:
-        log(f'FLUSH FAILED {len(batch)} voice sessions: {e}')
+        log(f"FLUSH FAILED {len(batch)} voice sessions: {e}")
         # Keep batch in buffer for retry
 
 
@@ -172,11 +205,14 @@ async def flush_mention_buffer():
         return
     batch = mention_buffer[:]
     try:
-        await api_post('/observer/mentions', batch)
-        mention_buffer = []
-        log(f'FLUSHED {len(batch)} mentions')
+        result = await api_post("/observer/mentions", batch)
+        if result is not None:
+            mention_buffer = []
+            log(f"FLUSHED {len(batch)} mentions")
+        else:
+            log(f"FLUSH FAILED {len(batch)} mentions (API returned None)")
     except Exception as e:
-        log(f'FLUSH FAILED {len(batch)} mentions: {e}')
+        log(f"FLUSH FAILED {len(batch)} mentions: {e}")
         # Keep batch in buffer for retry
 
 
@@ -187,11 +223,14 @@ async def flush_join_buffer():
         return
     batch = join_buffer[:]
     try:
-        await api_post('/observer/activity', {'batch': True, 'joins': batch})
-        join_buffer = []
-        log(f'FLUSHED {len(batch)} joins')
+        result = await api_post("/observer/activity", {"batch": True, "joins": batch})
+        if result is not None:
+            join_buffer = []
+            log(f"FLUSHED {len(batch)} joins")
+        else:
+            log(f"FLUSH FAILED {len(batch)} joins (API returned None)")
     except Exception as e:
-        log(f'FLUSH FAILED {len(batch)} joins: {e}')
+        log(f"FLUSH FAILED {len(batch)} joins: {e}")
         # Keep batch in buffer for retry
 
 
@@ -202,11 +241,16 @@ async def flush_member_presence_buffer():
         return
     batch = member_presence_buffer[:]
     try:
-        await api_post('/observer/presence', {'updates': batch})
-        member_presence_buffer = []
-        log(f'FLUSHED {len(batch)} member presence updates')
+        result = await api_post("/observer/presence", {"updates": batch})
+        if result is not None:
+            member_presence_buffer = []
+            log(f"FLUSHED {len(batch)} member presence updates")
+        else:
+            log(
+                f"FLUSH FAILED {len(batch)} member presence updates (API returned None)"
+            )
     except Exception as e:
-        log(f'FLUSH FAILED {len(batch)} member presence updates: {e}')
+        log(f"FLUSH FAILED {len(batch)} member presence updates: {e}")
         # Keep batch in buffer for retry
 
 
@@ -218,11 +262,14 @@ async def flush_online_count():
     for guild_id, members in list(online_members.items()):
         payload[guild_id] = len(members)
     try:
-        await api_post('/observer/online-count', payload)
-        log(f'FLUSHED online counts for {len(payload)} guilds: {payload}')
+        result = await api_post("/observer/online-count", payload)
+        if result is not None:
+            log(f"FLUSHED online counts for {len(payload)} guilds: {payload}")
+        else:
+            log(f"FLUSH FAILED online counts (API returned None)")
     except Exception as e:
-        log(f'FLUSH FAILED online counts: {e}')
-        # Keep payload in buffer for retry
+        log(f"FLUSH FAILED online counts: {e}")
+        # Keep online_members intact for retry
 
 
 async def flush_join_leave_buffer():
@@ -232,9 +279,14 @@ async def flush_join_leave_buffer():
         return
     batch = join_leave_buffer[:]
     try:
-        await api_post('/observer/join-leave', {'batch': True, 'events': batch})
-        join_leave_buffer = []
-        log(f'FLUSHED {len(batch)} join/leave events')
+        result = await api_post(
+            "/observer/join-leave", {"batch": True, "events": batch}
+        )
+        if result is not None:
+            join_leave_buffer = []
+            log(f"FLUSHED {len(batch)} join/leave events")
+        else:
+            log(f"FLUSH FAILED {len(batch)} join/leave events (API returned None)")
     except Exception as e:
-        log(f'FLUSH FAILED {len(batch)} join/leave events: {e}')
+        log(f"FLUSH FAILED {len(batch)} join/leave events: {e}")
         # Keep batch in buffer for retry

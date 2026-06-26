@@ -831,33 +831,3 @@ def workspace_settings_sync():
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-# ---------------------------------------------------------------------------
-# Magic login (development helper — kept as-is)
-# ---------------------------------------------------------------------------
-
-
-@workspace_bp.route("/magic-login")
-def magic_login():
-    slug = request.args.get("slug", "").strip()
-    email = request.args.get("email", "").strip().lower()
-    if not slug or not email:
-        return jsonify({"error": "slug and email required"}), 400
-    org = Organisation.query.filter_by(slug=slug, is_active=True).first()
-    if not org:
-        return jsonify({"error": "Organisation not found"}), 404
-    member = OrgMember.query.filter_by(
-        org_id=org.id, email=email, is_active=True
-    ).first()
-    if not member:
-        return jsonify({"error": "Member not found"}), 404
-    member.last_login = datetime.utcnow()
-    db.session.commit()
-    session["ws_org_id"] = org.id
-    session["ws_member_id"] = member.id
-    session["ws_member_role"] = member.role
-    session["ws_member_name"] = member.name
-    session["ws_org_name"] = org.name
-    session["ws_org_slug"] = org.slug
-    return redirect(url_for("workspace.workspace_dashboard"))

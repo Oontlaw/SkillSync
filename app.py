@@ -46,7 +46,10 @@ def inject_csrf_token():
 
 
 with app.app_context():
-    if os.path.isdir(migrate.directory):
+    if os.getenv("FLASK_SKIP_MIGRATIONS") == "1":
+        db.create_all()
+        print("[OK] Database tables created (test mode).")
+    elif os.path.isdir(migrate.directory):
         from flask_migrate import upgrade
 
         upgrade()
