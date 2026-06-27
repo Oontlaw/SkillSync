@@ -1,0 +1,196 @@
+{% extends "workspace_base.html" %}
+{% block title %}{{ summary.worker.name }} — Summary — {{ org_name }}{% endblock %}
+{% block content %}
+<div class="ws-page">
+  <div class="ws-wrap">
+    <!-- Header -->
+    <div class="ws-section ws-flex-between mb-24">
+      <div>
+        <div class="ws-eyebrow">
+          <a href="{{ url_for('workspace.workspace_workers') }}" style="color:var(--text-muted);text-decoration:none">Workers</a>
+          <span style="margin:0 6px;color:var(--text-muted)">›</span>
+          <a href="{{ url_for('workspace.workspace_worker_detail', worker_id=summary.worker.id) }}" style="color:var(--text-muted);text-decoration:none">{{ summary.worker.name }}</a>
+          <span style="margin:0 6px;color:var(--text-muted)">›</span>
+          <span>Summary</span>
+       </span> </div>
+        <div class="ws-title">{{ summary.worker.name }}</div>
+        <div class="ws-subtitle">{{ summary.period }} performance</div>
+        {% if summary.health %}
+        <div style="margin-top:8px">
+          {% if summary.health == 'green' %}
+          <span class="ws-tag ws-tag-green">🟢 On Track</span>
+          {% elif summary.health == 'yellow' %}
+          <span class="ws-tag ws-tag-orange">🟡 Needs Attention</span>
+          {% elif summary.health == 'red' %}
+          <span class="ws-tag ws-tag-red">🔴 At Risk</span>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+      <div>
+        <a href="{{ url_for('workspace.workspace_worker_detail', worker_id=summary.worker.id) }}" class="ws-btn ws-btn-sm">← Back to Detail</a>
+      </div>
+    </div>
+
+    <!-- Task Performance Card -->
+    <div class="ws-card mb-16">
+      <div class="ws-card-h">
+        <span class="ws-card-t">Task Performance</span>
+        <span style="font-size:10px;color:var(--text-muted)">{{ summary.period }}</span>
+      </div>
+      <div class="ws-card-b">
+        <div class="ws-grid-4" style="gap:12px;margin-bottom:16px">
+          <div style="background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border);text-align:center">
+            <div style="font-size:9px;color:var(--text-muted);margin-bottom:2px">Total Tasks</div>
+            <div style="font-size:24px;font-weight:800">{{ summary.tasks.total }}</div>
+          </div>
+          <div style="background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border);text-align:center">
+            <div style="font-size:9px;color:var(--text-muted);margin-bottom:2px">Completed</div>
+            <div style="font-size:24px;font-weight:800;color:var(--green)">{{ summary.tasks.completed }}</div>
+          </div>
+          <div style="background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border);text-align:center">
+            <div style="font-size:9px;color:var(--text-muted);margin-bottom:2px">Missed</div>
+            <div style="font-size:24px;font-weight:800;color:{% if summary.tasks.missed > 0 %}var(--red){% else %}var(--text-muted){% endif %}">{{ summary.tasks.missed }}</div>
+          </div>
+          <div style="background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border);text-align:center">
+            <div style="font-size:9px;color:var(--text-muted);margin-bottom:2px">Completion Rate</div>
+            <div style="font-size:24px;font-weight:800;{% if summary.tasks.completion_rate >= 80 %}color:var(--green){% elif summary.tasks.completion_rate >= 50 %}color:var(--orange){% else %}color:var(--red){% endif %}">{{ summary.tasks.completion_rate }}%</div>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">On-Time Rate</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="flex:1;height:8px;background:var(--border);border-radius:4px;overflow:hidden">
+              <div style="height:100%;width:{{ summary.tasks.on_time_rate }}%;background:{% if summary.tasks.on_time_rate >= 80 %}var(--green){% elif summary.tasks.on_time_rate >= 50 %}var(--orange){% else %}var(--red){% endif %};border-radius:4px;transition:width 0.3s"></div>
+            </div>
+            <span style="font-size:12px;font-weight:700;color:var(--text-sec)">{{ summary.tasks.on_time_rate }}%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Score Trajectory Card -->
+    <div class="ws-card mb-16">
+      <div class="ws-card-h">
+        <span class="ws-card-t">Score Trajectory</span>
+        <span style="font-size:10px;color:var(--text-muted)">4-week breakdown</span>
+      </div>
+      <div class="ws-card-b">
+        <!-- Mini bar chart using CSS -->
+        <div style="display:flex;align-items:flex-end;gap:8px;height:120px;padding:0 4px 24px 4px;position:relative;margin-bottom:12px">
+          <!-- Zero line -->
+          <div style="position:absolute;left:0;right:0;top:50%;height:1px;background:var(--border);opacity:0.4;pointer-events:none"></div>
+          {% for w in summary.score.weekly %}
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;height:100%;justify-content:flex-end">
+            {% set bar_h = w.score|abs %}
+            {% if bar_h > 0 %}
+            <div style="width:100%;max-width:48px;height:{{ (bar_h / 30 * 100)|round|int }}px;max-height:60px;background:{% if w.score >= 0 %}var(--green){% else %}var(--red){% endif %};border-radius:3px 3px 0 0;opacity:0.8;min-height:4px;transition:height 0.3s"></div>
+            {% else %}
+            <div style="width:100%;max-width:48px;height:2px;background:var(--text-muted);border-radius:1px"></div>
+            {% endif %}
+            <div style="font-size:9px;color:var(--text-muted);margin-top:4px">{{ w.week }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        <div style="display:flex;gap:16px;font-size:12px">
+          <div>
+            <span style="color:var(--text-muted)">Last 7 days: </span>
+            <span style="font-weight:700;{% if summary.score.total_7d >= 0 %}color:var(--green){% else %}color:var(--red){% endif %}">{{ "%+.1f"|format(summary.score.total_7d) }} pts</span>
+          </div>
+          <div>
+            <span style="color:var(--text-muted)">Last 30 days: </span>
+            <span style="font-weight:700;{% if summary.score.total_30d >= 0 %}color:var(--green){% else %}color:var(--red){% endif %}">{{ "%+.1f"|format(summary.score.total_30d) }} pts</span>
+          </div>
+          <div>
+            <span style="color:var(--text-muted)">Trend: </span>
+            {% if summary.score.trend == 'improving' %}
+            <span style="color:var(--green)">↑ Improving</span>
+            {% elif summary.score.trend == 'declining' %}
+            <span style="color:var(--red)">↓ Declining</span>
+            {% else %}
+            <span style="color:var(--text-muted)">→ Stable</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Points Breakdown Card -->
+    {% if summary.score.by_source %}
+    <div class="ws-card mb-16">
+      <div class="ws-card-h">
+        <span class="ws-card-t">Points Breakdown</span>
+        <span style="font-size:10px;color:var(--text-muted)">by source</span>
+      </div>
+      <div class="ws-card-b np">
+        <div class="ws-tbl-wrap">
+          <table class="ws-tbl">
+            <thead>
+              <tr>
+                <th></th>Source</th>
+                <th style="text-align:right">Points</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for src, pts in summary.score.by_source.items() %}
+              <tr>
+                <td>{{ src }}</td>
+                <td style="text-align:right;font-weight:700;{% if pts >= 0 %}color:var(--green){% else %}color:var(--red){% endif %}">{{ "%+.1f"|format(pts) }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Behavioural Signals Card -->
+    <div class="ws-card mb-16">
+      <div class="ws-card-h">
+        <span class="ws-card-t">Behavioural Signals</span>
+        <span style="font-size:10px;color:var(--text-muted)">ML-driven</span>
+      </div>
+      <div class="ws-card-b">
+        {% if summary.anomaly_count is defined or summary.burnout_score is defined or summary.corrections is defined %}
+        <div class="ws-grid-3" style="gap:12px">
+          <div style="background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)">
+            <div style="font-size:9px;color:var(--text-muted);margin-bottom:4px">Anomalies (30d)</div>
+            <div style="font-size:20px;font-weight:800;{% if summary.anomaly_count > 2 %}color:var(--red){% elif summary.anomaly_count > 0 %}color:var(--orange){% else %}color:var(--text-muted){% endif %}">{{ summary.anomaly_count }}</div>
+          </div>
+          <div style="background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)">
+            <div style="font-size:9px;color:var(--text-muted);margin-bottom:4px">Burnout Score</div>
+            <div style="font-size:20px;font-weight:800;{% if summary.burnout_score and summary.burnout_score > 60 %}color:var(--red){% elif summary.burnout_score and summary.burnout_score > 30 %}color:var(--orange){% else %}color:var(--text-muted){% endif %}">{{ summary.burnout_score|default('—', true) }}</div>
+          </div>
+          <div style="background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)">
+            <div style="font-size:9px;color:var(--text-muted);margin-bottom:4px">Admin Corrections (30d)</div>
+            <div style="font-size:20px;font-weight:800;{% if summary.corrections > 2 %}color:var(--red){% elif summary.corrections > 0 %}color:var(--orange){% else %}color:var(--text-muted){% endif %}">{{ summary.corrections }}</div>
+          </div>
+        </div>
+        {% else %}
+        <div style="color:var(--text-muted);font-size:12px">Community signals not shared for this worker.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Export Button -->
+    <div style="text-align:center;padding:16px 0 32px">
+      <button onclick="window.print()" class="ws-btn" style="padding:8px 24px">🖨️ Print / Export</button>
+    </div>
+  </div>
+</div>
+
+<style>
+@media print {
+  nav.ws-nav, .ws-nav, .ws-nav-links, .ws-nav-right, .ws-nav-user, .ws-nav-role, .ws-nav-brand { display: none !important; }
+  body { background: #fff !important; }
+  .ws-page, .ws-wrap, .ws-card, .ws-card-b { background: #fff !important; border: none !important; box-shadow: none !important; }
+  .ws-card-h { border-bottom: 1px solid #ddd !important; }
+  .ws-card-t { color: #000 !important; }
+  .ws-title, .ws-subtitle, .ws-eyebrow, .ws-label { color: #000 !important; }
+  button { display: none !important; }
+  [style*="background:var(--bg)"] { background: #f5f5f5 !important; border-color: #ddd !important; }
+  div[style*="border:1px solid var(--border)"] { border-color: #ddd !important; }
+}
+</style>
+{% endblock %}

@@ -1,0 +1,90 @@
+{% extends "workspace_base.html" %}
+{% block title %}Team Health — {{ org_name }}{% endblock %}
+{% block content %}
+<div class="ws-page">
+  <div class="ws-wrap">
+    <!-- Header -->
+    <div class="ws-section ws-flex-between mb-24">
+      <div>
+        <div class="ws-eyebrow">Workspace</div>
+        <div class="ws-title">Team Health</div>
+        <div class="ws-subtitle">{{ org_name }} — traffic-light health overview</div>
+      </div>
+    </div>
+
+    <!-- Summary Bar -->
+    <div class="ws-grid-3" style="gap:12px;margin-bottom:24px">
+      <div style="background:rgba(var(--green-rgb,34,197,94),0.08);padding:16px;border-radius:8px;border:1px solid rgba(var(--green-rgb,34,197,94),0.2);text-align:center">
+        <div style="font-size:28px;font-weight:800;color:var(--green)">{{ summary.green }}</div>
+        <div style="font-size:11px;color:var(--green);margin-top:2px">🟢 On Track</div>
+      </div>
+      <div style="background:rgba(var(--orange-rgb,255,159,67),0.08);padding:16px;border-radius:8px;border:1px solid rgba(var(--orange-rgb,255,159,67),0.2);text-align:center">
+        <div style="font-size:28px;font-weight:800;color:var(--orange)">{{ summary.yellow }}</div>
+        <div style="font-size:11px;color:var(--orange);margin-top:2px">🟡 Needs Attention</div>
+      </div>
+      <div style="background:rgba(var(--red-rgb,239,68,68),0.08);padding:16px;border-radius:8px;border:1px solid rgba(var(--red-rgb,239,68,68),0.2);text-align:center">
+        <div style="font-size:28px;font-weight:800;color:var(--red)">{{ summary.red }}</div>
+        <div style="font-size:11px;color:var(--red);margin-top:2px">🔴 At Risk</div>
+      </div>
+    </div>
+
+    <!-- Team Cards -->
+    {% if team %}
+    <div style="display:flex;flex-direction:column;gap:8px">
+      {% for member in team %}
+      <div class="ws-card" style="padding:0;border-left:4px solid {% if member.health == 'red' %}var(--red){% elif member.health == 'yellow' %}var(--orange){% else %}var(--green){% endif %};margin-bottom:0">
+        <div style="display:flex;align-items:center;gap:16px;padding:16px">
+          <!-- Health Dot -->
+          <div style="width:12px;height:12px;border-radius:50%;background:{% if member.health == 'red' %}var(--red){% elif member.health == 'yellow' %}var(--orange){% else %}var(--green){% endif %};flex-shrink:0"></div>
+
+          <!-- Worker Info -->
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:14px;color:var(--text)">{{ member.worker.name }}</div>
+            <div style="font-size:11px;color:var(--text-muted)">
+              {% if member.health == 'red' %}At Risk{% elif member.health == 'yellow' %}Needs Attention{% else %}On Track{% endif %}
+              {% if not member.has_community_data %}<span style="margin-left:8px">🔒 No community signals</span>{% endif %}
+            </div>
+          </div>
+
+          <!-- Stats -->
+          <div style="display:flex;gap:16px;align-items:center">
+            <div style="text-align:center;min-width:60px">
+              <div style="font-size:9px;color:var(--text-muted)">Score 30d</div>
+              <div style="font-size:16px;font-weight:700;{% if member.score_30d > 0 %}color:var(--green){% elif member.score_30d < 0 %}color:var(--red){% else %}color:var(--text-muted){% endif %}">{{ "%+.1f"|format(member.score_30d) }}</div>
+            </div>
+            <div style="text-align:center;min-width:60px">
+              <div style="font-size:9px;color:var(--text-muted)">Completion</div>
+              <div style="font-size:16px;font-weight:700;{% if member.completion_rate >= 80 %}color:var(--green){% elif member.completion_rate >= 50 %}color:var(--orange){% else %}color:var(--red){% endif %}">{{ member.completion_rate }}%</div>
+            </div>
+            <div style="text-align:center;min-width:40px">
+              <div style="font-size:9px;color:var(--text-muted)">Missed</div>
+              <div style="font-size:16px;font-weight:700;{% if member.tasks_missed > 0 %}color:var(--red){% else %}color:var(--text-muted){% endif %}">{{ member.tasks_missed }}</div>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <a href="{{ url_for('workspace.workspace_worker_summary', worker_id=member.worker_id) }}" class="ws-btn ws-btn-sm">Summary</a>
+            <a href="{{ url_for('workspace.workspace_worker_detail', worker_id=member.worker_id) }}" class="ws-btn ws-btn-sm">Detail</a>
+          </div>
+        </div>
+
+        <!-- Attention Reasons -->
+        {% if member.reasons %}
+        <div style="padding:0 16px 10px 44px;font-size:11px;color:var(--text-muted)">
+          {% for reason in member.reasons %}{% if not loop.first %} · {% endif %}{{ reason }}{% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="ws-card">
+      <div class="ws-card-b">
+        <div class="ws-empty">No workers linked to this organisation yet.</div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

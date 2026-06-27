@@ -6,6 +6,7 @@ from functools import wraps
 import requests
 from flask import (
     Blueprint,
+    flash,
     jsonify,
     redirect,
     render_template,
@@ -19,6 +20,7 @@ from sqlalchemy import cast, func
 from database import (
     AdminCorrection,
     BehavioralAnomaly,
+    BurnoutRisk,
     Organisation,
     OrgMember,
     ScoreLog,
@@ -334,7 +336,7 @@ def workspace_worker_detail(worker_id):
 
     tasks = (
         Task.query.filter_by(worker_id=worker_id)
-        .order_by(Task.created_at.desc())
+        .order_by(Task.assigned_at.desc())
         .limit(50)
         .all()
     )
@@ -355,6 +357,289 @@ def workspace_worker_detail(worker_id):
         scores=scores,
         prior=prior,
         org_name=org_name,
+        role=session.get("ws_member_role", "member"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Worker Summary (Feature 2)
+# ---------------------------------------------------------------------------
+
+
+@workspace_bp.route("/workers/<int:worker_id>/summary")
+@ws_login_required
+def workspace_worker_summary(worker_id):
+    """Auto-generated 30-day performance summary for a worker."""
+    org_id = session["ws_org_id"]
+
+    ident = WorkerIdentity.query.filter_by(
+        org_id=org_id, worker_id=worker_id, is_active=True
+    ).first_or_404()
+    worker = db.session.get(Worker, worker_id)
+
+    cutoff_30 = datetime.utcnow() - timedelta(days=30)
+    cutoff_7 = datetime.utcnow() - timedelta(days=7)
+
+    # Task stats
+    tasks_30 = (
+        Task.query.filter(
+            Task.worker_id == worker_id,
+            Task.assigned_at >= cutoff_30,
+        ).all()
+        if worker
+        else []
+    )
+    completed = [t for t in tasks_30 if t.status == "completed"]
+    missed = [t for t in tasks_30 if t.status == "missed"]
+    pending = [t for t in tasks_30 if t.status == "pending"]
+    on_time = [
+        t
+        for t in completed
+        if t.due_at and t.completed_at and t.completed_at <= t.due_at
+    ]
+    completion_rate = round(len(completed) / max(len(tasks_30), 1) * 100, 1)
+    on_time_rate = round(len(on_time) / max(len(completed), 1) * 100, 1)
+
+    # Score trajectory
+    score_logs_30 = (
+        ScoreLog.query.filter(
+            ScoreLog.worker_id == worker_id,
+            ScoreLog.created_at >= cutoff_30,
+        )
+        .order_by(ScoreLog.created_at)
+        .all()
+        if worker
+        else []
+    )
+    score_30d = sum(s.change for s in score_logs_30)
+    score_7d = sum(s.change for s in score_logs_30 if s.created_at >= cutoff_7)
+
+    # Score by week (4 weeks)
+    now = datetime.utcnow()
+    weekly_scores = []
+    for week in range(4):
+        w_start = now - timedelta(days=(4 - week) * 7)
+        w_end = now - timedelta(days=(3 - week) * 7)
+        w_score = sum(
+            s.change for s in score_logs_30 if w_start <= s.created_at < w_end
+        )
+        weekly_scores.append(
+            {
+                "week": f"Week {week + 1}",
+                "score": round(w_score, 1),
+            }
+        )
+
+    # Trend direction
+    if len(weekly_scores) >= 2:
+        trend = (
+            "improving"
+            if weekly_scores[-1]["score"] >= weekly_scores[-2]["score"]
+            else "declining"
+        )
+    else:
+        trend = "stable"
+
+    # Points breakdown by source
+    points_by_source = {}
+    for log in score_logs_30:
+        src = log.source or "other"
+        points_by_source[src] = points_by_source.get(src, 0) + log.change
+
+    # Anomalies (only if consent given)
+    anomaly_count = 0
+    burnout_score = None
+    if worker and ident.consent_community_prior and ident.discord_id:
+        anomaly_count = BehavioralAnomaly.query.filter(
+            BehavioralAnomaly.discord_id == ident.discord_id,
+            BehavioralAnomaly.detected_at >= cutoff_30,
+            BehavioralAnomaly.cleared_at == None,
+        ).count()
+        burnout = (
+            BurnoutRisk.query.filter_by(discord_id=ident.discord_id)
+            .order_by(BurnoutRisk.detected_at.desc())
+            .first()
+        )
+        if burnout:
+            burnout_score = burnout.score
+
+    # Corrections in last 30d
+    corrections_30 = (
+        AdminCorrection.query.filter(
+            AdminCorrection.worker_id == worker_id,
+            AdminCorrection.created_at >= cutoff_30,
+        ).count()
+        if worker
+        else 0
+    )
+
+    # Overall health rating
+    health = "green"
+    if len(missed) > 2 or score_30d < -20 or (burnout_score and burnout_score > 60):
+        health = "red"
+    elif len(missed) > 0 or score_30d < 0 or trend == "declining":
+        health = "yellow"
+
+    summary = {
+        "worker": worker,
+        "period": "Last 30 Days",
+        "tasks": {
+            "total": len(tasks_30),
+            "completed": len(completed),
+            "missed": len(missed),
+            "pending": len(pending),
+            "completion_rate": completion_rate,
+            "on_time_rate": on_time_rate,
+        },
+        "score": {
+            "total_30d": round(score_30d, 1),
+            "total_7d": round(score_7d, 1),
+            "weekly": weekly_scores,
+            "by_source": points_by_source,
+            "trend": trend,
+        },
+        "anomaly_count": anomaly_count,
+        "burnout_score": burnout_score,
+        "corrections": corrections_30,
+        "health": health,
+    }
+
+    return render_template(
+        "workspace_worker_summary.html",
+        summary=summary,
+        org_name=session["ws_org_name"],
+        role=session.get("ws_member_role", "member"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task Creation (Feature 1)
+# ---------------------------------------------------------------------------
+
+
+@workspace_bp.route("/tasks/create", methods=["GET", "POST"])
+@ws_login_required
+def workspace_task_create():
+    """HR/admin can manually create and assign a task to a linked worker."""
+    org_id = session["ws_org_id"]
+    role = session.get("ws_member_role", "member")
+    if role not in ("admin", "hr"):
+        return jsonify({"error": "Forbidden"}), 403
+
+    identities = WorkerIdentity.query.filter_by(org_id=org_id, is_active=True).all()
+    linked_workers = []
+    for ident in identities:
+        if ident.worker_id:
+            w = db.session.get(Worker, ident.worker_id)
+            if w:
+                linked_workers.append(
+                    {
+                        "id": w.id,
+                        "name": w.name,
+                        "display": ident.display_name or w.name,
+                    }
+                )
+
+    if request.method == "POST":
+        worker_id = request.form.get("worker_id", type=int)
+        title = request.form.get("title", "").strip()
+        description = request.form.get("description", "").strip()
+        priority = request.form.get("priority", "medium")
+        due_days = request.form.get("due_days", type=int)
+
+        if not worker_id or not title:
+            flash("Worker and title are required.", "error")
+            return render_template(
+                "workspace_task_create.html",
+                workers=linked_workers,
+                org_name=session["ws_org_name"],
+                role=role,
+            )
+
+        ident = WorkerIdentity.query.filter_by(
+            org_id=org_id, worker_id=worker_id, is_active=True
+        ).first()
+        if not ident:
+            return jsonify({"error": "Worker not in org"}), 403
+
+        due_at = datetime.utcnow() + timedelta(days=due_days) if due_days else None
+
+        task = Task(
+            worker_id=worker_id,
+            title=title,
+            description=description,
+            priority=priority,
+            due_at=due_at,
+            status="pending",
+            source="manual",
+            points_awarded=0.0,
+        )
+        db.session.add(task)
+        db.session.commit()
+        flash(f"Task '{title}' assigned successfully.", "success")
+        return redirect(
+            url_for("workspace.workspace_worker_detail", worker_id=worker_id)
+        )
+
+    return render_template(
+        "workspace_task_create.html",
+        workers=linked_workers,
+        org_name=session["ws_org_name"],
+        role=role,
+    )
+
+
+@workspace_bp.route("/tasks/<int:task_id>/update", methods=["POST"])
+@ws_login_required
+def workspace_task_update(task_id):
+    """Mark a task complete, missed, or cancelled. Awards/deducts points."""
+    org_id = session["ws_org_id"]
+    task = db.session.get(Task, task_id)
+    if not task:
+        return jsonify({"error": "Task not found"}), 404
+
+    ident = WorkerIdentity.query.filter_by(
+        org_id=org_id, worker_id=task.worker_id, is_active=True
+    ).first()
+    if not ident:
+        return jsonify({"error": "Forbidden"}), 403
+
+    new_status = request.form.get("status")
+    if new_status not in ("completed", "missed", "cancelled"):
+        return jsonify({"error": "Invalid status"}), 400
+
+    old_status = task.status
+    task.status = new_status
+
+    if new_status == "completed":
+        task.completed_at = datetime.utcnow()
+        if task.due_at and datetime.utcnow() > task.due_at:
+            pts = 5.0
+            reason = f"Task completed late: {task.title}"
+        else:
+            pts = 10.0
+            reason = f"Task completed on time: {task.title}"
+        task.points_awarded = pts
+        from scoring import award_points
+
+        award_points(task.worker_id, pts, reason, source="work_engine")
+
+    elif new_status == "missed" and old_status != "missed":
+        pts = -15.0
+        task.points_awarded = pts
+        from scoring import award_points
+
+        award_points(
+            task.worker_id,
+            pts,
+            f"Task missed: {task.title}",
+            source="work_engine",
+        )
+
+    db.session.commit()
+    return redirect(
+        request.referrer
+        or url_for("workspace.workspace_worker_detail", worker_id=task.worker_id)
     )
 
 
@@ -453,6 +738,15 @@ def workspace_leaderboard():
     org_name = session["ws_org_name"]
     role = session.get("ws_member_role", "member")
 
+    period = request.args.get("period", "30d")
+    cutoff = None
+    now = datetime.utcnow()
+    if period == "7d":
+        cutoff = now - timedelta(days=7)
+    elif period == "30d":
+        cutoff = now - timedelta(days=30)
+    # "all" -> no cutoff
+
     linked_ids = [
         i.worker_id
         for i in WorkerIdentity.query.filter_by(org_id=org_id, is_active=True).all()
@@ -461,31 +755,54 @@ def workspace_leaderboard():
 
     leaderboard = []
     if linked_ids:
-        scores_q = (
-            db.session.query(
-                ScoreLog.worker_id, func.sum(ScoreLog.change).label("total")
-            )
-            .filter(ScoreLog.worker_id.in_(linked_ids))
-            .group_by(ScoreLog.worker_id)
+        score_q = db.session.query(
+            ScoreLog.worker_id, func.sum(ScoreLog.change).label("total")
+        ).filter(ScoreLog.worker_id.in_(linked_ids))
+        if cutoff:
+            score_q = score_q.filter(ScoreLog.created_at >= cutoff)
+        score_q = (
+            score_q.group_by(ScoreLog.worker_id)
             .order_by(func.sum(ScoreLog.change).desc())
             .all()
         )
+
+        # Score delta for 7d trend (always computed)
+        cutoff_7d = now - timedelta(days=7)
+
         wmap = {w.id: w for w in Worker.query.filter(Worker.id.in_(linked_ids)).all()}
-        for i, row in enumerate(scores_q):
+        for i, row in enumerate(score_q):
             w = wmap.get(row.worker_id)
             if w:
-                done = Task.query.filter_by(
-                    worker_id=row.worker_id, status="completed"
-                ).count()
-                missed = Task.query.filter_by(
-                    worker_id=row.worker_id, status="missed"
-                ).count()
+                # Task counts filtered by same period
+                task_q = Task.query.filter_by(worker_id=row.worker_id)
+                if cutoff:
+                    task_q = task_q.filter(Task.assigned_at >= cutoff)
+                all_tasks = task_q.all()
+                done = sum(1 for t in all_tasks if t.status == "completed")
+                missed = sum(1 for t in all_tasks if t.status == "missed")
+
+                # 7d score delta for trend arrow
+                delta_7d = (
+                    db.session.query(func.sum(ScoreLog.change))
+                    .filter(
+                        ScoreLog.worker_id == row.worker_id,
+                        ScoreLog.created_at >= cutoff_7d,
+                    )
+                    .scalar()
+                    or 0
+                )
+                delta_7d = float(delta_7d)
+
+                trend = "up" if delta_7d > 0 else ("down" if delta_7d < 0 else "stable")
+
                 leaderboard.append(
                     {
                         "worker": w,
                         "score": float(row.total),
+                        "score_delta_7d": round(delta_7d, 1),
                         "tasks_done": done,
                         "tasks_missed": missed,
+                        "trend": trend,
                         "rank": i + 1,
                     }
                 )
@@ -498,6 +815,143 @@ def workspace_leaderboard():
         total_corrections=total_corrections,
         org_name=org_name,
         role=role,
+        period=period,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Team Health (Feature 4)
+# ---------------------------------------------------------------------------
+
+
+@workspace_bp.route("/team-health")
+@ws_login_required
+def workspace_team_health():
+    """Traffic-light health view for the whole team."""
+    org_id = session["ws_org_id"]
+    role = session.get("ws_member_role", "member")
+    cutoff_30 = datetime.utcnow() - timedelta(days=30)
+    cutoff_7 = datetime.utcnow() - timedelta(days=7)
+
+    identities = WorkerIdentity.query.filter_by(org_id=org_id, is_active=True).all()
+
+    team = []
+    green_count = yellow_count = red_count = 0
+
+    for ident in identities:
+        if not ident.worker_id:
+            continue
+        worker = db.session.get(Worker, ident.worker_id)
+        if not worker:
+            continue
+
+        # Score last 30d and last 7d
+        logs_30 = ScoreLog.query.filter(
+            ScoreLog.worker_id == ident.worker_id, ScoreLog.created_at >= cutoff_30
+        ).all()
+        score_30d = sum(s.change for s in logs_30)
+        score_7d = sum(s.change for s in logs_30 if s.created_at >= cutoff_7)
+
+        # Tasks
+        tasks_30 = Task.query.filter(
+            Task.worker_id == ident.worker_id, Task.assigned_at >= cutoff_30
+        ).all()
+        missed = sum(1 for t in tasks_30 if t.status == "missed")
+        completed = sum(1 for t in tasks_30 if t.status == "completed")
+        total = len(tasks_30)
+        completion_rate = round(completed / max(total, 1) * 100)
+
+        # Anomalies and burnout (consent-gated)
+        anomaly_count = 0
+        burnout_score = 0
+        if ident.consent_community_prior and ident.discord_id:
+            anomaly_count = BehavioralAnomaly.query.filter(
+                BehavioralAnomaly.discord_id == ident.discord_id,
+                BehavioralAnomaly.detected_at >= cutoff_30,
+                BehavioralAnomaly.cleared_at == None,
+            ).count()
+            br = (
+                BurnoutRisk.query.filter_by(discord_id=ident.discord_id)
+                .order_by(BurnoutRisk.detected_at.desc())
+                .first()
+            )
+            burnout_score = br.score if br else 0
+
+        # Health rating
+        red_flags = (
+            missed > 2
+            or score_30d < -20
+            or burnout_score > 60
+            or (total > 0 and completion_rate < 40)
+        )
+        yellow_flags = (
+            missed > 0
+            or score_30d < 0
+            or score_7d < -5
+            or burnout_score > 30
+            or anomaly_count > 2
+        )
+
+        if red_flags:
+            health = "red"
+            red_count += 1
+        elif yellow_flags:
+            health = "yellow"
+            yellow_count += 1
+        else:
+            health = "green"
+            green_count += 1
+
+        # Attention reasons (plain English)
+        reasons = []
+        if missed > 0:
+            reasons.append(f"{missed} missed task{'s' if missed > 1 else ''}")
+        if score_30d < 0:
+            reasons.append(f"Score down {abs(round(score_30d, 1))} pts this month")
+        if burnout_score > 30:
+            reasons.append(f"Burnout risk {int(burnout_score)}%")
+        if anomaly_count > 0:
+            reasons.append(
+                f"{anomaly_count} active anomal{'ies' if anomaly_count > 1 else 'y'}"
+            )
+
+        team.append(
+            {
+                "worker": worker,
+                "worker_id": ident.worker_id,
+                "health": health,
+                "score_30d": round(score_30d, 1),
+                "score_7d": round(score_7d, 1),
+                "completion_rate": completion_rate,
+                "tasks_total": total,
+                "tasks_missed": missed,
+                "burnout_score": int(burnout_score),
+                "anomaly_count": anomaly_count,
+                "reasons": reasons,
+                "has_community_data": bool(
+                    ident.consent_community_prior and ident.discord_id
+                ),
+            }
+        )
+
+    # Sort: red first, then yellow, then green; within each group by score desc
+    team.sort(
+        key=lambda x: (
+            {"red": 0, "yellow": 1, "green": 2}[x["health"]],
+            -x["score_30d"],
+        )
+    )
+
+    return render_template(
+        "workspace_team_health.html",
+        team=team,
+        org_name=session["ws_org_name"],
+        role=role,
+        summary={
+            "green": green_count,
+            "yellow": yellow_count,
+            "red": red_count,
+        },
     )
 
 
@@ -693,14 +1147,44 @@ def workspace_members():
     org_id = session["ws_org_id"]
     org_name = session["ws_org_name"]
     role = session.get("ws_member_role", "member")
+
     members = (
         OrgMember.query.filter_by(org_id=org_id, is_active=True)
         .order_by(OrgMember.created_at)
         .all()
     )
+
+    # For each member, find their linked worker identity by email
+    member_data = []
+    for m in members:
+        ident = WorkerIdentity.query.filter_by(
+            org_id=org_id, email=m.email, is_active=True
+        ).first()
+        worker = None
+        score = None
+        if ident and ident.worker_id:
+            worker = db.session.get(Worker, ident.worker_id)
+            if worker:
+                score = (
+                    db.session.query(func.sum(ScoreLog.change))
+                    .filter(ScoreLog.worker_id == ident.worker_id)
+                    .scalar()
+                    or 0
+                )
+                score = round(float(score), 1)
+
+        member_data.append(
+            {
+                "member": m,
+                "worker": worker,
+                "score": score,
+                "identity": ident,
+            }
+        )
+
     return render_template(
         "workspace_members.html",
-        members=members,
+        member_data=member_data,
         current_member_id=session["ws_member_id"],
         org_name=org_name,
         role=role,

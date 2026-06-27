@@ -504,9 +504,12 @@ block content %}
         <div class="ws-card mb-16">
             <div class="ws-card-h">
                 <span class="ws-card-t">Recent Tasks</span>
-                <span style="font-size: 10px; color: var(--text-muted)"
-                    >Last 50</span
-                >
+                <div style="display:flex;align-items:center;gap:8px">
+                    <span style="font-size:10px;color:var(--text-muted)">Last 50</span></span>
+                    {% if session.get('ws_member_role') in ('admin','hr') %}
+                    <a href="{{ url_for('workspace.workspace_task_create') }}" class="ws-btn ws-btn-sm" style="padding:2px 10px;font-size:10px">+ Assign New Task</a>
+                    {% endif %}
+                </div>
             </div>
             <div class="ws-card-b np">
                 <div class="ws-tbl-wrap">
@@ -518,6 +521,9 @@ block content %}
                                 <th>Priority</th>
                                 <th>Source</th>
                                 <th>Created</th>
+                                {% if session.get('ws_member_role') in ('admin','hr') %}
+                                <th style="width:140px">Actions</th>
+                                {% endif %}
                             </tr>
                         </thead>
                         <tbody>
@@ -560,10 +566,30 @@ block content %}
                                 <td>{{ t.source or '—' }}</td>
                                 <td>
                                     <span
-                                        data-utc="{{ t.created_at.isoformat() }}"
-                                        >{{ t.created_at }}</span
+                                        data-utc="{{ t.assigned_at.isoformat() }}"
+                                        >{{ t.assigned_at }}</span
                                     >
                                 </td>
+                                {% if session.get('ws_member_role') in ('admin','hr') %}
+                                <td>
+                                    </td>{% if t.status == 'pending' %}
+                                    <div class="ws-flex" style="gap:4px">
+                                        <form method="POST" action="{{ url_for('workspace.workspace_task_update', task_id=t.id) }}" style="margin:0;display:inline">
+                                            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}"/>
+                                            <input type="hidden" name="status" value="completed"/>
+                                            <button type="submit" class="ws-btn ws-btn-sm ws-btn-green" style="padding:2px 8px;font-size:10px">Complete</button>
+                                        </form>
+                                        <form method="POST" action="{{ url_for('workspace.workspace_task_update', task_id=t.id) }}" style="margin:0;display:inline">
+                                            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}"/>
+                                            <input type="hidden" name="status" value="missed"/>
+                                            <button type="submit" class="ws-btn ws-btn-sm ws-btn-danger" style="padding:2px 8px;font-size:10px" onclick="return confirm('Mark this task as missed?')">Missed</button>
+                                        </form>
+                                    </div>
+                                    {% else %}
+                                    <span style="color:var(--text-muted);font-size:11px">—</span>
+                                    {% endif %}
+                                </td>
+                                {% endif %}
                             </tr>
                             {% endfor %}
                         </tbody>

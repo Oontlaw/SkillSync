@@ -38,12 +38,24 @@
                     class="ws-nav-link {% if request.endpoint == 'workspace.workspace_leaderboard' %}active{% endif %}"
                     >Leaderboard</a
                 >
+                {% if session.get('ws_member_role') in ('admin','hr') %}
+                <a
+                    href="{{ url_for('workspace.workspace_team_health') }}"
+                    class="ws-nav-link {% if request.endpoint == 'workspace.workspace_team_health' %}active{% endif %}"
+                    >Team Health</a
+                >
+                {% endif %}
                 <a
                     href="{{ url_for('workspace.workspace_identities') }}"
                     class="ws-nav-link {% if request.endpoint == 'workspace.workspace_identities' %}active{% endif %}"
                     >Identities</a
                 >
                 {% if session.get('ws_member_role') in ('admin','hr') %}
+                <a
+                    href="{{ url_for('workspace.workspace_task_create') }}"
+                    class="ws-nav-link {% if request.endpoint == 'workspace.workspace_task_create' %}active{% endif %}"
+                    >Assign Task</a
+                >
                 <a
                     href="{{ url_for('workspace.workspace_overrides') }}"
                     class="ws-nav-link {% if request.endpoint == 'workspace.workspace_overrides' %}active{% endif %}"

@@ -56,7 +56,7 @@
     <!-- Members Table -->
     <div class="ws-card">
       <div class="ws-card-b np">
-        {% if members %}
+        {% if member_data %}
         <div class="ws-tbl-wrap">
           <table class="ws-tbl">
             <thead>
@@ -64,47 +64,64 @@
                 <th>Name</th>
                 <th>Email</th>
                 <th>Role</th>
+                <th>Linked Worker</th>
+                <th>Score</th>
                 <th>Joined</th>
                 <th>Last Login</th>
-                <th style="width:160px">Actions</th>
+</th>                <th</th> style="width:160px">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {% for m in members %}
-              <tr id="member-row-{{ m.id }}">
+              {% for md in member_data %}
+              <tr id="member-row-{{ md.member.id }}">
                 <td class="bold">
-                  {{ m.name }}
-                  {% if m.id == current_member_id %}
+                  {{ md.member.name }}
+                  {% if md.member.id == current_member_id %}
                   <span class="ws-tag ws-tag-white" style="margin-left:6px;vertical-align:middle">you</span>
                   {% endif %}
                 </td>
-                <td class="mono">{{ m.email }}</td>
+                <td class="mono">{{ md.member.email }}</td>
                 <td>
-                  {% if m.role == 'admin' %}
+                  {% if md.member.role == 'admin' %}
                   <span class="ws-tag ws-tag-white">admin</span>
-                  {% elif m.role == 'hr' %}
+                  {% elif md.member.role == 'hr' %}
                   <span class="ws-tag ws-tag-blue">hr</span>
                   {% else %}
                   <span class="ws-tag ws-tag-muted">member</span>
                   {% endif %}
                 </td>
-                <td><span data-utc="{{ m.created_at.isoformat() }}">{{ m.created_at }}</span></td>
                 <td>
-                  {% if m.last_login %}
-                  <span data-utc="{{ m.last_login.isoformat() }}">{{ m.last_login }}</span>
+                  {% if md.worker %}
+                  <a href="{{ url_for('workspace.workspace_worker_detail', worker_id=md.worker.id) }}" style="color:var(--text);text-decoration:none;font-weight:500">{{ md.worker.name }}</a>
+                  {% else %}
+                  <span style="color:var(--text-muted);font-size:11px">— Not linked</span>
+                  <a href="{{ url_for('workspace.workspace_identities') }}" style="color:var(--text-muted);text-decoration:none;margin-left:4px" title="Link worker">🔗</a>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if md.score</td> is not none %}
+                  <a href="{{ url_for('workspace.workspace_worker_summary', worker_id=md.worker.id) if md.worker else '#' }}" style="text-decoration:none;font-weight:700;{% if md.score > 0 %}color:var(--green){% elif md.score < 0 %}color:var(--red){% else %}color:var(--text-muted){% endif %}">{{ "%+.1f"|format(md.score) }}</a>
+                  {% else %}
+                  <span style="color:var(--text-muted)">—</span>
+                  {% endif %}
+                </td>
+                <td><span data-utc="{{ md.member.created_at.isoformat() }}">{{ md.member.created_at }}</span></td>
+                <td>
+                  {% if md.member.</td>last_login %}
+                  <span data-utc="{{ md.member.last_login.isoformat() }}">{{ md.member.last_login }}</span>
                   {% else %}
                   <span style="color:var(--text-muted)">Never</span>
                   {% endif %}
                 </td>
                 <td>
                   <div class="ws-flex gap-8">
-                    <select class="ws-select" style="width:90px;padding:4px 8px;font-size:11px" onchange="changeRole({{ m.id }}, this.value)" {% if m.id == current_member_id %}disabled{% endif %}>
-                      <option value="member" {% if m.role == 'member' %}selected{% endif %}>member</option>
-                      <option value="hr" {% if m.role == 'hr' %}selected{% endif %}>hr</option>
-                      <option value="admin" {% if m.role == 'admin' %}selected{% endif %}>admin</option>
+                    <select class="</td>ws-select" style="width:90px;padding:4px 8px;font-size:11px" onchange="changeRole({{ md.member.id }}, this.value)" {% if md.member.id == current_member_id %}disabled{% endif %}>
+                      <option value="member" {% if md.member.role == 'member' %}selected{% endif %}>member</option>
+                      <option value="hr" {% if md.member.role == 'hr' %}selected{% endif %}>hr</option>
+                      <option value="admin" {% if md.member.role == 'admin' %}selected{% endif %}>admin</option>
                     </select>
-                    {% if m.id != current_member_id %}
-                    <button class="ws-btn ws-btn-sm ws-btn-danger" onclick="removeMember({{ m.id }})">Remove</button>
+                    {% if md.member.id != current_member_id %}
+                    <button class="ws-btn ws-btn-sm ws-btn-danger" onclick="removeMember({{ md.member.id }})">Remove</button>
                     {% endif %}
                   </div>
                 </td>

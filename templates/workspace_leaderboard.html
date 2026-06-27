@@ -10,6 +10,27 @@ Leaderboard{% endblock %} {% block content %}
                 <div class="ws-subtitle">
                     {{ org_name }} — ranked by total score
                 </div>
+                <!-- Period Filters -->
+                <div style="display: flex; gap: 6px; margin-top: 12px">
+                    <a
+                        href="?period=7d"
+                        class="ws-btn ws-btn-sm"
+                        style="{% if period == '7d' %}background:var(--text);color:var(--bg){% else %}background:var(--bg);color:var(--text-sec){% endif %};border:1px solid var(--border);padding:4px 12px;text-decoration:none"
+                        >7 Days</a
+                    >
+                    <a
+                        href="?period=30d"
+                        class="ws-btn ws-btn-sm"
+                        style="{% if period == '30d' %}background:var(--text);color:var(--bg){% else %}background:var(--bg);color:var(--text-sec){% endif %};border:1px solid var(--border);padding:4px 12px;text-decoration:none"
+                        >30 Days</a
+                    >
+                    <a
+                        href="?period=all"
+                        class="ws-btn ws-btn-sm"
+                        style="{% if period == 'all' %}background:var(--text);color:var(--bg){% else %}background:var(--bg);color:var(--text-sec){% endif %};border:1px solid var(--border);padding:4px 12px;text-decoration:none"
+                        >All Time</a
+                    >
+                </div>
             </div>
             <div class="ws-flex gap-8">
                 {% if total_corrections > 0 %}
@@ -39,8 +60,10 @@ Leaderboard{% endblock %} {% block content %}
                                 <th>Name</th>
                                 <th>Role</th>
                                 <th style="text-align: right">Score</th>
-                                <th style="text-align: right">Done</th>
-                                <th style="text-align: right">Missed</th>
+                                <th style="text-align: right">Tasks</th>
+                                <th style="text-align: right; width: 60px">
+                                    Trend
+                                </th>
                                 <th style="width: 80px"></th>
                             </tr>
                         </thead>
@@ -49,12 +72,16 @@ Leaderboard{% endblock %} {% block content %}
                             <tr
                                 class="{% if item.rank == 1 %}ws-rank-1{% endif %}"
                             >
-                                <td
-                                    style="font-weight:{% if item.rank <= 3 %}700{% else %}400{% endif %};color:{% if item.rank == 1 %}var(--text){% elif item.rank == 2 %}var(--text-sec){% elif item.rank == 3 %}var(--text-dim){% else %}var(--text-muted){% endif %}"
-                                >
-                                    {% if item.rank == 1 %}#1{% elif item.rank
-                                    == 2 %}#2{% elif item.rank == 3 %}#3{% else
-                                    %}{{ item.rank }}{% endif %}
+                                <td style="text-align:center;font-size:14px">
+                                    {% if item.rank == 1 %}
+                                    <span style="background:linear-gradient(135deg,#FFD700,#FFA500);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-weight:800">🥇</span>
+                                    {% elif item.rank == 2 %}
+                                    <span style="color:#C0C0C0;font-weight:700">🥈</span>
+                                    {% elif item.rank == 3 %}
+                                    <span style="color:#CD7F32;font-weight:700">🥉</span>
+                                    {% else %}
+                                    <span style="color:var(--text-muted);font-weight:400;font-size:12px">{{ item.rank }}</span>
+                                    {% endif %}
                                 </td>
                                 <td class="bold">{{ item.worker.name }}</td>
                                 <td>{{ item.worker.role or '—' }}</td>
@@ -68,25 +95,21 @@ Leaderboard{% endblock %} {% block content %}
                                 >
                                     {{ "%+.0f"|format(item.score) }}
                                 </td>
-                                <td style="text-align: right">
-                                    <span class="ws-tag ws-tag-green"
-                                        >{{ item.tasks_done }}</span
-                                    >
+                                <td style="text-align:right;font-size:11px;color:var(--text-muted)">
+                                    {{ item.tasks_done }} done{% if item.tasks_missed > 0 %}, <span style="color:var(--red)">{{ item.tasks_missed }} missed</span>{% endif %}
                                 </td>
-                                <td style="text-align: right">
-                                    {% if item.tasks_missed > 0 %}
-                                    <span class="ws-tag ws-tag-red"
-                                        >{{ item.tasks_missed }}</span
-                                    >
+                                <td style="text-align:right;font-size:16px">
+                                    {% if item.trend == 'up' %}
+                                    <span title="+{{ item.score_delta_7d }} pts this week" style="color:var(--green)">↑</span>
+                                    {% elif item.trend == 'down' %}
+                                    <span title="{{ item.score_delta_7d }} pts this week" style="color:var(--red)">↓</span>
                                     {% else %}
-                                    <span style="color: var(--text-muted)"
-                                        >0</span
-                                    >
+                                    <span style="color:var(--text-muted)">→</span>
                                     {% endif %}
                                 </td>
                                 <td>
                                     <a
-                                        href="{{ url_for('workspace.workspace_worker_detail', worker_id=item.worker.id) }}"
+</td>                                        href="{{ url_for('workspace.workspace_worker_detail', worker_id=item.worker.id) }}"
                                         class="ws-btn ws-btn-sm"
                                         >View</a
                                     >
