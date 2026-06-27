@@ -18,11 +18,11 @@
         {% if summary.health %}
         <div style="margin-top:8px">
           {% if summary.health == 'green' %}
-          <span class="ws-tag ws-tag-green">🟢 On Track</span>
+          <span class="ws-tag ws-tag-green"><span class="dot-green">●</span> On Track</span>
           {% elif summary.health == 'yellow' %}
-          <span class="ws-tag ws-tag-orange">🟡 Needs Attention</span>
+          <span class="ws-tag ws-tag-orange"><span class="dot-orange">●</span> Needs Attention</span>
           {% elif summary.health == 'red' %}
-          <span class="ws-tag ws-tag-red">🔴 At Risk</span>
+          <span class="ws-tag ws-tag-red"><span class="dot-red">●</span> At Risk</span>
           {% endif %}
         </div>
         {% endif %}

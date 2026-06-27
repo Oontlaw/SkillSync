@@ -1,25 +1,25 @@
 /* SkillSync Workspace Design System */
 /* Design tokens */
 :root {
-    --bg: #080808;
-    --bg-card: #0e0e0e;
-    --bg-input: #111111;
-    --bg-hover: rgba(255, 255, 255, 0.03);
-    --border: rgba(255, 255, 255, 0.07);
-    --border-focus: rgba(255, 255, 255, 0.3);
-    --text: #f0f0f0;
-    --text-sec: #999999;
-    --text-dim: #666666;
-    --text-muted: #444444;
+    --bg: #0a0a0a;
+    --bg-card: #141414;
+    --bg-input: #1a1a1a;
+    --bg-hover: rgba(255, 255, 255, 0.05);
+    --border: rgba(255, 255, 255, 0.1);
+    --border-focus: rgba(255, 255, 255, 0.35);
+    --text: #f4f4f4;
+    --text-sec: #b0b0b0;
+    --text-dim: #787878;
+    --text-muted: #555555;
     --green: #4ade80;
-    --green-bg: rgba(74, 222, 128, 0.08);
+    --green-bg: rgba(74, 222, 128, 0.1);
     --red: #f87171;
-    --red-bg: rgba(248, 113, 113, 0.08);
+    --red-bg: rgba(248, 113, 113, 0.1);
     --orange: #fb923c;
-    --orange-bg: rgba(251, 146, 60, 0.08);
+    --orange-bg: rgba(251, 146, 60, 0.1);
     --blue: #60a5fa;
-    --blue-bg: rgba(96, 165, 250, 0.08);
-    --white-bg: rgba(255, 255, 255, 0.06);
+    --blue-bg: rgba(96, 165, 250, 0.1);
+    --white-bg: rgba(255, 255, 255, 0.08);
     --font: "Inter", sans-serif;
     --nav-h: 48px;
     --wrap: 1200px;
@@ -33,7 +33,9 @@
 }
 body {
     font-family: var(--font);
-    background: var(--bg);
+    background:
+        radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.055), transparent 30rem),
+        linear-gradient(180deg, #111 0%, var(--bg) 34%, #080808 100%);
     color: var(--text);
     min-height: 100vh;
 }
@@ -45,9 +47,10 @@ body {
     left: 0;
     right: 0;
     height: var(--nav-h);
-    background: rgba(8, 8, 8, 0.95);
+    background: rgba(10, 10, 10, 0.9);
     border-bottom: 1px solid var(--border);
     backdrop-filter: blur(12px);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
     z-index: 100;
     display: flex;
     align-items: center;
@@ -99,11 +102,11 @@ body {
     margin-left: auto;
 }
 .ws-nav-user {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-dim);
 }
 .ws-nav-role {
-    font-size: 10px;
+    font-size: 12px;
     color: var(--text-muted);
     background: var(--white-bg);
     padding: 2px 7px;
@@ -149,6 +152,7 @@ body {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
 }
 .ws-card-h {
     display: flex;
@@ -158,12 +162,15 @@ body {
     border-bottom: 1px solid var(--border);
 }
 .ws-card-t {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
     color: var(--text);
 }
 .ws-card-b {
     padding: 18px;
+    font-size: 13px;
+    color: var(--text-sec);
+    line-height: 1.6;
 }
 .ws-card-b.np {
     padding: 0;
@@ -177,13 +184,17 @@ body {
     margin-bottom: 24px;
 }
 .ws-stat {
-    background: var(--bg-card);
+    background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.045), transparent 54%),
+        var(--bg-card);
     border: 1px solid var(--border);
+    border-left: 3px solid rgba(255, 255, 255, 0.26);
     border-radius: var(--radius);
     padding: 16px 18px;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
 }
 .ws-stat-label {
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
@@ -206,6 +217,11 @@ body {
 .ws-stat-num.crit {
     color: var(--red);
 }
+.ws-stat-value,
+[class*="stat"] .value,
+[class*="score"] .value {
+    font-size: 22px;
+}
 
 /* TABLES */
 .ws-tbl-wrap {
@@ -214,14 +230,14 @@ body {
 .ws-tbl {
     width: 100%;
     border-collapse: collapse;
-    font-size: 12px;
+    font-size: 13px;
 }
 .ws-tbl th {
     text-align: left;
     padding: 10px 14px;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
-    color: var(--text-muted);
+    color: var(--text-dim);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     border-bottom: 1px solid var(--border);
@@ -229,6 +245,7 @@ body {
 }
 .ws-tbl td {
     padding: 10px 14px;
+    font-size: 13px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.03);
     color: var(--text-sec);
     vertical-align: middle;
@@ -245,14 +262,14 @@ body {
 }
 .ws-tbl td.mono {
     font-family: monospace;
-    font-size: 11px;
+    font-size: 12px;
 }
 
 /* TAGS */
 .ws-tag {
     display: inline-flex;
     align-items: center;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
     padding: 2px 8px;
     border-radius: 20px;
@@ -328,9 +345,25 @@ body {
     border-color: var(--red);
 }
 .ws-btn-sm {
-    font-size: 11px;
+    font-size: 12px;
     padding: 5px 10px;
 }
+.dot-green {
+    color: var(--green);
+    font-size: 10px;
+    line-height: 1;
+}
+.dot-orange {
+    color: var(--orange);
+    font-size: 10px;
+    line-height: 1;
+}
+.dot-red {
+    color: var(--red);
+    font-size: 10px;
+    line-height: 1;
+}
+
 .ws-btn:disabled {
     opacity: 0.4;
     cursor: not-allowed;
@@ -342,12 +375,12 @@ body {
 }
 .ws-label {
     display: block;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
-    color: var(--text-dim);
+    color: var(--text-sec);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    margin-bottom: 5px;
+    margin-bottom: 6px;
 }
 .ws-input {
     width: 100%;
@@ -403,7 +436,7 @@ body {
     color: var(--text);
 }
 .ws-checkbox-desc {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-dim);
     margin-top: 2px;
 }
@@ -439,7 +472,7 @@ body {
     color: var(--text);
 }
 .ws-feed-reason {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-dim);
     margin-top: 1px;
     white-space: nowrap;
@@ -448,7 +481,7 @@ body {
     max-width: 300px;
 }
 .ws-feed-meta {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-muted);
     margin-top: 2px;
 }
@@ -628,7 +661,7 @@ body {
 /* CODE */
 code.ws-code {
     font-family: monospace;
-    font-size: 11px;
+    font-size: 12px;
     background: var(--bg-input);
     padding: 2px 6px;
     border-radius: 4px;

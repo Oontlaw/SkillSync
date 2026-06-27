@@ -72,13 +72,13 @@ endblock %} {% block content %}
                             {% if activity_consistency.trend == 'up' %}<span
                                 class="text-green-400"
                                 >↑ {{ ((activity_consistency.recent_total /
-                                max(activity_consistency.prior_total, 1)) * 100
+                                ([activity_consistency.prior_total, 1]|max)) * 100
                                 - 100)|round|int }}%</span
                             >
                             {% elif activity_consistency.trend == 'down' %}<span
                                 class="text-red-400"
                                 >↓ {{ ((activity_consistency.recent_total /
-                                max(activity_consistency.prior_total, 1)) * 100
+                                ([activity_consistency.prior_total, 1]|max)) * 100
                                 - 100)|round|int }}%</span
                             >
                             {% else %}<span class="text-gray-400">→ flat</span
