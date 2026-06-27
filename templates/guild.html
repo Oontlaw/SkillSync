@@ -1,679 +1,415 @@
-{% extends "base.html" %} {% block title %}{{ guild.name }} – SkillSync{%
-endblock %} {% block content %}
-<div class="p-6 max-w-7xl mx-auto">
-    <!-- 1. GUILD HEADER -->
-    <div
-        class="bg-[#111318] rounded-2xl border border-gray-800/40 p-6 mb-8 glow"
-    >
-        <div class="flex justify-between items-start">
-            <div>
-                <h1
-                    class="text-2xl font-bold text-white flex items-center gap-2"
-                >
-                    {{ guild.name }}
-                </h1>
-                <p class="text-gray-500 text-sm mt-1">
-                    Guild ID: {{ guild.guild_id }}
-                </p>
-            </div>
-            <div class="text-right">
-                {% if guild.owner_name %}
-                <p class="text-gray-400 text-sm">
-                    Owner:
-                    <span class="text-white font-medium"
-                        >{{ guild.owner_name }}</span
-                    >
-                </p>
-                {% endif %}
-                <p class="text-gray-600 text-xs mt-1">
-                    Scanned:
-                    <span
-                        class="utc-time"
-                        data-utc="{{ guild.scanned_at.isoformat() if guild.scanned_at else '' }}"
-                        >{{ guild.scanned_at.strftime('%Y-%m-%d %H:%M') if
-                        guild.scanned_at else 'Not yet' }}</span
-                    >
-                </p>
-            </div>
+{% extends "base.html" %} {% block title %}{{ guild.name }} – SkillSync{% endblock %} {% block content %}
+
+<section class="ws-section">
+    <div class="section-header">
+        <div class="section-eyebrow">Overview</div>
+        <h1 class="ws-title">{{ guild.name }}</h1>
+        <p class="ws-subtitle">Server ID: {{ guild.guild_id }}</p>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">{{ guild.member_count }}</div>
+            <div class="stat-label">Members</div>
         </div>
-        <div class="grid grid-cols-2 md:grid-cols-6 gap-4 mt-6">
-            {% set hdr = [('Members', guild.member_count, 'white'), ('Online',
-            online_count, 'green'), ('Tracked', human_count, 'blue'),
-            ('Chatted', tracked_chatted, 'emerald'), ('Messages',
-            guild_msg_total, 'yellow'), ('Roles', guild.role_count, 'white')] %}
-            {% for label, val, color in hdr %}
-            <div
-                class="bg-[#0f1116] rounded-xl border border-gray-800/40 p-3 text-center"
-            >
-                <p class="text-gray-500 text-[10px] uppercase tracking-wider">
-                    {{ label }}
-                </p>
-                <p class="text-2xl font-bold text-{{ color }}-400 mt-1">
-                    {{ val }}
-                </p>
+        <div class="stat-card">
+            <div class="stat-value" style="color: var(--green);">{{ online_count }}</div>
+            <div class="stat-label">Online</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" style="color: var(--blue);">{{ human_count }}</div>
+            <div class="stat-label">Tracked</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" style="color: var(--green);">{{ tracked_chatted }}</div>
+            <div class="stat-label">Chatted</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" style="color: var(--orange);">{{ guild_msg_total }}</div>
+            <div class="stat-label">Messages</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ guild.role_count }}</div>
+            <div class="stat-label">Roles</div>
+        </div>
+    </div>
+</section>
+
+{% if guild_anomalies %}
+<section class="ws-section">
+    <div class="section-header" style="margin-bottom: 16px;">
+        <div class="section-eyebrow">Alerts</div>
+        <h2 class="ws-title" style="font-size: 20px;">Intelligence Alerts</h2>
+        <p class="ws-subtitle">Behavioral anomalies and concerns detected in this guild.</p>
+    </div>
+
+    <div class="ws-card" style="border-color: rgba(239, 68, 68, 0.25); background-color: rgba(239, 68, 68, 0.02);">
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+            {% for a in guild_anomalies %}
+            <div class="flex justify-between items-center" style="padding: 12px 16px; border: 1px solid var(--border-primary); border-radius: var(--radius-md); background-color: var(--bg-card);">
+                <div style="min-width: 0;">
+                    <span style="color: var(--red); font-weight: 700; font-size: 13px;">{{ a.anomaly_type | replace('_', ' ') | title }}</span>
+                    <span style="color: var(--text-secondary); font-size: 12px; margin-left: 8px;">— {{ a.name or a.discord_id }}</span>
+                    <p style="color: var(--text-dim); font-size: 12px; margin: 4px 0 0;">{{ a.details }}</p>
+                </div>
+                <span class="ws-tag red" style="flex-shrink: 0; font-family: var(--font-secondary); font-weight: 800; font-size: 12px; padding: 2px 8px;">{{ "%.0f"|format(a.severity) }}%</span>
             </div>
             {% endfor %}
         </div>
     </div>
+</section>
+{% endif %}
 
-    <!-- 2. INTELLIGENCE ALERTS -->
-    {% if guild_anomalies %}
-    <div class="mb-8">
-        <div class="flex items-center gap-2 mb-4">
-            <h2
-                class="text-sm font-bold text-gray-300 uppercase tracking-widest"
-            >
-                Intelligence Alerts
-            </h2>
-        </div>
-        <div
-            class="bg-[#111318] rounded-2xl border border-red-900/30 p-6 shadow-sm"
-        >
-            <div class="space-y-3">
-                {% for a in guild_anomalies %}
-                <div
-                    class="flex justify-between items-center p-3 bg-[#0b0d11] rounded-xl border border-gray-800/40 hover:border-red-900/50 transition"
-                >
-                    <div>
-                        <span class="text-red-400 font-medium text-sm"
-                            >{{ a.anomaly_type | replace('_', ' ') | title
-                            }}</span
-                        >
-                        <span class="text-gray-400 text-sm ml-2"
-                            >— {{ a.name or a.discord_id }}</span
-                        >
-                        <p class="text-gray-600 text-xs mt-0.5">
-                            {{ a.details }}
-                        </p>
-                    </div>
-                    <span
-                        class="text-red-400 text-xs font-bold px-2 py-1 bg-red-900/30 rounded"
-                        >{{ "%.0f"|format(a.severity) }}%</span
-                    >
-                </div>
-                {% endfor %}
-            </div>
-        </div>
+<section class="ws-section">
+    <div class="section-header" style="margin-bottom: 16px;">
+        <div class="section-eyebrow">Analytics</div>
+        <h2 class="ws-title" style="font-size: 20px;">Analytics Hub</h2>
+        <p class="ws-subtitle">Activity patterns and forecasts for this server.</p>
     </div>
-    {% endif %}
 
-    <!-- 3. ANALYTICS HUB -->
-    <div class="mb-8">
-        <div class="flex items-center gap-2 mb-4">
-            <h2
-                class="text-sm font-bold text-gray-300 uppercase tracking-widest"
-            >
-                Analytics Hub
-            </h2>
-        </div>
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <!-- Main Activity Charts -->
-            <div class="lg:col-span-8 space-y-6">
-                {% if guild_hourly_chart %}
-                <div
-                    class="bg-[#111318] rounded-2xl border border-gray-800/40 p-6 shadow-sm"
-                >
-                    <h3
-                        class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4"
-                    >
-                        Hourly Activity Distribution
-                    </h3>
-                    <div class="relative" style="height: 200px">
-                        <canvas id="guildHourlyChart"></canvas>
-                    </div>
+    <div class="ws-grid-8-4">
+        <!-- Main charts -->
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+            {% if guild_hourly_chart %}
+            <div class="ws-card" style="margin-bottom: 0;">
+                <div class="card-header">
+                    <div class="card-title">Hourly Activity Distribution</div>
+                    <div class="card-subtitle">Message counts across local hour slots</div>
                 </div>
-                {% endif %} {% if community_hourly and staff_hourly %}
-                <div
-                    class="bg-[#111318] rounded-2xl border border-yellow-800/30 p-6 shadow-sm"
-                >
-                    <h3
-                        class="text-sm font-semibold text-yellow-400 uppercase tracking-wider mb-4"
-                    >
-                        Peak Hour Staffing Overlay
-                    </h3>
-                    <div class="relative" style="height: 200px">
-                        <canvas id="staffingChart"></canvas>
-                    </div>
+                <div class="ws-chart-box">
+                    <canvas id="guildHourlyChart"></canvas>
                 </div>
-                {% endif %} {% if forecast_data %}
-                <div
-                    class="bg-[#111318] rounded-2xl border border-blue-800/30 p-6 shadow-sm"
-                >
-                    <h3
-                        class="text-sm font-semibold text-blue-400 uppercase tracking-wider mb-4"
-                    >
-                        ML 24h Activity Forecast
-                    </h3>
-                    <div class="relative" style="height: 200px">
-                        <canvas id="forecastChart"></canvas>
-                    </div>
-                    {% if forecast_metrics and forecast_metrics.samples > 0 %}
-                    <div class="flex gap-6 mt-4 text-xs">
-                        <span class="text-gray-500"
-                            >MAE:
-                            <strong class="text-gray-300"
-                                >{{ forecast_metrics.mean_absolute_error
-                                }}</strong
-                            ></span
-                        >
-                        <span class="text-gray-500"
-                            >Bias:
-                            <strong
-                                class="text-gray-300 {% if forecast_metrics.mean_signed_error > 0 %}text-yellow-400{% elif forecast_metrics.mean_signed_error < 0 %}text-orange-400{% else %}text-gray-300{% endif %}"
-                                >{{ "+" if forecast_metrics.mean_signed_error >
-                                0 else "" }}{{
-                                forecast_metrics.mean_signed_error }}</strong
-                            ></span
-                        >
-                        <span class="text-gray-500"
-                            >Accuracy:
-                            <strong
-                                class="{% if forecast_metrics.accuracy_pct > 70 %}text-emerald-400{% elif forecast_metrics.accuracy_pct > 40 %}text-yellow-400{% else %}text-red-400{% endif %}"
-                                >{{ forecast_metrics.accuracy_pct }}%</strong
-                            ></span
-                        >
-                    </div>
-                    {% endif %}
+            </div>
+            {% endif %}
+
+            {% if community_hourly and staff_hourly %}
+            <div class="ws-card" style="margin-bottom: 0; border-color: rgba(245, 158, 11, 0.25);">
+                <div class="card-header">
+                    <div class="card-title" style="color: var(--orange);">Peak Hour Staffing Overlay</div>
+                    <div class="card-subtitle">Staff vs Community hourly patterns</div>
+                </div>
+                <div class="ws-chart-box">
+                    <canvas id="staffingChart"></canvas>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if forecast_data %}
+            <div class="ws-card" style="margin-bottom: 0; border-color: rgba(59, 130, 246, 0.25);">
+                <div class="card-header">
+                    <div class="card-title" style="color: var(--blue);">ML 24h Activity Forecast</div>
+                    <div class="card-subtitle">Random Forest regression prediction</div>
+                </div>
+                <div class="ws-chart-box">
+                    <canvas id="forecastChart"></canvas>
+                </div>
+                {% if forecast_metrics and forecast_metrics.samples > 0 %}
+                <div style="display: flex; gap: 24px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-primary);">
+                    <span style="color: var(--text-dim); font-size: 11px;">MAE: <strong style="color: var(--text-primary);">{{ forecast_metrics.mean_absolute_error }}</strong></span>
+                    <span style="color: var(--text-dim); font-size: 11px;">Bias: <strong style="color: {% if forecast_metrics.mean_signed_error > 0 %}var(--orange){% else %}var(--text-primary){% endif %};">{{ "+" if forecast_metrics.mean_signed_error > 0 else "" }}{{ forecast_metrics.mean_signed_error }}</strong></span>
+                    <span style="color: var(--text-dim); font-size: 11px;">Accuracy: <strong style="color: {% if forecast_metrics.accuracy_pct > 70 %}var(--green){% elif forecast_metrics.accuracy_pct > 40 %}var(--orange){% else %}var(--red){% endif %};">{{ forecast_metrics.accuracy_pct }}%</strong></span>
                 </div>
                 {% endif %}
             </div>
+            {% endif %}
+        </div>
 
-            <!-- Side Analytics -->
-            <div class="lg:col-span-4 space-y-6">
-                <div
-                    class="bg-[#111318] rounded-2xl border border-gray-800/40 p-6 shadow-sm"
-                >
-                    <h3
-                        class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4"
-                    >
-                        Guild Composition
-                    </h3>
-                    <div class="space-y-4">
-                        <div class="relative" style="height: 120px">
-                            <canvas id="guildCompositionChart"></canvas>
-                        </div>
-                        <div class="relative" style="height: 120px">
-                            <canvas id="guildStaffChart"></canvas>
-                        </div>
-                        <div class="relative" style="height: 120px">
-                            <canvas id="guildBotsChart"></canvas>
-                        </div>
-                    </div>
+        <!-- Composition charts -->
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+            <div class="ws-card" style="margin-bottom: 0;">
+                <div class="card-header">
+                    <div class="card-title">Guild Composition</div>
+                    <div class="card-subtitle">Proportional breakdown</div>
+                </div>
+                <div class="ws-chart-sm" style="height: 120px; margin-bottom: 16px;">
+                    <canvas id="guildCompositionChart"></canvas>
+                </div>
+                <div class="ws-chart-sm" style="height: 120px; margin-bottom: 16px;">
+                    <canvas id="guildStaffChart"></canvas>
+                </div>
+                <div class="ws-chart-sm" style="height: 120px;">
+                    <canvas id="guildBotsChart"></canvas>
                 </div>
             </div>
         </div>
     </div>
+</section>
 
-    <!-- 4. OPERATIONAL OVERVIEW -->
-    <div class="mb-8">
-        <div class="flex items-center gap-2 mb-4">
-            <h2
-                class="text-sm font-bold text-gray-300 uppercase tracking-widest"
-            >
-                Operational Overview
-            </h2>
-        </div>
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <!-- Roles & Permissions -->
-            <div
-                class="lg:col-span-2 bg-[#111318] rounded-2xl border border-gray-800/40 p-6 shadow-sm"
-            >
-                <h3
-                    class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-5"
-                >
-                    Roles & Permissions
-                </h3>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm table-hover">
-                        <thead>
-                            <tr
-                                class="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800/40"
-                            >
-                                <th class="text-left py-3 font-medium">Role</th>
-                                <th class="text-center py-3 font-medium">
-                                    Admin
-                                </th>
-                                <th class="text-center py-3 font-medium">
-                                    Ban
-                                </th>
-                                <th class="text-center py-3 font-medium">
-                                    Kick
-                                </th>
-                                <th class="text-center py-3 font-medium">
-                                    Manage Guild
-                                </th>
-                                <th class="text-center py-3 font-medium">
-                                    Manage Roles
-                                </th>
-                                <th class="text-center py-3 font-medium">
-                                    Mod
-                                </th>
-                                <th class="text-right py-3 font-medium">
-                                    Members
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for role in roles %}
-                            <tr
-                                class="border-b border-gray-800/30 hover:bg-white/[0.02] transition"
-                            >
-                                <td
-                                    class="py-3 font-medium"
-                                    style="color: {{ role.color if role.color and role.color != '#000000' else '#fff' }}"
-                                >
-                                    {{ role.name }}
-                                </td>
-                                <td class="py-3 text-center">
-                                    {% if role.is_admin %}<span
-                                        class="text-green-400 text-xs"
-                                        >&#10003;</span
-                                    >{% else %}<span class="text-gray-700"
-                                        >—</span
-                                    >{% endif %}
-                                </td>
-                                <td class="py-3 text-center">
-                                    {% if role.can_ban %}<span
-                                        class="text-green-400 text-xs"
-                                        >&#10003;</span
-                                    >{% else %}<span class="text-gray-700"
-                                        >—</span
-                                    >{% endif %}
-                                </td>
-                                <td class="py-3 text-center">
-                                    {% if role.can_kick %}<span
-                                        class="text-green-400 text-xs"
-                                        >&#10003;</span
-                                    >{% else %}<span class="text-gray-700"
-                                        >—</span
-                                    >{% endif %}
-                                </td>
-                                <td class="py-3 text-center">
-                                    {% if role.can_manage_guild %}<span
-                                        class="text-green-400 text-xs"
-                                        >&#10003;</span
-                                    >{% else %}<span class="text-gray-700"
-                                        >—</span
-                                    >{% endif %}
-                                </td>
-                                <td class="py-3 text-center">
-                                    {% if role.can_manage_roles %}<span
-                                        class="text-green-400 text-xs"
-                                        >&#10003;</span
-                                    >{% else %}<span class="text-gray-700"
-                                        >—</span
-                                    >{% endif %}
-                                </td>
-                                <td class="py-3 text-center">
-                                    {% if role.is_mod %}<span
-                                        class="text-xs font-medium bg-blue-900/40 text-blue-300 px-2 py-1 rounded"
-                                        >MOD</span
-                                    >{% else %}<span
-                                        class="text-xs text-gray-600"
-                                        >—</span
-                                    >{% endif %}
-                                </td>
-                                <td class="py-3 text-right text-gray-400">
-                                    {{ role.member_count }}
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
+<section class="ws-section">
+    <div class="section-header" style="margin-bottom: 16px;">
+        <div class="section-eyebrow">Operational</div>
+        <h2 class="ws-title" style="font-size: 20px;">Operational Overview</h2>
+        <p class="ws-subtitle">Roles, moderation rules, and voice analytics.</p>
+    </div>
+
+    <div class="ws-grid-8-4">
+        <!-- Roles table -->
+        <div class="ws-card" style="margin-bottom: 0;">
+            <div class="card-header">
+                <div class="card-title">Roles & Permissions</div>
+                <div class="card-subtitle">Scanned server roles</div>
             </div>
-
-            <!-- Voice Activity -->
-            {% if guild_voice_sessions > 0 %}
-            <div
-                class="bg-[#111318] rounded-2xl border border-emerald-800/30 p-6 shadow-sm"
-            >
-                <h3
-                    class="text-sm font-semibold text-emerald-400 uppercase tracking-wider mb-5"
-                >
-                    Voice Intelligence
-                </h3>
-                <div class="space-y-6">
-                    <div class="grid grid-cols-2 gap-3">
-                        <div
-                            class="bg-[#0b0d11] p-3 rounded-xl border border-gray-800/40 text-center"
-                        >
-                            <p class="text-gray-500 text-[10px] uppercase">
-                                Sessions
-                            </p>
-                            <p class="text-xl font-bold text-white">
-                                {{ guild_voice_sessions }}
-                            </p>
-                        </div>
-                        <div
-                            class="bg-[#0b0d11] p-3 rounded-xl border border-gray-800/40 text-center"
-                        >
-                            <p class="text-gray-500 text-[10px] uppercase">
-                                Total Hours
-                            </p>
-                            <p class="text-xl font-bold text-white">
-                                {{ guild_voice_hours }}h
-                            </p>
-                        </div>
-                    </div>
-                    <div class="relative" style="height: 120px">
-                        <canvas id="guildVoiceHourlyChart"></canvas>
-                    </div>
-                    <div class="space-y-2 max-h-40 overflow-y-auto">
-                        {% for ch in guild_voice_top_channels %}
-                        <div
-                            class="flex justify-between items-center border-b border-gray-800/40 pb-1.5"
-                        >
-                            <span class="text-gray-300 text-xs"
-                                >{{ ch.name }}</span
-                            >
-                            <span class="text-gray-500 text-[10px]"
-                                >{{ ch.sessions }} sess · {{ ch.hours }}h</span
-                            >
-                        </div>
+            <div style="overflow-x: auto;">
+                <table class="ws-table">
+                    <thead>
+                        <tr>
+                            <th>Role</th>
+                            <th style="text-align:center;">Admin</th>
+                            <th style="text-align:center;">Ban</th>
+                            <th style="text-align:center;">Kick</th>
+                            <th style="text-align:center;">Manage Guild</th>
+                            <th style="text-align:center;">Manage Roles</th>
+                            <th style="text-align:center;">Mod</th>
+                            <th style="text-align:right;">Members</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for role in roles %}
+                        <tr>
+                            <td style="font-weight:700; color: {{ role.color if role.color and role.color != '#000000' else 'var(--text-primary)' }}">{{ role.name }}</td>
+                            <td style="text-align:center;">{% if role.is_admin %}<span style="color: var(--green); font-weight: bold;">✓</span>{% else %}<span style="color: var(--text-dim);">—</span>{% endif %}</td>
+                            <td style="text-align:center;">{% if role.can_ban %}<span style="color: var(--green); font-weight: bold;">✓</span>{% else %}<span style="color: var(--text-dim);">—</span>{% endif %}</td>
+                            <td style="text-align:center;">{% if role.can_kick %}<span style="color: var(--green); font-weight: bold;">✓</span>{% else %}<span style="color: var(--text-dim);">—</span>{% endif %}</td>
+                            <td style="text-align:center;">{% if role.can_manage_guild %}<span style="color: var(--green); font-weight: bold;">✓</span>{% else %}<span style="color: var(--text-dim);">—</span>{% endif %}</td>
+                            <td style="text-align:center;">{% if role.can_manage_roles %}<span style="color: var(--green); font-weight: bold;">✓</span>{% else %}<span style="color: var(--text-dim);">—</span>{% endif %}</td>
+                            <td style="text-align:center;">{% if role.is_mod %}<span class="ws-tag blue" style="font-size: 10px;">MOD</span>{% else %}<span style="color: var(--text-dim); font-size:10px;">—</span>{% endif %}</td>
+                            <td style="text-align:right; font-weight: 500; color: var(--text-secondary);">{{ role.member_count }}</td>
+                        </tr>
                         {% endfor %}
-                    </div>
-                </div>
+                    </tbody>
+                </table>
             </div>
-            {% endif %}
         </div>
 
-        <!-- AutoMod & Pings -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-            {% if automod_rules %}
-            <div
-                class="bg-[#111318] rounded-2xl border border-purple-800/30 p-6 shadow-sm"
-            >
-                <h3
-                    class="text-sm font-semibold text-purple-400 uppercase tracking-wider mb-5"
-                >
-                    AutoMod Registry
-                </h3>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-xs table-hover">
-                        <thead>
-                            <tr
-                                class="text-gray-500 uppercase tracking-wider border-b border-gray-800/40"
-                            >
-                                <th class="text-left py-2">Rule</th>
-                                <th class="text-left py-2">Trigger</th>
-                                <th class="text-left py-2">Action</th>
-                                <th class="text-center py-2">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for rule in automod_rules %}
-                            <tr
-                                class="border-b border-gray-800/30 hover:bg-white/[0.02] transition"
-                            >
-                                <td class="py-2 font-medium text-white">
-                                    {{ rule.name }}
-                                </td>
-                                <td class="py-2 text-gray-400">
-                                    {{ rule.trigger_type }}{% if
-                                    rule.trigger_text %}: {{
-                                    rule.trigger_text[:30] }}...{% endif %}
-                                </td>
-                                <td class="py-2 text-gray-400">
-                                    {{ rule.action_type | replace('_', ' ') |
-                                    title }}
-                                </td>
-                                <td class="py-2 text-center">
-                                    {% if rule.enabled %}<span
-                                        class="text-[10px] font-medium bg-green-900/40 text-green-300 px-2 py-0.5 rounded"
-                                        >Active</span
-                                    >{% else %}<span
-                                        class="text-[10px] font-medium bg-gray-800/40 text-gray-500 px-2 py-0.5 rounded"
-                                        >Disabled</span
-                                    >{% endif %}
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+        <!-- Voice analytics -->
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+            {% if guild_voice_sessions > 0 %}
+            <div class="ws-card" style="margin-bottom: 0; border-color: rgba(16, 185, 129, 0.25);">
+                <div class="card-header">
+                    <div class="card-title" style="color: var(--green);">Voice Intelligence</div>
+                    <div class="card-subtitle">Channel session stats</div>
                 </div>
-            </div>
-            {% endif %} {% if ping_events %}
-            <div
-                class="bg-[#111318] rounded-2xl border border-orange-800/30 p-6 shadow-sm"
-            >
-                <h3
-                    class="text-sm font-semibold text-orange-400 uppercase tracking-wider mb-5"
-                >
-                    Ping-to-Join Events
-                </h3>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-xs table-hover">
-                        <thead>
-                            <tr
-                                class="text-gray-500 uppercase tracking-wider border-b border-gray-800/40"
-                            >
-                                <th class="text-left py-2">Mod</th>
-                                <th class="text-center py-2">Gain</th>
-                                <th class="text-left py-2">Joiners</th>
-                                <th class="text-right py-2">When</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for ev in ping_events %}
-                            <tr
-                                class="border-b border-gray-800/30 hover:bg-white/[0.02] transition"
-                            >
-                                <td class="py-2 font-medium text-white">
-                                    {{ ev.moderator_name }}
-                                </td>
-                                <td
-                                    class="py-2 text-center font-bold text-orange-400"
-                                >
-                                    +{{ ev.new_members }}
-                                </td>
-                                <td
-                                    class="py-2 text-gray-400 truncate max-w-[100px]"
-                                >
-                                    {{ ev.joiners[:40] }}...
-                                </td>
-                                <td
-                                    class="py-2 text-right text-gray-600 utc-time"
-                                    data-utc="{{ ev.created_at.isoformat() }}"
-                                >
-                                    {{ ev.created_at.strftime('%d %b %H:%M') }}
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px;">
+                    <div class="ws-stat" style="margin-bottom: 0; padding: 10px; border-radius: var(--radius-sm); text-align: center;">
+                        <div class="ws-stat-label" style="font-size: 9px; margin-top: 0;">Sessions</div>
+                        <div class="ws-stat-value" style="font-size: 18px; font-family: var(--font-secondary);">{{ guild_voice_sessions }}</div>
+                    </div>
+                    <div class="ws-stat" style="margin-bottom: 0; padding: 10px; border-radius: var(--radius-sm); text-align: center;">
+                        <div class="ws-stat-label" style="font-size: 9px; margin-top: 0;">Hours</div>
+                        <div class="ws-stat-value" style="font-size: 18px; font-family: var(--font-secondary);">{{ guild_voice_hours }}h</div>
+                    </div>
+                </div>
+                <div class="ws-chart-sm" style="height: 100px; margin-bottom: 16px;">
+                    <canvas id="guildVoiceHourlyChart"></canvas>
+                </div>
+                <div class="ws-scroll" style="max-height: 120px;">
+                    {% for ch in guild_voice_top_channels %}
+                    <div class="flex justify-between items-center" style="padding: 6px 0; border-bottom: 1px solid var(--border-primary);">
+                        <span style="color: var(--text-secondary); font-size: 12px; font-weight: 500;">{{ ch.name }}</span>
+                        <span style="color: var(--text-dim); font-size: 11px;">{{ ch.sessions }} sess · {{ ch.hours }}h</span>
+                    </div>
+                    {% endfor %}
                 </div>
             </div>
             {% endif %}
         </div>
     </div>
 
-    <!-- Member Directory -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-        <div
-            class="bg-[#111318] rounded-2xl border border-blue-800/40 p-6 shadow-sm"
-        >
-            <h2
-                class="text-sm font-semibold text-blue-400 uppercase tracking-wider mb-5"
-            >
-                Staff ({{ staff|length }})
-            </h2>
+    <!-- AutoMod & Pings -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 24px;">
+        {% if automod_rules %}
+        <div class="ws-card" style="margin-bottom: 0; border-color: rgba(168, 85, 247, 0.25);">
+            <div class="card-header">
+                <div class="card-title" style="color: var(--purple);">AutoMod Registry</div>
+                <div class="card-subtitle">Active rule blocks</div>
+            </div>
+            <div style="overflow-x: auto;">
+                <table class="ws-table">
+                    <thead>
+                        <tr>
+                            <th>Rule</th>
+                            <th>Trigger</th>
+                            <th>Action</th>
+                            <th style="text-align:center;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for rule in automod_rules %}
+                        <tr>
+                            <td style="font-weight:700;">{{ rule.name }}</td>
+                            <td style="color: var(--text-secondary); font-size: 12px;">{{ rule.trigger_type }}{% if rule.trigger_text %}: {{ rule.trigger_text[:30] }}...{% endif %}</td>
+                            <td style="color: var(--text-secondary); font-size: 12px;">{{ rule.action_type | replace('_', ' ') | title }}</td>
+                            <td style="text-align:center;">
+                                {% if rule.enabled %}
+                                <span class="ws-tag green" style="font-size:10px;">Active</span>
+                                {% else %}
+                                <span class="ws-tag muted" style="font-size:10px;">Disabled</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if ping_events %}
+        <div class="ws-card" style="margin-bottom: 0; border-color: rgba(245, 158, 11, 0.25);">
+            <div class="card-header">
+                <div class="card-title" style="color: var(--orange);">Ping-to-Join Correlation</div>
+                <div class="card-subtitle">Spikes in traffic post pings</div>
+            </div>
+            <div style="overflow-x: auto;">
+                <table class="ws-table">
+                    <thead>
+                        <tr>
+                            <th>Mod</th>
+                            <th style="text-align:center;">Gain</th>
+                            <th>Joiners</th>
+                            <th style="text-align:right;">When</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for ev in ping_events %}
+                        <tr>
+                            <td style="font-weight:700;">{{ ev.moderator_name }}</td>
+                            <td style="text-align:center; font-weight:700; color: var(--orange);">+{{ ev.new_members }}</td>
+                            <td style="color: var(--text-secondary); font-size:12px; max-width:150px;" class="truncate">{{ ev.joiners }}</td>
+                            <td style="text-align:right; color: var(--text-dim);" class="utc-time" data-utc="{{ ev.created_at.isoformat() }}">{{ ev.created_at.strftime('%d %b %H:%M') }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</section>
+
+<section class="ws-section">
+    <div class="section-header" style="margin-bottom: 16px;">
+        <div class="section-eyebrow">Members</div>
+        <h2 class="ws-title" style="font-size: 20px;">Server Members</h2>
+        <p class="ws-subtitle">Staff and community breakdown.</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+        <div class="ws-card" style="margin-bottom: 0;">
+            <div class="card-header">
+                <div class="card-title">Staff ({{ staff|length }})</div>
+                <div class="card-subtitle">Detected administrators and moderators</div>
+            </div>
             {% if staff %}
-            <div class="space-y-2 max-h-96 overflow-y-auto pr-2">
+            <div class="ws-scroll" style="max-height: 250px;">
                 {% for m in staff %}
-                <div
-                    class="flex justify-between items-center p-2 rounded-lg hover:bg-white/[0.02] transition border border-transparent hover:border-gray-800/60"
-                >
-                    <div class="flex items-center gap-2 min-w-0">
-                        <span
-                            class="inline-block w-2 h-2 rounded-full flex-shrink-0 {% if m.is_online %}bg-green-400{% else %}bg-gray-600{% endif %}"
-                        ></span>
-                        <span class="text-white truncate text-sm"
-                            >{{ m.name }}</span
-                        >
-                        {% if m.is_owner %}<span
-                            class="text-[10px] font-medium bg-yellow-900/40 text-yellow-300 px-1.5 py-0.5 rounded flex-shrink-0"
-                            >Owner</span
-                        >{% endif %}
+                <div class="flex justify-between items-center" style="padding: 8px 0; border-bottom: 1px solid var(--border-primary);">
+                    <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; {% if m.is_online %}background-color: var(--green);{% else %}background-color: var(--text-dim);{% endif %}"></span>
+                        <span class="truncate" style="color: var(--text-primary); font-size: 13px; font-weight: 500;">{{ m.name }}</span>
+                        {% if m.is_owner %}<span class="ws-tag orange" style="font-size: 9px; padding: 1px 4px;">Owner</span>{% endif %}
                     </div>
-                    <span class="text-gray-600 text-[10px] flex-shrink-0 ml-2"
-                        >{{ m.member_id }}</span
-                    >
+                    <span style="color: var(--text-dim); font-size: 11px;">{{ m.member_id }}</span>
                 </div>
                 {% endfor %}
             </div>
             {% else %}
-            <div class="empty-state py-6">
-                <p class="text-gray-500 text-sm">No staff detected</p>
-            </div>
+            <div class="empty-state">No staff detected</div>
             {% endif %}
         </div>
 
-        <div
-            class="bg-[#111318] rounded-2xl border border-gray-800/40 p-6 shadow-sm"
-        >
-            <h2
-                class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-5"
-            >
-                Community ({{ members|length }})
-            </h2>
+        <div class="ws-card" style="margin-bottom: 0;">
+            <div class="card-header">
+                <div class="card-title">Community ({{ members|length }})</div>
+                <div class="card-subtitle">General observed users</div>
+            </div>
             {% if members %}
-            <div class="space-y-1 max-h-96 overflow-y-auto pr-2">
+            <div class="ws-scroll" style="max-height: 250px;">
                 {% for m in members[:50] %}
-                <div
-                    class="flex justify-between items-center p-1.5 rounded-lg hover:bg-white/[0.02] transition border border-transparent hover:border-gray-800/60"
-                >
-                    <div class="flex items-center gap-2 min-w-0">
-                        <span
-                            class="inline-block w-2 h-2 rounded-full flex-shrink-0 {% if m.is_online %}bg-green-400{% else %}bg-gray-600{% endif %}"
-                        ></span>
-                        <span class="text-gray-300 text-xs truncate"
-                            >{{ m.name }}</span
-                        >
-                        {% if m.last_message_at %}<span
-                            class="text-[10px] text-emerald-600 hidden md:inline"
-                            >chatted</span
-                        >{% elif m.is_online %}<span
-                            class="text-[10px] text-gray-600 hidden md:inline"
-                            >online</span
-                        >{% else %}<span
-                            class="text-[10px] text-gray-700 hidden md:inline"
-                            >observed</span
-                        >{% endif %}
+                <div class="flex justify-between items-center" style="padding: 8px 0; border-bottom: 1px solid var(--border-primary);">
+                    <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; {% if m.is_online %}background-color: var(--green);{% else %}background-color: var(--text-dim);{% endif %}"></span>
+                        <span class="truncate" style="color: var(--text-secondary); font-size: 13px;">{{ m.name }}</span>
+                        {% if m.last_message_at %}<span style="color: var(--green); font-size: 9px; font-weight: 600;">chatted</span>{% elif m.is_online %}<span style="color: var(--text-dim); font-size: 9px;">online</span>{% else %}<span style="color: var(--text-dim); font-size:9px;">observed</span>{% endif %}
                     </div>
-                    <span class="text-gray-600 text-[10px] flex-shrink-0 ml-2"
-                        >{{ m.member_id }}</span
-                    >
+                    <span style="color: var(--text-dim); font-size:11px;">{{ m.member_id }}</span>
                 </div>
-                {% endfor %} {% if members|length > 50 %}
-                <p class="text-gray-600 text-xs text-center mt-3">
-                    ...and {{ members|length - 50 }} more
-                </p>
+                {% endfor %}
+                {% if members|length > 50 %}
+                <p style="color: var(--text-dim); font-size:11px; text-align:center; margin-top:12px; font-weight: 500;">...and {{ members|length - 50 }} more</p>
                 {% endif %}
             </div>
             {% else %}
-            <div class="empty-state py-6">
-                <p class="text-gray-500 text-sm">
-                    No community members tracked
-                </p>
-            </div>
+            <div class="empty-state">No community members tracked</div>
             {% endif %}
         </div>
     </div>
+</section>
 
-    <!-- Role Changes -->
-    {% if role_changes %}
-    <div
-        class="bg-[#111318] rounded-2xl border border-cyan-800/30 p-6 shadow-sm mb-8"
-    >
-        <h2
-            class="text-sm font-semibold text-cyan-400 uppercase tracking-wider mb-5"
-        >
-            Staff Role Changes
-        </h2>
-        <div class="overflow-x-auto">
-            <table class="w-full text-xs table-hover">
+{% if role_changes %}
+<section class="ws-section" style="padding-bottom: 48px; margin-top: 24px;">
+    <div class="ws-card" style="margin-bottom: 0; border-color: rgba(34, 211, 238, 0.25);">
+        <div class="card-header">
+            <div class="card-title" style="color: var(--cyan);">Staff Role Changes</div>
+            <div class="card-subtitle">Historical updates</div>
+        </div>
+        <div style="overflow-x: auto;">
+            <table class="ws-table">
                 <thead>
-                    <tr
-                        class="text-gray-500 uppercase tracking-wider border-b border-gray-800/40"
-                    >
-                        <th class="text-left py-2">Member</th>
-                        <th class="text-left py-2">Change</th>
-                        <th class="text-left py-2">Role</th>
-                        <th class="text-center py-2">Category</th>
-                        <th class="text-left py-2">By</th>
-                        <th class="text-right py-2">When</th>
+                    <tr>
+                        <th>Member</th>
+                        <th>Change</th>
+                        <th>Role</th>
+                        <th style="text-align:center;">Category</th>
+                        <th>By</th>
+                        <th style="text-align:right;">When</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for rc in role_changes %}
-                    <tr
-                        class="border-b border-gray-800/30 hover:bg-white/[0.02] transition"
-                    >
-                        <td class="py-2 font-medium text-white">
-                            {{ rc.member_name }}
+                    <tr>
+                        <td style="font-weight:700;">{{ rc.member_name }}</td>
+                        <td>{% if rc.change_type == 'added' %}<span style="color: var(--green); font-weight: 600;">+ Added</span>{% else %}<span style="color: var(--red); font-weight: 600;">- Removed</span>{% endif %}</td>
+                        <td style="color: var(--text-secondary);">{{ rc.role_name }}</td>
+                        <td style="text-align:center;">
+                            {% if rc.change_category == 'promotion' %}
+                            <span class="ws-tag green" style="font-size:10px;">Promotion</span>
+                            {% elif rc.change_category == 'demotion' %}
+                            <span class="ws-tag red" style="font-size:10px;">Demotion</span>
+                            {% elif rc.change_category == 'retirement' %}
+                            <span class="ws-tag orange" style="font-size:10px;">Retirement</span>
+                            {% else %}
+                            <span class="ws-tag muted" style="font-size:10px;">Other</span>
+                            {% endif %}
                         </td>
-                        <td class="py-2">
-                            {% if rc.change_type == 'added' %}<span
-                                class="text-green-400"
-                                >+ Added</span
-                            >{% else %}<span class="text-red-400"
-                                >- Removed</span
-                            >{% endif %}
-                        </td>
-                        <td class="py-2 text-gray-300">{{ rc.role_name }}</td>
-                        <td class="py-2 text-center">
-                            {% if rc.change_category == 'promotion' %}<span
-                                class="text-green-400 text-[10px] font-medium bg-green-900/30 px-2 py-0.5 rounded"
-                                >Promotion</span
-                            >
-                            {% elif rc.change_category == 'demotion' %}<span
-                                class="text-red-400 text-[10px] font-medium bg-red-900/30 px-2 py-0.5 rounded"
-                                >Demotion</span
-                            >
-                            {% elif rc.change_category == 'retirement' %}<span
-                                class="text-yellow-400 text-[10px] font-medium bg-yellow-900/30 px-2 py-0.5 rounded"
-                                >Retirement</span
-                            >
-                            {% else %}<span
-                                class="text-gray-500 text-[10px] font-medium bg-gray-800/40 px-2 py-0.5 rounded"
-                                >Other</span
-                            >{% endif %}
-                        </td>
-                        <td class="py-2 text-gray-400">
-                            {{ rc.modifier_name or '—' }}
-                        </td>
-                        <td
-                            class="py-2 text-right text-gray-600 utc-time"
-                            data-utc="{{ rc.created_at.isoformat() }}"
-                        >
-                            {{ rc.created_at.strftime('%d %b %H:%M') }}
-                        </td>
+                        <td style="color: var(--text-secondary);">{{ rc.modifier_name or '—' }}</td>
+                        <td style="text-align:right; color: var(--text-dim);" class="utc-time" data-utc="{{ rc.created_at.isoformat() }}">{{ rc.created_at.strftime('%d %b %H:%M') }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
     </div>
-    {% endif %}
-</div>
+</section>
+{% endif %}
+
 {% endblock %} {% block scripts %}
 <script>
     const gc = document.getElementById('guildCompositionChart');
-    if (gc) darkChart(gc, { type: 'doughnut', data: { labels: ['Online', 'Offline', 'Observed'], datasets: [{ data: [{{ online_count }}, {{ tracked_offline }}, {{ tracked_chatted }}], backgroundColor: ['rgba(16,185,129,0.7)', 'rgba(75,85,99,0.5)', 'rgba(59,130,246,0.5)'], borderColor: '#111318', borderWidth: 3 }] }, options: { plugins: { legend: { position: 'bottom' } } } });
+    if (gc) darkChart(gc, { type: 'doughnut', data: { labels: ['Online', 'Offline', 'Observed'], datasets: [{ data: [{{ online_count }}, {{ tracked_offline }}, {{ tracked_chatted }}], backgroundColor: ['rgba(16,185,129,0.7)', 'rgba(75,85,99,0.5)', 'rgba(59,130,246,0.5)'], borderColor: 'var(--bg-card)', borderWidth: 2 }] }, options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 8 } } } });
 
     const gs = document.getElementById('guildStaffChart');
-    if (gs) darkChart(gs, { type: 'doughnut', data: { labels: ['Community', 'Staff'], datasets: [{ data: [{{ community_count }}, {{ guild.staff_count }}], backgroundColor: ['rgba(75,85,99,0.6)', 'rgba(59,130,246,0.8)'], borderColor: '#111318', borderWidth: 3 }] }, options: { plugins: { legend: { position: 'bottom' } } } });
+    if (gs) darkChart(gs, { type: 'doughnut', data: { labels: ['Community', 'Staff'], datasets: [{ data: [{{ community_count }}, {{ guild.staff_count }}], backgroundColor: ['rgba(75,85,99,0.6)', 'rgba(59,130,246,0.8)'], borderColor: 'var(--bg-card)', borderWidth: 2 }] }, options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 8 } } } });
 
     const gb = document.getElementById('guildBotsChart');
-    if (gb) darkChart(gb, { type: 'doughnut', data: { labels: ['Humans', 'Bots'], datasets: [{ data: [{{ human_count }}, {{ bot_count }}], backgroundColor: ['rgba(16,185,129,0.7)', 'rgba(139,92,246,0.7)'], borderColor: '#111318', borderWidth: 3 }] }, options: { plugins: { legend: { position: 'bottom' } } } });
+    if (gb) darkChart(gb, { type: 'doughnut', data: { labels: ['Humans', 'Bots'], datasets: [{ data: [{{ human_count }}, {{ bot_count }}], backgroundColor: ['rgba(16,185,129,0.7)', 'rgba(139,92,246,0.7)'], borderColor: 'var(--bg-card)', borderWidth: 2 }] }, options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 8 } } } });
 
     {% if guild_hourly_chart %}
     (function() {
       const el = document.getElementById('guildHourlyChart'); if (!el) return;
       const gh = shiftHourly({{ guild_hourly_chart | tojson }});
       const h = Array.from({length:24},(_,i)=>`${i}:00`), d = h.map((_,i)=>gh[i]||0), p = Math.max(...d);
-      darkChart(el, { type: 'bar', data: { labels: h, datasets: [{ label: 'Messages', data: d, backgroundColor: d.map(v => v === p && p > 0 ? 'rgba(245,158,11,0.7)' : 'rgba(59,130,246,0.5)'), borderColor: d.map(v => v === p && p > 0 ? '#f59e0b' : '#3b82f6'), borderWidth: 1, borderRadius: 3 }] }, options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 12, font: { family: font } } }, y: { beginAtZero: true, ticks: { font: { family: font } } } } } });
+      darkChart(el, { type: 'bar', data: { labels: h, datasets: [{ label: 'Messages', data: d, backgroundColor: d.map(v => v === p && p > 0 ? 'rgba(245,158,11,0.75)' : 'rgba(59,130,246,0.5)'), borderColor: d.map(v => v === p && p > 0 ? '#f59e0b' : '#3b82f6'), borderWidth: 1, borderRadius: 2 }] }, options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 12, font: { family: font } } }, y: { beginAtZero: true, ticks: { font: { family: font } } } } } });
     })();
     {% endif %}
 
@@ -686,11 +422,11 @@ endblock %} {% block content %}
       darkChart(el, { type: 'line', data: {
         labels: h,
         datasets: [
-          { label: 'Community', data: commData, borderColor: '#6b7280', backgroundColor: 'rgba(107,114,128,0.1)', fill: true, tension: 0.3, pointRadius: 2, pointHitRadius: 5 },
-          { label: 'Staff', data: staffData, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.1)', fill: true, tension: 0.3, pointRadius: 3, pointHitRadius: 5 },
+          { label: 'Community', data: commData, borderColor: '#6b7280', backgroundColor: 'rgba(107,114,128,0.02)', fill: true, tension: 0.35, pointRadius: 1, pointHitRadius: 5 },
+          { label: 'Staff', data: staffData, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.02)', fill: true, tension: 0.35, pointRadius: 2, pointHitRadius: 5 },
         ]
       }, options: {
-        plugins: { legend: { position: 'bottom', labels: { font: { family: font }, boxWidth: 12, padding: 8 } } },
+        plugins: { legend: { position: 'bottom', labels: { font: { family: font }, boxWidth: 10, padding: 8 } } },
         scales: { x: { ticks: { maxTicksLimit: 12, font: { family: font } } }, y: { beginAtZero: true, ticks: { font: { family: font } } } }
       } });
     })();
@@ -705,13 +441,22 @@ endblock %} {% block content %}
       darkChart(el, { type: 'bar', data: {
         labels: h,
         datasets: [
-          { label: 'Predicted', data: h.map((_,i)=>Math.round(preds[i]||0)), backgroundColor: 'rgba(59,130,246,0.5)', borderColor: '#3b82f6', borderWidth: 1, borderRadius: 3 },
-          { label: 'Actual (avg)', data: h.map((_,i)=>actual[i]||0), backgroundColor: 'rgba(16,185,129,0.3)', borderColor: '#10b981', borderWidth: 1, borderRadius: 3 },
+          { label: 'Predicted', data: h.map((_,i)=>Math.round(preds[i]||0)), backgroundColor: 'rgba(59,130,246,0.5)', borderColor: '#3b82f6', borderWidth: 1, borderRadius: 2 },
+          { label: 'Actual (avg)', data: h.map((_,i)=>actual[i]||0), backgroundColor: 'rgba(16,185,129,0.3)', borderColor: '#10b981', borderWidth: 1, borderRadius: 2 },
         ]
       }, options: {
-        plugins: { legend: { position: 'bottom', labels: { font: { family: font }, boxWidth: 12, padding: 8 } } },
+        plugins: { legend: { position: 'bottom', labels: { font: { family: font }, boxWidth: 10, padding: 8 } } },
         scales: { x: { ticks: { maxTicksLimit: 12, font: { family: font } } }, y: { beginAtZero: true, ticks: { font: { family: font } } } }
       } });
+    })();
+    {% endif %}
+    
+    {% if guild_voice_sessions > 0 %}
+    (function() {
+      const el = document.getElementById('guildVoiceHourlyChart'); if (!el) return;
+      const vh = shiftHourly({{ guild_voice_hourly | tojson if guild_voice_hourly else aggregate_hourly | tojson }});
+      const h = Array.from({length:24},(_,i)=>`${i}:00`);
+      darkChart(el, { type: 'bar', data: { labels: h, datasets: [{ label: 'Sessions', data: h.map((_,i)=>vh[i]||0), backgroundColor: 'rgba(16,185,129,0.45)', borderColor: '#10b981', borderWidth: 1, borderRadius: 2 }] }, options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 8, font: { size: 9, family: font } } }, y: { beginAtZero: true, ticks: { font: { size: 9, family: font } } } } } });
     })();
     {% endif %}
 </script>

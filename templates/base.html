@@ -1,246 +1,424 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>{% block title %}SkillSync{% endblock %}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Inter', sans-serif; background: #0b0d11; overflow-x: hidden; }
-    .gradient-text { background: linear-gradient(135deg, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .card-hover { transition: all 0.2s ease; }
-    .card-hover:hover { border-color: #3b82f6 !important; transform: translateY(-2px); }
-    .glow { box-shadow: 0 0 30px rgba(59,130,246,0.08); }
-    .table-hover tr:hover { background: rgba(59,130,246,0.04); }
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>{% block title %}SkillSync{% endblock %}</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+        <style>
+            @font-face {
+                font-family: "Cal Sans UI";
+                src: url('{{ url_for("static", filename="fonts/CalSansUI.woff2") }}')
+                    format("woff2-variations");
+                font-weight: 300 700;
+                font-style: normal;
+                font-display: swap;
+            }
+            @font-face {
+                font-family: "Inter";
+                src: url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+                font-weight: 400 700;
+                font-style: normal;
+                font-display: swap;
+            }
+            @font-face {
+                font-family: "Syne";
+                src: url("https://fonts.googleapis.com/css2?family=Syne:wght@400;700&display=swap");
+                font-weight: 400 700;
+                font-style: normal;
+                font-display: swap;
+            }
+        </style>
+        <link
+            rel="stylesheet"
+            href="{{ url_for('static', filename='dashboard.css') }}"
+        />
+        {% block head_extra %}{% endblock %}
+    </head>
+    <body>
+        {% if user and not logged_out %}
+        <div class="dashboard-layout">
+            <!-- Sidebar -->
+            <aside class="sidebar" id="sidebar">
+                <div
+                    style="
+                        padding: 24px 16px;
+                        border-bottom: 1px solid var(--border-dark);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                    "
+                >
+                    <span
+                        style="
+                            font-family: 'Syne', sans-serif;
+                            font-weight: 800;
+                            font-size: 20px;
+                            color: var(--text-on-dark);
+                            letter-spacing: -0.03em;
+                        "
+                        >SkillSync</span
+                    >
+                </div>
 
-    /* Sidebar */
-    .sidebar { width: 220px; min-width: 220px; height: 100vh; position: fixed; top: 0; left: 0; z-index: 50; overflow-y: auto; }
-    .sidebar::-webkit-scrollbar { width: 4px; }
-    .sidebar::-webkit-scrollbar-thumb { background: #1f2937; border-radius: 2px; }
-    .main-content { margin-left: 220px; min-height: 100vh; }
-    .nav-link { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-radius: 8px; font-size: 14px; color: #6b7280; transition: all 0.15s ease; }
-    .nav-link:hover { color: #e5e7eb; background: rgba(59,130,246,0.08); }
-    .nav-link.active { color: #60a5fa; background: rgba(59,130,246,0.12); }
+                <nav style="flex: 1; padding: 24px 0;">
+                    <a
+                        href="/"
+                        class="nav-link {% if request.path == '/' %}active{% endif %}"
+                    >
+                        <!-- Grid Icon -->
+                        <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <rect x="3" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="14" width="7" height="7"></rect>
+                            <rect x="3" y="14" width="7" height="7"></rect>
+                        </svg>
+                        <span>Dashboard</span>
+                    </a>
 
-    /* Mobile overlay */
-    .sidebar-overlay { display: none; }
-    @media (max-width: 768px) {
-      .sidebar { transform: translateX(-100%); transition: transform 0.25s ease; }
-      .sidebar.open { transform: translateX(0); }
-      .sidebar-overlay.open { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 40; }
-      .main-content { margin-left: 0; }
-    }
+                    {% if accessible_guilds %}
+                    <div
+                        style="
+                            font-size: 10px;
+                            font-weight: 700;
+                            color: var(--text-muted);
+                            text-transform: uppercase;
+                            letter-spacing: 0.1em;
+                            padding: 20px 24px 8px;
+                            font-family: var(--font-primary);
+                        "
+                    >
+                        Communities
+                    </div>
+                    {% for g in accessible_guilds %}
+                    <a
+                        href="/guild/{{ g.id }}"
+                        class="nav-link {% if request.path.startswith('/guild/' ~ g.id) %}active{% endif %}"
+                    >
+                        <!-- Shield/Server Icon -->
+                        <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                        </svg>
+                        <span>{{ g.name }}</span>
+                    </a>
+                    {% endfor %} {% endif %}
+                </nav>
 
-    /* Animated counter */
-    .count-up { display: inline-block; }
+                <div
+                    style="
+                        padding: 16px 20px;
+                        border-top: 1px solid var(--border-dark);
+                        background-color: rgba(0, 0, 0, 0.2);
+                    "
+                >
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px">
+                        <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+                            {% if user.avatar %}
+                            <img
+                                src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png"
+                                style="
+                                    width: 32px;
+                                    height: 32px;
+                                    border-radius: 50%;
+                                    border: 1px solid var(--border-dark);
+                                "
+                                alt=""
+                            />
+                            {% else %}
+                            <div
+                                style="
+                                    width: 32px;
+                                    height: 32px;
+                                    border-radius: 50%;
+                                    background: rgba(255, 255, 255, 0.1);
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    color: var(--text-on-dark);
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                "
+                            >
+                                {{ user.name[:1] }}
+                            </div>
+                            {% endif %}
+                            <div style="min-width: 0;">
+                                <div
+                                    style="
+                                        font-size: 13px;
+                                        color: var(--text-on-dark);
+                                        font-weight: 600;
+                                        overflow: hidden;
+                                        text-overflow: ellipsis;
+                                        white-space: nowrap;
+                                    "
+                                >
+                                    {{ user.name }}
+                                </div>
+                            </div>
+                        </div>
+                        <form
+                            method="POST"
+                            action="/auth/logout"
+                            style="display: inline-flex"
+                        >
+                            <button
+                                type="submit"
+                                class="logout-btn"
+                                style="
+                                    background: none;
+                                    border: none;
+                                    color: var(--text-muted);
+                                    cursor: pointer;
+                                    padding: 6px;
+                                    display: inline-flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    border-radius: var(--radius-sm);
+                                    transition: all 0.15s;
+                                "
+                                onmouseover="
+                                    this.style.color = 'var(--text-on-dark)';
+                                    this.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                                "
+                                onmouseout="
+                                    this.style.color = 'var(--text-muted)';
+                                    this.style.backgroundColor = 'transparent';
+                                "
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    width="16"
+                                    height="16"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    aria-hidden="true"
+                                >
+                                    <path
+                                        d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"
+                                    />
+                                    <polyline points="16 17 21 12 16 7" />
+                                    <line x1="21" y1="12" x2="9" y2="12" />
+                                </svg>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </aside>
 
-    /* Skeleton loader */
-    .skeleton { background: linear-gradient(90deg, #1f2937 25%, #2d3748 50%, #1f2937 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px; }
-    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+            <!-- Mobile Overlay -->
+            <div
+                class="sidebar-overlay"
+                id="sidebarOverlay"
+                onclick="toggleSidebar()"
+            ></div>
 
-    /* Empty state */
-    .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; text-align: center; }
+            <!-- Mobile Menu Button -->
+            <button
+                onclick="toggleSidebar()"
+                class="hamburger-button"
+                style="
+                    padding: 8px;
+                    z-index: 1001;
+                "
+            >
+                <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 20 20"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                >
+                    <path d="M3 5h14M3 10h14M3 15h14" />
+                </svg>
+            </button>
 
-    /* Toast */
-    .toast { position: fixed; bottom: 24px; right: 24px; z-index: 100; padding: 12px 20px; border-radius: 10px; font-size: 13px; font-weight: 500; opacity: 0; transform: translateY(10px); transition: all 0.3s ease; }
-    .toast.show { opacity: 1; transform: translateY(0); }
-  </style>
-  {% block head_extra %}{% endblock %}
-</head>
-<body class="text-gray-100 min-h-screen">
+            <!-- Main Content -->
+            <main class="main-content">{% block content %}{% endblock %}</main>
+        </div>
+        {% else %}
+        <!-- Logged Out / Landing Page layout -->
+        <header
+            style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 24px 32px;
+                border-bottom: 1px solid var(--border-primary);
+                background-color: var(--bg-card);
+            "
+        >
+            <a
+                href="/"
+                style="
+                    font-family: 'Syne', sans-serif;
+                    font-weight: 800;
+                    font-size: 20px;
+                    color: var(--text-primary);
+                    text-decoration: none;
+                    letter-spacing: -0.03em;
+                "
+                >SkillSync</a
+            >
+            <div style="display: flex; align-items: center; gap: 16px">
+                {% if user %}
+                <span style="font-size: 13px; color: var(--text-secondary)"
+                    >{{ user.name }}</span
+                >
+                <form
+                    method="POST"
+                    action="/auth/logout"
+                    style="display: inline"
+                >
+                    <button type="submit" class="btn">Logout</button>
+                </form>
+                {% else %}
+                <a href="/auth/login" class="btn">Login</a>
+                <a
+                    href="{{ invite_url }}"
+                    target="_blank"
+                    class="btn primary"
+                    >Invite Bot</a
+                >
+                {% endif %}
+            </div>
+        </header>
+        <main style="min-height: calc(100vh - 80px);">{% block landing_content %}{% endblock %}</main>
+        {% endif %}
 
-{% if user and not logged_out %}
+        <div class="toast" id="toast"></div>
 
-<!-- SIDEBAR -->
-<aside class="sidebar bg-[#111318] border-r border-gray-800/40 flex flex-col" id="sidebar">
-  <div class="p-4 border-b border-gray-800/40 flex items-center gap-2">
-    <span class="text-white font-bold" style="font-size: 18px;">SkillSync</span>
-  </div>
+        <script>
+            // Global chart helpers aligned with v2 aesthetics
+            const font = "Inter";
+            const gridColor = "rgba(0, 0, 0, 0.05)";
+            const textColor = "#494D5F";
+            const bgColor = "var(--bg-card)";
+            const borderColor = "var(--border-primary)";
+            const successColor = "var(--green)";
 
-  <nav class="flex-1 p-3 space-y-1">
-    <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">
-      <span>Dashboard</span>
-    </a>
+            function darkChart(ctx, config) {
+                config.options.responsive = true;
+                config.options.maintainAspectRatio = false;
+                
+                // Styling overrides
+                config.options.plugins = config.options.plugins || {};
+                config.options.plugins.legend = config.options.plugins.legend || {};
+                config.options.plugins.legend.labels = config.options.plugins.legend.labels || {};
+                config.options.plugins.legend.labels.color = textColor;
+                config.options.plugins.legend.labels.font = { family: font, size: 11, weight: '500' };
 
-    {% if accessible_guilds %}
-    <div class="text-gray-600 text-xs uppercase tracking-wider px-3 pt-4 pb-1">Servers</div>
-    {% for g in accessible_guilds %}
-    <a href="/guild/{{ g.id }}" class="nav-link text-xs {% if request.path.startswith('/guild/' ~ g.id) %}active{% endif %}">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="min-width:14px"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-      <span class="truncate">{{ g.name }}</span>
-    </a>
-    {% endfor %}
-    {% endif %}
-  </nav>
+                config.options.scales = config.options.scales || {};
+                
+                if (config.options.scales.x) {
+                    config.options.scales.x.ticks = config.options.scales.x.ticks || {};
+                    config.options.scales.x.ticks.color = textColor;
+                    config.options.scales.x.ticks.font = { family: font, size: 10 };
+                    config.options.scales.x.grid = config.options.scales.x.grid || {};
+                    config.options.scales.x.grid.color = gridColor;
+                }
+                
+                if (config.options.scales.y) {
+                    config.options.scales.y.ticks = config.options.scales.y.ticks || {};
+                    config.options.scales.y.ticks.color = textColor;
+                    config.options.scales.y.ticks.font = { family: font, size: 10 };
+                    config.options.scales.y.grid = config.options.scales.y.grid || {};
+                    config.options.scales.y.grid.color = gridColor;
+                }
 
-  <div class="p-3 border-t border-gray-800/40">
-    {% if user %}
-    <div class="flex items-center gap-2 px-2 py-2">
-      {% if user.avatar %}
-      <img src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png" class="w-7 h-7 rounded-full" alt=""/>
-      {% else %}
-      <div class="w-7 h-7 rounded-full bg-blue-600/30 flex items-center justify-center text-xs text-blue-300">{{ user.name[:1] }}</div>
-      {% endif %}
-      <div class="flex-1 min-w-0">
-        <p class="text-sm text-gray-300 truncate">{{ user.name }}</p>
-      </div>
-      <form method="POST" action="/auth/logout">
-        <button type="submit" class="text-gray-500 hover:text-red-400 transition cursor-pointer" title="Logout" style="padding:2px">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-            <polyline points="16 17 21 12 16 7"/>
-            <line x1="21" y1="12" x2="9" y2="12"/>
-          </svg>
-        </button>
-      </form>
-    </div>
-    {% endif %}
-  </div>
-</aside>
+                // Smooth out line datasets
+                if (config.data && config.data.datasets) {
+                    config.data.datasets.forEach(ds => {
+                        if (ds.type === 'line' || config.type === 'line') {
+                            ds.tension = ds.tension !== undefined ? ds.tension : 0.35;
+                            ds.borderWidth = ds.borderWidth || 2;
+                            ds.pointRadius = ds.pointRadius !== undefined ? ds.pointRadius : 2;
+                            ds.pointHoverRadius = ds.pointHoverRadius || 5;
+                        }
+                    });
+                }
 
-<!-- Mobile overlay -->
-<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+                return new Chart(ctx, config);
+            }
 
-<!-- Hamburger (mobile) -->
-<button onclick="toggleSidebar()" class="md:hidden fixed top-4 left-4 z-50 bg-[#111318] border border-gray-800/60 p-2 rounded-lg text-gray-400">
-  <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-</button>
+            function toggleSidebar() {
+                const sidebar = document.getElementById("sidebar");
+                const overlay = document.getElementById("sidebarOverlay");
+                sidebar.classList.toggle("open");
+                overlay.classList.toggle("open");
+            }
 
-<!-- MAIN -->
-<main class="main-content">
-{% else %}
-<!-- LANDING / LOGGED OUT — full width, no sidebar -->
-<nav class="border-b border-gray-800/60 px-6 py-4 flex items-center justify-between max-w-7xl mx-auto">
-  <a href="/" class="flex items-center gap-2">
-    <span class="text-white font-bold text-lg">SkillSync</span>
-  </a>
-  <div class="flex items-center gap-4">
-    {% if user %}
-    <span class="text-gray-400 text-sm">{{ user.name }}</span>
-    <form method="POST" action="/auth/logout" style="display:inline">
-      <button type="submit" class="text-gray-500 hover:text-red-400 text-sm transition cursor-pointer">Logout</button>
-    </form>
-    {% else %}
-    <a href="/auth/login" class="border border-gray-700 hover:border-gray-500 px-5 py-2 rounded-lg text-sm font-medium transition">Login</a>
-    <a href="{{ invite_url }}" target="_blank" class="bg-blue-600 hover:bg-blue-500 px-5 py-2 rounded-lg text-sm font-medium transition shadow-lg shadow-blue-600/20">Invite Bot</a>
-    {% endif %}
-  </div>
-</nav>
-<main>
-{% endif %}
+            function showToast(msg, type) {
+                const t = document.getElementById("toast");
+                t.textContent = msg;
+                t.className = "toast show " + (type || "info");
+                setTimeout(() => t.classList.remove("show"), 3000);
+            }
 
-{% block content %}{% endblock %}
+            // Client-side hourly data shifter: converts UTC hourly data to local timezone
+            function shiftHourly(data) {
+                const offset = new Date().getTimezoneOffset();
+                const oh = -offset / 60;
+                const shifted = {};
+                for (const [h, count] of Object.entries(data)) {
+                    const lh = Math.floor((parseInt(h) + oh + 24) % 24);
+                    shifted[lh] = (shifted[lh] || 0) + count;
+                }
+                return shifted;
+            }
 
-</main>
+            // Localize all UTC timestamps to the viewer's timezone
+            function localizeTimestamps() {
+                document.querySelectorAll(".utc-time").forEach((el) => {
+                    const utcStr = el.dataset.utc;
+                    if (!utcStr) return;
+                    const d = new Date(utcStr + "Z");
+                    if (isNaN(d.getTime())) return;
+                    const hasTime = utcStr.includes("T");
+                    if (hasTime) {
+                        el.textContent = d.toLocaleString(undefined, {
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                        });
+                    } else {
+                        el.textContent = d.toLocaleDateString(undefined, {
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
+                        });
+                    }
+                });
+            }
+            document.addEventListener("DOMContentLoaded", localizeTimestamps);
+        </script>
 
-{% if user and not logged_out %}
-<footer class="border-t border-gray-800/40 py-5 text-center text-gray-600 text-xs ml-[220px]">
-  SkillSync — Workforce Intelligence for Discord
-</footer>
-{% else %}
-<footer class="border-t border-gray-800/40 py-6 text-center text-gray-600 text-xs mt-8">
-  SkillSync — Workforce Intelligence for Discord
-</footer>
-{% endif %}
-
-<div class="toast" id="toast"></div>
-
-<script>
-  const font = 'Inter';
-  const gridColor = 'rgba(255,255,255,0.05)';
-  const textColor = '#9ca3af';
-
-  function darkChart(ctx, config) {
-    config.options.responsive = true;
-    config.options.maintainAspectRatio = true;
-    if (config.options.plugins && config.options.plugins.legend) {
-      config.options.plugins.legend.labels = config.options.plugins.legend.labels || {};
-      config.options.plugins.legend.labels.color = textColor;
-      config.options.plugins.legend.labels.font = { family: font };
-    }
-    if (config.options.scales) {
-      if (config.options.scales.x) { config.options.scales.x.ticks = config.options.scales.x.ticks || {}; config.options.scales.x.ticks.color = textColor; config.options.scales.x.grid = config.options.scales.x.grid || {}; config.options.scales.x.grid.color = gridColor; }
-      if (config.options.scales.y) { config.options.scales.y.ticks = config.options.scales.y.ticks || {}; config.options.scales.y.ticks.color = textColor; config.options.scales.y.grid = config.options.scales.y.grid || {}; config.options.scales.y.grid.color = gridColor; }
-    }
-    return new Chart(ctx, config);
-  }
-
-  function toggleSidebar() {
-    document.getElementById('sidebar').classList.toggle('open');
-    document.getElementById('sidebarOverlay').classList.toggle('open');
-  }
-
-  function showToast(msg, type) {
-    const t = document.getElementById('toast');
-    t.textContent = msg;
-    t.className = 'toast show ' + (type === 'error' ? 'bg-red-700 text-red-100' : type === 'success' ? 'bg-emerald-700 text-emerald-100' : 'bg-gray-700 text-gray-100');
-    setTimeout(() => t.classList.remove('show'), 3000);
-  }
-
-  // Animated counters
-  document.addEventListener('DOMContentLoaded', function() {
-    const counters = document.querySelectorAll('.count-up');
-    if (!counters.length) return;
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (!entry.isIntersecting) return;
-        const el = entry.target;
-        const target = parseFloat(el.dataset.target || el.textContent.replace(/[^0-9.-]/g, ''));
-        const suffix = el.dataset.suffix || '';
-        const duration = 800;
-        const start = performance.now();
-        function update(now) {
-          const p = Math.min((now - start) / duration, 1);
-          const eased = 1 - Math.pow(1 - p, 3);
-          el.textContent = (target * eased).toFixed(target % 1 === 0 ? 0 : 1) + suffix;
-          if (p < 1) requestAnimationFrame(update);
-        }
-        requestAnimationFrame(update);
-        observer.unobserve(el);
-      });
-    }, { threshold: 0.5 });
-    counters.forEach(c => observer.observe(c));
-  });
-
-  // Client-side hourly data shifter: converts UTC hourly data to local timezone
-  function shiftHourly(data) {
-    const offset = new Date().getTimezoneOffset(); // e.g. -330 for IST
-    const oh = -offset / 60; // e.g. 5.5 for IST
-    const shifted = {};
-    for (const [h, count] of Object.entries(data)) {
-      const lh = Math.floor((parseInt(h) + oh + 24) % 24);
-      shifted[lh] = (shifted[lh] || 0) + count;
-    }
-    return shifted;
-  }
-
-  // Localize all UTC timestamps to the viewer's timezone
-  function localizeTimestamps() {
-    document.querySelectorAll('.utc-time').forEach(el => {
-      const utcStr = el.dataset.utc;
-      if (!utcStr) return;
-      const d = new Date(utcStr + 'Z');
-      if (isNaN(d.getTime())) return;
-      const hasTime = utcStr.includes('T');
-      if (hasTime) {
-        el.textContent = d.toLocaleString(undefined, {
-          year: 'numeric', month: 'short', day: 'numeric',
-          hour: '2-digit', minute: '2-digit'
-        });
-      } else {
-        el.textContent = d.toLocaleDateString(undefined, {
-          year: 'numeric', month: 'short', day: 'numeric'
-        });
-      }
-    });
-  }
-  document.addEventListener('DOMContentLoaded', localizeTimestamps);
-</script>
-
-{% block scripts %}{% endblock %}
-
-</body>
+        {% block scripts %}{% endblock %}
+    </body>
 </html>
