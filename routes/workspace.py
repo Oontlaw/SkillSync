@@ -665,6 +665,160 @@ def workspace_task_update(task_id):
 
 
 # ---------------------------------------------------------------------------
+# Work Review — auto-judged task completion review
+# ---------------------------------------------------------------------------
+
+
+@workspace_bp.route("/work/review")
+@ws_admin_required
+def workspace_work_review():
+    """Review auto-judged work_engine points entries.
+    Shows pending (unreviewed) work_engine ScoreLog entries.
+    Admin/HR can confirm or correct each auto-judgment."""
+    org_id = session["ws_org_id"]
+    org_name = session["ws_org_name"]
+    role = session.get("ws_member_role", "member")
+
+    linked_ids = [
+        i.worker_id
+        for i in WorkerIdentity.query.filter_by(org_id=org_id, is_active=True).all()
+        if i.worker_id
+    ]
+
+    entries = []
+    total_pending = 0
+    total_reviewed = 0
+    total_corrected = 0
+
+    if linked_ids:
+        # Fetch unreviewed work_engine score logs
+        raw = (
+            ScoreLog.query.filter(
+                ScoreLog.worker_id.in_(linked_ids),
+                ScoreLog.source == "work_engine",
+                ScoreLog.reviewed == False,
+            )
+            .order_by(ScoreLog.created_at.desc())
+            .limit(50)
+            .all()
+        )
+
+        # Stats
+        total_pending = len(raw)
+        total_reviewed = ScoreLog.query.filter(
+            ScoreLog.worker_id.in_(linked_ids),
+            ScoreLog.source == "work_engine",
+            ScoreLog.reviewed == True,
+        ).count()
+        total_corrected = ScoreLog.query.filter(
+            ScoreLog.worker_id.in_(linked_ids),
+            ScoreLog.source == "work_engine",
+            ScoreLog.admin_correction == True,
+        ).count()
+
+        wmap = {w.id: w for w in Worker.query.filter(Worker.id.in_(linked_ids)).all()}
+        for log in raw:
+            w = wmap.get(log.worker_id)
+            entries.append(
+                {
+                    "log": log,
+                    "worker_name": w.name if w else "Unknown",
+                    "change_display": f"{'%2B' if log.change >= 0 else ''}{int(log.change)} pts",
+                }
+            )
+
+    return render_template(
+        "workspace_work_review.html",
+        entries=entries,
+        total_pending=total_pending,
+        total_reviewed=total_reviewed,
+        total_corrected=total_corrected,
+        org_name=org_name,
+        role=role,
+    )
+
+
+@workspace_bp.route("/work/review/<int:log_id>/action", methods=["POST"])
+@ws_admin_required
+def workspace_work_review_action(log_id):
+    """Confirm or correct an auto-judged work_engine ScoreLog entry.
+    Accepts JSON: {"action": "confirmed" | "corrected", "new_change": ..., "reason": ...}"""
+    org_id = session["ws_org_id"]
+    data = request.get_json(force=True)
+    action = data.get("action")
+
+    if action not in ("confirmed", "corrected"):
+        return jsonify({"error": 'action must be "confirmed" or "corrected"'}), 400
+
+    log = db.session.get(ScoreLog, log_id)
+    if not log:
+        return jsonify({"error": "ScoreLog entry not found"}), 404
+
+    # Verify entry belongs to this org
+    linked_ids = [
+        i.worker_id
+        for i in WorkerIdentity.query.filter_by(org_id=org_id, is_active=True).all()
+        if i.worker_id
+    ]
+    if log.worker_id not in linked_ids:
+        return jsonify({"error": "Forbidden — worker not in your org"}), 403
+
+    admin_name = session.get("ws_member_name", "Admin")
+
+    if action == "confirmed":
+        log.reviewed = True
+        log.reviewed_at = datetime.utcnow()
+        log.reviewed_by = admin_name
+        db.session.commit()
+        return jsonify({"ok": True, "action": "confirmed", "log_id": log_id})
+
+    elif action == "corrected":
+        new_change = data.get("new_change")
+        reason = data.get("reason", "").strip()
+
+        if new_change is None:
+            return jsonify(
+                {"error": "new_change is required for corrected entries"}
+            ), 400
+
+        # Use correct_case to record the correction (writes AdminCorrection, updates ScoreLog)
+        result = correct_case(
+            log_id,
+            float(new_change),
+            reason or "Admin correction via Work Review",
+            admin_name,
+        )
+
+        if "error" in result:
+            return jsonify({"error": result["error"]}), 400
+
+        # Mark as reviewed and as admin_correction
+        log.reviewed = True
+        log.reviewed_at = datetime.utcnow()
+        log.reviewed_by = admin_name
+        log.admin_correction = True
+        db.session.commit()
+
+        # Fire retrain signal (fire and forget)
+        try:
+            api_key = os.getenv("API_KEY", "")
+            requests.post(
+                "http://localhost:5000/api/observer/ml/request-retrain",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={},
+                timeout=2,
+            )
+        except Exception:
+            pass
+
+        return jsonify(
+            {"ok": True, "action": "corrected", "log_id": log_id, "result": result}
+        )
+
+    return jsonify({"error": "Invalid action"}), 400
+
+
+# ---------------------------------------------------------------------------
 # Identities
 # ---------------------------------------------------------------------------
 

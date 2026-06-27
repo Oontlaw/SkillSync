@@ -160,6 +160,11 @@ class ScoreLog(db.Model):
     guild_id = db.Column(db.String(50), nullable=True, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
+    # Auto-judgment review tracking
+    reviewed = db.Column(db.Boolean, default=False)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    reviewed_by = db.Column(db.String(150), nullable=True)
+
     def __repr__(self):
         return f"<ScoreLog worker={self.worker_id} change={self.change}>"
 

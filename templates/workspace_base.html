@@ -52,6 +52,13 @@
                 >
                 {% if session.get('ws_member_role') in ('admin','hr') %}
                 <a
+                    href="{{ url_for('workspace.workspace_work_review') }}"
+                    class="ws-nav-link {% if request.endpoint == 'workspace.workspace_work_review' %}active{% endif %}"
+                    >Work Review</a
+                >
+                {% endif %} {% if session.get('ws_member_role') in
+                ('admin','hr') %}
+                <a
                     href="{{ url_for('workspace.workspace_task_create') }}"
                     class="ws-nav-link {% if request.endpoint == 'workspace.workspace_task_create' %}active{% endif %}"
                     >Assign Task</a

@@ -1,0 +1,184 @@
+{% extends "workspace_base.html" %}
+{% block title %}Work Review — {{ org_name }}{% endblock %}
+{% block content %}
+<div class="ws-page">
+    <div class="ws-page-header">
+        <div>
+            <h1 class="ws-page-title">Work Review</h1>
+            <p class="ws-page-subtitle">Review auto-judged task completions from the work engine</p>
+        </div>
+    </div>
+
+    <!-- Stats row -->
+    <div class="ws-stats">
+        <div class="ws-stat">
+            <span class="ws-stat-value">{{ total_pending }}</span>
+            <span class="ws-stat-label">Pending Review</span>
+        </div>
+        <div class="ws-stat">
+            <span class="ws-stat-value">{{ total_reviewed }}</span>
+            <span class="ws-stat-label">Reviewed</span>
+        </div>
+        <div class="ws-stat">
+            <span class="ws-stat-value">{{ total_corrected }}</span>
+            <span class="ws-stat-label">Corrected</span>
+        </div>
+    </div>
+
+    {% if entries %}
+    <div class="ws-card" style="margin-top: 24px;">
+        <div class="ws-table-wrap">
+            {% for entry in entries %}
+            <div class="ws-review-card" data-log-id="{{ entry.log.id }}">
+                <div class="ws-review-card-header">
+                    <div class="ws-review-worker">
+                        <strong>{{ entry.worker_name }}</strong>
+                        <span class="ws-tag ws-tag-{% if entry.log.change >= 0 %}success{% else %}danger{% endif %}" style="margin-left: 8px;">
+                            {{ entry.change_display }}
+                        </span>
+                    </div>
+                    <div class="ws-review-meta">
+                        <span data-utc="{{ entry.log.created_at.isoformat() }}">{{ entry.log.created_at.strftime('%Y-%m-%d %H:%M') if entry.log.created_at else '' }}</span>
+                    </div>
+                </div>
+                <div class="ws-review-card-body">
+                    <p class="ws-review-reason">{{ entry.log.reason }}</p>
+                </div>
+                <div class="ws-review-card-actions">
+                    <button class="ws-btn ws-btn-sm ws-btn-success" onclick="confirmReview({{ entry.log.id }})">
+                        ✓ Confirm
+                    </button>
+                    <button class="ws-btn ws-btn-sm ws-btn-danger" onclick="showCorrectForm({{ entry.log.id }})">
+                        ✗ Correct
+                    </button>
+                </div>
+                <!-- Inline correction form (hidden by default) -->
+                <div class="ws-review-correct-form" id="correct-form-{{ entry.log.id }}" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--ws-border);">
+                    <div class="ws-field" style="margin-bottom: 8px;">
+                        <label class="ws-label">New Points Value</label>
+                        <input type="number" step="0.5" class="ws-input" id="new-change-{{ entry.log.id }}" placeholder="e.g. 5 or -10" style="width: 200px;" />
+                    </div>
+                    <div class="ws-field" style="margin-bottom: 8px;">
+                        <label class="ws-label">Reason for Correction</label>
+                        <input type="text" class="ws-input" id="reason-{{ entry.log.id }}" placeholder="Why is this being corrected?" style="width: 100%;" />
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="ws-btn ws-btn-sm ws-btn-primary" onclick="submitCorrection({{ entry.log.id }})">
+                            Submit Correction
+                        </button>
+                        <button class="ws-btn ws-btn-sm" onclick="hideCorrectForm({{ entry.log.id }})">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% else %}
+    <div class="ws-card ws-card-empty" style="margin-top: 24px;">
+        <p style="text-align: center; color: var(--ws-muted); padding: 48px 0;">
+            ✨ No pending auto-judgments to review. All caught up!
+        </p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function getCSRFToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.getAttribute('content') : '{{ csrf_token }}';
+}
+
+function confirmReview(logId) {
+    const btn = document.querySelector(`[data-log-id="${logId}"] .ws-btn-success`);
+    btn.disabled = true;
+    btn.textContent = 'Confirming...';
+
+    fetch(`/workspace/work/review/${logId}/action`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': getCSRFToken(),
+        },
+        body: JSON.stringify({ action: 'confirmed' }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            const card = document.querySelector(`[data-log-id="${logId}"]`);
+            card.style.opacity = '0.5';
+            card.querySelector('.ws-review-card-actions').innerHTML =
+                '<span class="ws-tag ws-tag-success">✓ Confirmed</span>';
+            // Update stats
+            location.reload();
+        } else {
+            wsToast(data.error || 'Failed to confirm', 'error');
+            btn.disabled = false;
+            btn.textContent = '✓ Confirm';
+        }
+    })
+    .catch(err => {
+        wsToast('Network error: ' + err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = '✓ Confirm';
+    });
+}
+
+function showCorrectForm(logId) {
+    document.getElementById(`correct-form-${logId}`).style.display = 'block';
+}
+
+function hideCorrectForm(logId) {
+    document.getElementById(`correct-form-${logId}`).style.display = 'none';
+}
+
+function submitCorrection(logId) {
+    const newChange = document.getElementById(`new-change-${logId}`).value;
+    const reason = document.getElementById(`reason-${logId}`).value;
+
+    if (!newChange) {
+        wsToast('Please enter a new points value', 'error');
+        return;
+    }
+
+    const btn = document.querySelector(`[data-log-id="${logId}"] .ws-btn-primary`);
+    btn.disabled = true;
+    btn.textContent = 'Submitting...';
+
+    fetch(`/workspace/work/review/${logId}/action`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': getCSRFToken(),
+        },
+        body: JSON.stringify({
+            action: 'corrected',
+            new_change: parseFloat(newChange),
+            reason: reason || 'Admin correction via Work Review',
+        }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            const card = document.querySelector(`[data-log-id="${logId}"]`);
+            card.style.opacity = '0.5';
+            card.querySelector('.ws-review-card-actions').innerHTML =
+                '<span class="ws-tag ws-tag-danger">✗ Corrected</span>';
+            location.reload();
+        } else {
+            wsToast(data.error || 'Failed to correct', 'error');
+            btn.disabled = false;
+            btn.textContent = 'Submit Correction';
+        }
+    })
+    .catch(err => {
+        wsToast('Network error: ' + err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Submit Correction';
+    });
+}
+</script>
+{% endblock %}

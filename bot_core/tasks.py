@@ -397,6 +397,37 @@ async def jira_poll_loop():
     print(f"[WorkEngine] Synced {synced} issues from Jira")
 
 
+@tasks.loop(hours=1)
+async def jira_per_org_poll_loop():
+    """Poll Jira for every org that has credentials configured.
+    Auto-creates/updates tasks and awards points per org credentials.
+    Runs every hour."""
+    from database import Organisation
+    from work_engine.connector_jira import poll_and_sync_for_org
+
+    orgs = Organisation.query.filter(
+        Organisation.jira_url.isnot(None),
+        Organisation.jira_email.isnot(None),
+        Organisation.jira_api_token.isnot(None),
+        Organisation.jira_project.isnot(None),
+        Organisation.is_active.is_(True),
+    ).all()
+
+    if not orgs:
+        return
+
+    print(f"[WorkEngine] Per-org Jira poll: {len(orgs)} org(s) configured")
+    for org in orgs:
+        try:
+            result = poll_and_sync_for_org(org)
+            if result.get("synced", 0) > 0:
+                print(f"[WorkEngine] Org {org.slug}: synced {result['synced']} tasks")
+            if result.get("errors", 0) > 0:
+                print(f"[WorkEngine] Org {org.slug}: {result['errors']} errors")
+        except Exception as e:
+            print(f"[WorkEngine] Org {org.slug}: poll error: {e}")
+
+
 @tasks.loop(hours=6)
 async def rescan_guilds_loop():
     """Re-scan all guilds every 6 hours to refresh online counts, members, and staff lists."""
