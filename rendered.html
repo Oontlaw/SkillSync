@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Test Guild – SkillSync</title>
+        <script src="/static/chart.umd.min.js"></script>
+        <style>
+            @font-face {
+                font-family: "Cal Sans UI";
+                src: url('/static/fonts/CalSansUI.woff2')
+                    format("woff2-variations");
+                font-weight: 300 700;
+                font-style: normal;
+                font-display: swap;
+            }
+            @font-face {
+                font-family: "Inter";
+                src: url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+                font-weight: 400 700;
+                font-style: normal;
+                font-display: swap;
+            }
+            @font-face {
+                font-family: "Syne";
+                src: url("https://fonts.googleapis.com/css2?family=Syne:wght@400;700&display=swap");
+                font-weight: 400 700;
+                font-style: normal;
+                font-display: swap;
+            }
+        </style>
+        <link
+            rel="stylesheet"
+            href="/static/dashboard.css"
+        />
+        
+    </head>
+    <body>
+        
+        <!-- Logged Out / Landing Page layout -->
+        <header
+            style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 24px 32px;
+                border-bottom: 1px solid var(--border-primary);
+                background-color: var(--bg-card);
+            "
+        >
+            <a
+                href="/"
+                style="
+                    font-family: 'Syne', sans-serif;
+                    font-weight: 800;
+                    font-size: 20px;
+                    color: var(--text-primary);
+                    text-decoration: none;
+                    letter-spacing: -0.03em;
+                "
+                >SkillSync</a
+            >
+            <div style="display: flex; align-items: center; gap: 16px">
+                
+                <a href="/auth/login" class="btn">Login</a>
+                <a
+                    href=""
+                    target="_blank"
+                    class="btn primary"
+                    >Invite Bot</a
+                >
+                
+            </div>
+        </header>
+        <main style="min-height: calc(100vh - 80px);"></main>
+        
+
+        <div class="toast" id="toast"></div>
+
+        <script>
+            // Global chart helpers aligned with v2 aesthetics
+            const font = "Inter";
+            const gridColor = "rgba(0, 0, 0, 0.05)";
+            const textColor = "#494D5F";
+            const bgColor = "var(--bg-card)";
+            const borderColor = "var(--border-primary)";
+            const successColor = "var(--green)";
+
+            function darkChart(ctx, config) {
+                config.options = config.options || {};
+                config.options.responsive = true;
+                config.options.maintainAspectRatio = false;
+                
+                // Styling overrides
+                config.options.plugins = config.options.plugins || {};
+                config.options.plugins.legend = config.options.plugins.legend || {};
+                config.options.plugins.legend.labels = config.options.plugins.legend.labels || {};
+                config.options.plugins.legend.labels.color = textColor;
+                config.options.plugins.legend.labels.font = { family: font, size: 11, weight: '500' };
+
+                config.options.scales = config.options.scales || {};
+                
+                if (config.options.scales.x) {
+                    config.options.scales.x.ticks = config.options.scales.x.ticks || {};
+                    config.options.scales.x.ticks.color = textColor;
+                    config.options.scales.x.ticks.font = { family: font, size: 10 };
+                    config.options.scales.x.grid = config.options.scales.x.grid || {};
+                    config.options.scales.x.grid.color = gridColor;
+                }
+                
+                if (config.options.scales.y) {
+                    config.options.scales.y.ticks = config.options.scales.y.ticks || {};
+                    config.options.scales.y.ticks.color = textColor;
+                    config.options.scales.y.ticks.font = { family: font, size: 10 };
+                    config.options.scales.y.grid = config.options.scales.y.grid || {};
+                    config.options.scales.y.grid.color = gridColor;
+                }
+
+                // Smooth out line datasets
+                if (config.data && config.data.datasets) {
+                    config.data.datasets.forEach(ds => {
+                        if (ds.type === 'line' || config.type === 'line') {
+                            ds.tension = ds.tension !== undefined ? ds.tension : 0.35;
+                            ds.borderWidth = ds.borderWidth || 2;
+                            ds.pointRadius = ds.pointRadius !== undefined ? ds.pointRadius : 2;
+                            ds.pointHoverRadius = ds.pointHoverRadius || 5;
+                        }
+                    });
+                }
+
+                return new Chart(ctx, config);
+            }
+
+            function toggleSidebar() {
+                const sidebar = document.getElementById("sidebar");
+                const overlay = document.getElementById("sidebarOverlay");
+                sidebar.classList.toggle("open");
+                overlay.classList.toggle("open");
+            }
+
+            function showToast(msg, type) {
+                const t = document.getElementById("toast");
+                t.textContent = msg;
+                t.className = "toast show " + (type || "info");
+                setTimeout(() => t.classList.remove("show"), 3000);
+            }
+
+            // Client-side hourly data shifter: converts UTC hourly data to local timezone
+            function shiftHourly(data) {
+                const offset = new Date().getTimezoneOffset();
+                const oh = -offset / 60;
+                const shifted = {};
+                for (const [h, count] of Object.entries(data)) {
+                    const lh = Math.floor((parseInt(h) + oh + 24) % 24);
+                    shifted[lh] = (shifted[lh] || 0) + count;
+                }
+                return shifted;
+            }
+
+            // Localize all UTC timestamps to the viewer's timezone
+            function localizeTimestamps() {
+                document.querySelectorAll(".utc-time").forEach((el) => {
+                    const utcStr = el.dataset.utc;
+                    if (!utcStr) return;
+                    const d = new Date(utcStr + "Z");
+                    if (isNaN(d.getTime())) return;
+                    const hasTime = utcStr.includes("T");
+                    if (hasTime) {
+                        el.textContent = d.toLocaleString(undefined, {
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                        });
+                    } else {
+                        el.textContent = d.toLocaleDateString(undefined, {
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
+                        });
+                    }
+                });
+            }
+            document.addEventListener("DOMContentLoaded", localizeTimestamps);
+
+            function getCookie(name) {
+                let cookieValue = null;
+                if (document.cookie && document.cookie !== '') {
+                    const cookies = document.cookie.split(';');
+                    for (let i = 0; i < cookies.length; i++) {
+                        const cookie = cookies[i].trim();
+                        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                            break;
+                        }
+                    }
+                }
+                return cookieValue;
+            }
+
+            function feedback(type, id, verdict, btn) {
+                const url = type === 'anomaly' ? '/dashboard/ml/anomaly-feedback' : '/dashboard/ml/burnout-feedback';
+                fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+                    body: JSON.stringify({ id: id, verdict: verdict })
+                }).then(r => {
+                    if (r.ok) showToast(verdict === 'confirmed' ? 'Verified as ' + type : 'Dismissed ' + type, 'success');
+                    const cell = btn.parentElement;
+                    cell.innerHTML = `<span style="color: ${verdict === 'confirmed' ? 'var(--green)' : 'var(--text-dim)'}; font-size: 12px; font-weight: 500;">${verdict === 'confirmed' ? '✓ Confirmed' : '✗ Dismissed'}</span>`;
+                }).catch(e => showToast('Failed to submit feedback', 'error'));
+            }
+        </script>
+
+        
+<script>
+    const gc = document.getElementById('guildCompositionChart');
+    if (gc) darkChart(gc, { type: 'doughnut', data: { labels: ['Online', 'Offline', 'Observed'], datasets: [{ data: [10, , 50], backgroundColor: ['rgba(16,185,129,0.7)', 'rgba(75,85,99,0.5)', 'rgba(59,130,246,0.5)'], borderColor: 'var(--bg-card)', borderWidth: 2 }] }, options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 8 } } } });
+
+    const gs = document.getElementById('guildStaffChart');
+    if (gs) darkChart(gs, { type: 'doughnut', data: { labels: ['Community', 'Staff'], datasets: [{ data: [80, 10], backgroundColor: ['rgba(75,85,99,0.6)', 'rgba(59,130,246,0.8)'], borderColor: 'var(--bg-card)', borderWidth: 2 }] }, options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 8 } } } });
+
+    const gb = document.getElementById('guildBotsChart');
+    if (gb) darkChart(gb, { type: 'doughnut', data: { labels: ['Humans', 'Bots'], datasets: [{ data: [90, 10], backgroundColor: ['rgba(16,185,129,0.7)', 'rgba(139,92,246,0.7)'], borderColor: 'var(--bg-card)', borderWidth: 2 }] }, options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 8 } } } });
+
+    
+
+    
+
+    
+    
+    
+</script>
+
+    </body>
+</html>

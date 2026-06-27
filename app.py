@@ -44,6 +44,14 @@ def csrf_check():
     return validate_csrf()
 
 
+@app.template_filter('multiply')
+def multiply_filter(value, arg):
+    try:
+        return value * arg
+    except:
+        return 0
+
+
 @app.context_processor
 def inject_csrf_token():
     """Make csrf_token available in every template automatically."""

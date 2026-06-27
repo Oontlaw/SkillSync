@@ -279,6 +279,10 @@ def index(template_name="dashboard.html"):
     )
     daily_volume = {str(d.day): d.count for d in daily_vol}
 
+    base_date = datetime.utcnow().date() - timedelta(days=6)
+    daily_volume_dates = [(base_date + timedelta(days=i)).strftime("%b %d") for i in range(7)]
+    daily_volume_counts = [daily_volume.get(str(base_date + timedelta(days=i)), 0) for i in range(7)]
+
     # Score source breakdown (per-guild scoped)
     source_query = db.session.query(
         ScoreLog.source, func.count(ScoreLog.id).label("count")
@@ -287,6 +291,36 @@ def index(template_name="dashboard.html"):
         source_query = source_query.filter(scorelog_filter)
     source_data = source_query.group_by(ScoreLog.source).all()
     score_sources = {s.source: s.count for s in source_data}
+
+    # Community vs staff message breakdown
+    community_msg_q = msg_base.filter(MessageRecord.is_public_channel == True)
+    staff_msg_q = community_msg_q.filter(
+        MessageRecord.discord_id.in_(
+            db.session.query(GuildMember.member_id).filter(
+                GuildMember.is_staff == True,
+                GuildMember.is_bot == False,
+                GuildMember.guild_id.in_(accessible_ids) if accessible_ids else True,
+            )
+        )
+    ) if accessible_ids else community_msg_q.filter(db.false())
+    community_messages_total = community_msg_q.count()
+    staff_messages_total = staff_msg_q.count()
+
+    # Score source percentages for doughnut chart (actual source keys: discord, system, jira, etc.)
+    total_score_events = sum(score_sources.values()) or 1
+    source_discord_pct = round(score_sources.get("discord", 0) / total_score_events * 100, 1)
+    source_system_pct = round(score_sources.get("system", 0) / total_score_events * 100, 1)
+    source_jira_pct = round(score_sources.get("jira", 0) / total_score_events * 100, 1)
+    source_manual_pct = round(score_sources.get("manual", 0) / total_score_events * 100, 1)
+    source_other_pct = round(
+        (total_score_events - score_sources.get("discord", 0) - score_sources.get("system", 0)
+         - score_sources.get("jira", 0) - score_sources.get("manual", 0)) / total_score_events * 100, 1
+    )
+    # Keep legacy aliases for template compatibility
+    source_msg_pct = source_discord_pct
+    source_voice_pct = source_system_pct
+    source_mod_pct = source_jira_pct
+    source_task_pct = source_manual_pct
 
     # Guild scan overview — only guilds the user can access AND the bot is in
     guilds = (
@@ -397,6 +431,31 @@ def index(template_name="dashboard.html"):
     for h, c in hourly_leaves_data:
         hourly_leaves_7d[str(h)] = c
 
+    # Daily join/leave data for charts
+    daily_joins_data = db.session.query(
+        func.date(MemberJoinLeave.created_at).label("day"), func.count(MemberJoinLeave.id)
+    ).filter(
+        MemberJoinLeave.created_at >= cutoff,
+        MemberJoinLeave.event_type == "join"
+    )
+    if accessible_ids:
+        daily_joins_data = daily_joins_data.filter(MemberJoinLeave.guild_id.in_(accessible_ids))
+    daily_joins_dict = {str(d[0]): d[1] for d in daily_joins_data.group_by(func.date(MemberJoinLeave.created_at)).all()}
+
+    daily_leaves_data = db.session.query(
+        func.date(MemberJoinLeave.created_at).label("day"), func.count(MemberJoinLeave.id)
+    ).filter(
+        MemberJoinLeave.created_at >= cutoff,
+        MemberJoinLeave.event_type == "leave"
+    )
+    if accessible_ids:
+        daily_leaves_data = daily_leaves_data.filter(MemberJoinLeave.guild_id.in_(accessible_ids))
+    daily_leaves_dict = {str(d[0]): d[1] for d in daily_leaves_data.group_by(func.date(MemberJoinLeave.created_at)).all()}
+
+    daily_growth_dates = daily_volume_dates
+    daily_joins = [daily_joins_dict.get(str(base_date + timedelta(days=i)), 0) for i in range(7)]
+    daily_leaves = [daily_leaves_dict.get(str(base_date + timedelta(days=i)), 0) for i in range(7)]
+
     # ML model status
     ml_status = ml_engine.get_model_status()
     ml_last_train = None
@@ -447,10 +506,23 @@ def index(template_name="dashboard.html"):
         anomalies=recent_anomalies,
         hourly_activity=hourly_activity,
         daily_volume=daily_volume,
+        daily_volume_dates=daily_volume_dates,
+        daily_volume_counts=daily_volume_counts,
+        daily_growth_dates=daily_growth_dates,
+        daily_joins=daily_joins,
+        daily_leaves=daily_leaves,
         score_sources=score_sources,
         guild_hourly=guild_hourly,
         guild_msg_counts=guild_msg_counts,
         guild_name_map={g.guild_id: g.name for g in guilds},
+        guild_names_map={g.guild_id: g.name for g in guilds},
+        community_messages_total=community_messages_total,
+        staff_messages_total=staff_messages_total,
+        source_msg_pct=source_msg_pct,
+        source_voice_pct=source_voice_pct,
+        source_mod_pct=source_mod_pct,
+        source_task_pct=source_task_pct,
+        source_manual_pct=source_manual_pct,
         guild_online_map=guild_online_map,
         guild_member_count_map=guild_member_count_map,
         burnout_risks=burnout_risks,

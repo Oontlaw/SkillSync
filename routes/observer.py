@@ -467,7 +467,7 @@ def get_staff_activity():
             "message_count": v["message_count"],
             "channels_active": list(v["channels"]),
             "guild": v["guild"],
-            "last_seen": v.get("last_seen"),
+            "last_seen": v.get("last_seen") or "",
         }
         for discord_id, v in staff_activity.items()
     }
@@ -1718,7 +1718,7 @@ def ml_forecast_guild(guild_id):
     return jsonify(
         {
             "guild_id": guild_id,
-            "forecast": preds.tolist(),
+            "forecast": preds.tolist() if hasattr(preds, "tolist") else list(preds),
             "hours": list(range(24)),
         }
     )

@@ -104,8 +104,8 @@ def check_dashboard(url, path="/", label="Dashboard"):
         code = e.code
     except Exception as e:
         code = f"ERROR: {e}"
-    ok = "✅" if str(code) == "200" else "❌"
-    print(f"  {ok}  {label:<20} {full}  →  HTTP {code}")
+    ok = "[OK]" if str(code) == "200" else "[FAIL]"
+    print(f"  {ok}  {label:<20} {full}  ->  HTTP {code}")
     return code
 
 
@@ -115,7 +115,7 @@ if __name__ == "__main__":
 
     print("[2/4] Starting ngrok (detached)...")
     pid = start_ngrok()
-    print(f"      PID: {pid}  →  log: ngrok.log")
+    print(f"      PID: {pid}  ->  log: ngrok.log")
 
     print("[3/4] Waiting for tunnel to come up...")
     public_url = wait_for_tunnel(timeout=20)
@@ -130,8 +130,8 @@ if __name__ == "__main__":
 
     print()
     print("=" * 56)
-    print(f"  ngrok live  →  {public_url}")
-    print(f"  v1  →  {public_url}/")
-    print(f"  v2  →  {public_url}/v2/")
-    print(f"  Auth callback  →  {public_url}/auth/callback")
+    print(f"  ngrok live  ->  {public_url}")
+    print(f"  v1  ->  {public_url}/")
+    print(f"  v2  ->  {public_url}/v2/")
+    print(f"  Auth callback  ->  {public_url}/auth/callback")
     print("=" * 56)
