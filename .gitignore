@@ -92,6 +92,7 @@ start-dev.bat
 # One-off debug / diagnostic scripts
 debug_v2.py
 health_report.py
+append_dblog.py
 
 # Local machine utilities and launchers
 check_services.ps1
