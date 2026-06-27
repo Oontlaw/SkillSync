@@ -19,8 +19,19 @@ SLACK_TIMEOUT = 3  # seconds — never block the main thread long
 BASE_URL = os.environ.get("SKILLSYNC_PUBLIC_URL", "http://localhost:5000")
 
 
-def _enabled():
-    return bool(SLACK_WEBHOOK_URL)
+def _enabled() -> bool:
+    """Return True only if webhook URL looks like a real Slack URL."""
+    url = SLACK_WEBHOOK_URL
+    if not url:
+        return False
+    if not url.startswith("https://hooks.slack.com/"):
+        logger.warning(
+            f"SLACK_WEBHOOK_URL does not look like a Slack webhook URL "
+            f"(should start with https://hooks.slack.com/). "
+            f"Slack notifications disabled."
+        )
+        return False
+    return True
 
 
 def _send(payload: dict) -> bool:

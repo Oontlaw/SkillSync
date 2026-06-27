@@ -81,6 +81,23 @@ class OrgMember(db.Model):
         return f"<OrgMember {self.email} @ org={self.org_id}>"
 
 
+class LoginAttempt(db.Model):
+    """Tracks failed login attempts per email for brute-force protection.
+    Cleared automatically after LOCKOUT_WINDOW_MINUTES."""
+
+    __tablename__ = "login_attempts"
+
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(150), nullable=False, index=True)
+    ip_address = db.Column(db.String(45), nullable=True)
+    attempted_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    success = db.Column(db.Boolean, default=False)
+
+    __table_args__ = (
+        db.Index("ix_login_attempts_email_time", "email", "attempted_at"),
+    )
+
+
 class WorkerIdentity(db.Model):
     __tablename__ = "worker_identities"
 

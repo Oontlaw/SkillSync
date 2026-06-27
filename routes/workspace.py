@@ -21,6 +21,7 @@ from database import (
     AdminCorrection,
     BehavioralAnomaly,
     BurnoutRisk,
+    LoginAttempt,
     Organisation,
     OrgMember,
     ScoreLog,
@@ -88,6 +89,39 @@ def ws_strict_admin_required(f):
     return decorated
 
 
+# Brute force protection constants
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_LOCKOUT_MINUTES = 15
+
+
+def _check_login_rate_limit(email: str, ip: str):
+    """Returns (is_locked_out, attempts_remaining).
+    Counts failed attempts in the last LOGIN_LOCKOUT_MINUTES minutes."""
+    cutoff = datetime.utcnow() - timedelta(minutes=LOGIN_LOCKOUT_MINUTES)
+    recent_failures = LoginAttempt.query.filter(
+        LoginAttempt.email == email.lower(),
+        LoginAttempt.attempted_at >= cutoff,
+        LoginAttempt.success == False,
+    ).count()
+    is_locked = recent_failures >= LOGIN_MAX_ATTEMPTS
+    remaining = max(0, LOGIN_MAX_ATTEMPTS - recent_failures)
+    return is_locked, remaining
+
+
+def _record_login_attempt(email: str, ip: str, success: bool):
+    """Record a login attempt. Clean up old records while we're here."""
+    attempt = LoginAttempt(
+        email=email.lower(),
+        ip_address=ip,
+        success=success,
+    )
+    db.session.add(attempt)
+    # Clean up attempts older than 24h to keep table small
+    cutoff_cleanup = datetime.utcnow() - timedelta(hours=24)
+    LoginAttempt.query.filter(LoginAttempt.attempted_at < cutoff_cleanup).delete()
+    db.session.commit()
+
+
 # ---------------------------------------------------------------------------
 # Auth routes
 # ---------------------------------------------------------------------------
@@ -99,6 +133,25 @@ def workspace_login():
         slug = request.form.get("slug", "").strip()
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
+        ip = (
+            request.headers.get("X-Forwarded-For", request.remote_addr or "unknown")
+            .split(",")[0]
+            .strip()
+        )
+
+        # Rate limit check FIRST — before any DB query
+        is_locked, _remaining = _check_login_rate_limit(email, ip)
+        if is_locked:
+            return render_template(
+                "workspace_login.html",
+                error=(
+                    f"Too many failed login attempts. "
+                    f"Please wait {LOGIN_LOCKOUT_MINUTES} minutes before trying again."
+                ),
+                locked_out=True,
+                login_lockout_minutes=LOGIN_LOCKOUT_MINUTES,
+            )
+
         org = Organisation.query.filter_by(slug=slug, is_active=True).first()
         if not org:
             return render_template(
@@ -113,7 +166,14 @@ def workspace_login():
                 error="No account found with that email for this organisation",
             )
         if not member.check_password(password):
+            _record_login_attempt(email, ip, success=False)
+            import time
+
+            time.sleep(0.5)
             return render_template("workspace_login.html", error="Invalid password")
+
+        _record_login_attempt(email, ip, success=True)
+        session.clear()  # Fix 1 — prevent session fixation
         member.last_login = datetime.utcnow()
         db.session.commit()
         session["ws_org_id"] = org.id
@@ -149,6 +209,7 @@ def workspace_register():
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
         confirm = request.form.get("confirm", "")
+
         if not all([org_name, slug, name, email, password, confirm]):
             return render_template(
                 "workspace_register.html", error="All fields required"
@@ -156,6 +217,23 @@ def workspace_register():
         if password != confirm:
             return render_template(
                 "workspace_register.html", error="Passwords do not match"
+            )
+
+        # Password strength validation
+        pw_errors = []
+        if len(password) < 8:
+            pw_errors.append("Password must be at least 8 characters.")
+        if not any(c.isupper() for c in password):
+            pw_errors.append("Password must contain at least one uppercase letter.")
+        if not any(c.isdigit() for c in password):
+            pw_errors.append("Password must contain at least one number.")
+        if pw_errors:
+            for e in pw_errors:
+                flash(e, "error")
+            return render_template(
+                "workspace_register.html",
+                org_name=org_name,
+                email=email,
             )
         if Organisation.query.filter_by(slug=slug).first():
             return render_template(
@@ -690,8 +768,7 @@ def workspace_task_update(task_id):
         pass  # never block on Slack failure
 
     return redirect(
-        request.referrer
-        or url_for("workspace.workspace_worker_detail", worker_id=task.worker_id)
+        url_for("workspace.workspace_worker_detail", worker_id=task.worker_id)
     )
 
 

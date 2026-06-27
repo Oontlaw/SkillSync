@@ -5,7 +5,22 @@ endblock %} {% block content %}
         <div class="ws-auth-brand">SkillSync</div>
         <div class="ws-auth-sub">Workforce Intelligence — Workspace</div>
 
-        {% if error %}
+        {% if locked_out %}
+        <div
+            style="
+                background: var(--red-dim, #3d1a1a);
+                border: 1px solid var(--red, #ef4444);
+                border-radius: 6px;
+                padding: 12px 16px;
+                margin-bottom: 1rem;
+                font-size: 0.85rem;
+                color: var(--red, #ef4444);
+            "
+        >
+            Account temporarily locked due to too many failed attempts. Please
+            wait {{ login_lockout_minutes|default(15) }} minutes.
+        </div>
+        {% elif error %}
         <div class="ws-alert ws-alert-error">{{ error }}</div>
         {% endif %}
 

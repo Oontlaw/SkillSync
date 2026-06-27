@@ -133,6 +133,19 @@ endblock %} {% block content %}
                             class="ws-input"
                             placeholder="Leave blank to keep existing"
                         />
+                        <p
+                            style="
+                                font-size: 0.75rem;
+                                color: var(--text-dim);
+                                margin-top: 4px;
+                                margin-bottom: 0;
+                            "
+                        >
+                            Your Jira API token is stored in the database. Use a
+                            scoped token with read-only permissions where
+                            possible. Never use your main Atlassian account
+                            password here.
+                        </p>
                     </div>
                     <div class="ws-form-group" style="margin-bottom: 16px">
                         <label class="ws-label">Project Key</label>
