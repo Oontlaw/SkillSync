@@ -261,6 +261,22 @@ def score_worker(discord_id, days=30):
             )
         db.session.commit()
 
+        # Slack notification for flagged workers (fire-and-forget)
+        try:
+            from database import WorkerIdentity
+            from services.slack import notify_burnout_flagged
+
+            ident = WorkerIdentity.query.filter_by(discord_id=discord_id).first()
+            if ident and ident.worker_id:
+                notify_burnout_flagged(
+                    worker_name=worker.name,
+                    burnout_score=burnout_score_int,
+                    signals=triggered,
+                    worker_id=ident.worker_id,
+                )
+        except Exception:
+            pass
+
     # Update cross-model signal in UserBehaviorBaseline
     try:
         from database import UserBehaviorBaseline

@@ -97,6 +97,7 @@ class WorkerIdentity(db.Model):
     jira_account_id = db.Column(db.String(100), nullable=True)
     display_name = db.Column(db.String(150), nullable=True)
     email = db.Column(db.String(150), nullable=True)
+    member_email = db.Column(db.String(150), nullable=True, index=True)
 
     linked_at = db.Column(db.DateTime, default=datetime.utcnow)
     linked_by = db.Column(db.String(150), nullable=True)

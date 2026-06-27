@@ -31,6 +31,12 @@ from database import (
 )
 from routes.security import current_workspace_member
 from scoring import correct_case
+from services.slack import (
+    notify_score_corrected,
+    notify_task_completed,
+    notify_task_missed,
+    notify_worker_linked,
+)
 
 workspace_bp = Blueprint("workspace", __name__, url_prefix="/workspace")
 
@@ -632,7 +638,7 @@ def workspace_task_update(task_id):
     old_status = task.status
     task.status = new_status
 
-    if new_status == "completed":
+    if new_status == "completed" and old_status != "completed":
         task.completed_at = datetime.utcnow()
         if task.due_at and datetime.utcnow() > task.due_at:
             pts = 5.0
@@ -658,6 +664,31 @@ def workspace_task_update(task_id):
         )
 
     db.session.commit()
+
+    # Slack notification (fire-and-forget)
+    worker = Worker.query.get(task.worker_id)
+    worker_name = worker.name if worker else "Unknown"
+    try:
+        if new_status == "completed":
+            on_time = not (
+                task.due_at and task.completed_at and task.completed_at > task.due_at
+            )
+            notify_task_completed(
+                worker_name=worker_name,
+                task_title=task.title,
+                pts=task.points_awarded,
+                on_time=on_time,
+                worker_id=task.worker_id,
+            )
+        elif new_status == "missed":
+            notify_task_missed(
+                worker_name=worker_name,
+                task_title=task.title,
+                worker_id=task.worker_id,
+            )
+    except Exception:
+        pass  # never block on Slack failure
+
     return redirect(
         request.referrer
         or url_for("workspace.workspace_worker_detail", worker_id=task.worker_id)
@@ -723,7 +754,7 @@ def workspace_work_review():
                 {
                     "log": log,
                     "worker_name": w.name if w else "Unknown",
-                    "change_display": f"{'%2B' if log.change >= 0 else ''}{int(log.change)} pts",
+                    "change_display": f"{'+' if log.change >= 0 else ''}{int(log.change)} pts",
                 }
             )
 
@@ -937,6 +968,17 @@ def workspace_link_identity():
         existing.linked_at = datetime.utcnow()
         existing.linked_by = session["ws_member_name"]
     else:
+        # Populate member_email from the current user (inviting member)
+        member_email_from_session = None
+        try:
+            from database import OrgMember
+
+            inviting_member = OrgMember.query.get(session.get("ws_member_id"))
+            if inviting_member:
+                member_email_from_session = inviting_member.email
+        except Exception:
+            pass
+
         identity = WorkerIdentity(
             org_id=org_id,
             worker_id=worker_id,
@@ -945,10 +987,29 @@ def workspace_link_identity():
             jira_account_id=jira_account_id or None,
             display_name=display_name or None,
             email=email or None,
+            member_email=member_email_from_session,
             linked_by=session["ws_member_name"],
         )
         db.session.add(identity)
     db.session.commit()
+
+    # Slack notification for new identity (fire-and-forget)
+    if not existing and worker_id and discord_id:
+        try:
+            worker_obj = Worker.query.get(worker_id)
+            org_obj = Organisation.query.get(org_id)
+            if worker_obj and discord_id:
+                notify_worker_linked(
+                    worker_name=worker_obj.name,
+                    discord_id=discord_id,
+                    org_name=org_obj.name
+                    if org_obj
+                    else session.get("ws_org_name", ""),
+                    worker_id=worker_id,
+                )
+        except Exception:
+            pass
+
     return jsonify({"ok": True})
 
 
@@ -1328,6 +1389,20 @@ def workspace_override_correct():
         case_id, float(new_change), reason or "Admin correction", admin_name
     )
 
+    # Slack notification (fire-and-forget)
+    try:
+        if "error" not in result:
+            notify_score_corrected(
+                worker_name=result.get("worker", "Unknown"),
+                original=float(result.get("original", 0)),
+                corrected=float(result.get("new_change", 0)),
+                reason=reason,
+                corrected_by=admin_name,
+                worker_id=log.worker_id,
+            )
+    except Exception:
+        pass
+
     # Fire retrain signal (fire and forget)
     try:
         api_key = os.getenv("API_KEY", "")
@@ -1380,11 +1455,17 @@ def workspace_members():
         .all()
     )
 
-    # For each member, find their linked worker identity by email
+    # For each member, find their linked worker identity by member_email first, then email, then display_name
     member_data = []
     for m in members:
-        ident = WorkerIdentity.query.filter_by(
-            org_id=org_id, email=m.email, is_active=True
+        ident = WorkerIdentity.query.filter(
+            WorkerIdentity.org_id == org_id,
+            WorkerIdentity.is_active == True,
+            db.or_(
+                WorkerIdentity.member_email == m.email,
+                WorkerIdentity.email == m.email,
+                WorkerIdentity.display_name == m.name,
+            ),
         ).first()
         worker = None
         score = None
@@ -1494,6 +1575,25 @@ def workspace_settings():
     org = db.session.get(Organisation, org_id)
     org_name = session["ws_org_name"]
     if request.method == "POST":
+        action = request.form.get("action") or ""
+        if action == "test_slack":
+            from services.slack import notify_team_health_summary
+
+            sent = notify_team_health_summary(
+                org_name=session.get("ws_org_name", "Test Org"),
+                green=3,
+                yellow=1,
+                red=0,
+            )
+            if sent:
+                flash("Test Slack message sent successfully.", "success")
+            else:
+                flash(
+                    "Slack not configured or webhook failed. "
+                    "Set SLACK_WEBHOOK_URL in your .env file.",
+                    "error",
+                )
+            return redirect(url_for("workspace.workspace_settings"))
         data = request.get_json(force=True)
         org.share_feature_vectors = data.get(
             "share_feature_vectors", org.share_feature_vectors
@@ -1504,7 +1604,13 @@ def workspace_settings():
         org.store_task_content = data.get("store_task_content", org.store_task_content)
         db.session.commit()
         return jsonify({"ok": True})
-    return render_template("workspace_settings.html", org=org, org_name=org_name)
+    slack_configured = bool(os.environ.get("SLACK_WEBHOOK_URL", ""))
+    return render_template(
+        "workspace_settings.html",
+        org=org,
+        org_name=org_name,
+        slack_configured=slack_configured,
+    )
 
 
 @workspace_bp.route("/settings/jira", methods=["POST"])

@@ -21,6 +21,7 @@ from bot_core.state import (
     set_bot_start_time,
 )
 from bot_core.tasks import (
+    check_overdue_tasks,
     check_ping_joins,
     check_reversed_actions,
     flush_all_buffers,
@@ -29,6 +30,7 @@ from bot_core.tasks import (
     message_cleanup_loop,
     rescan_guilds_loop,
     set_bot,
+    weekly_health_digest,
 )
 
 
@@ -70,6 +72,10 @@ async def handle_ready(bot):
         jira_per_org_poll_loop.start()
     if not rescan_guilds_loop.is_running():
         rescan_guilds_loop.start()
+    if not check_overdue_tasks.is_running():
+        check_overdue_tasks.start()
+    if not weekly_health_digest.is_running():
+        weekly_health_digest.start()
 
     # Fetch prefixes + content trust from API
     try:

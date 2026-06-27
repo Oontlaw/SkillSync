@@ -249,6 +249,82 @@ endblock %} {% block content %}
             </div>
         </div>
     </div>
+
+    <!-- Card 4: Slack Notifications -->
+    <div class="ws-card" style="margin-top: 1.5rem">
+        <div class="ws-card-h">
+            <span class="ws-card-t">Slack Notifications</span>
+            {% if slack_configured %}
+            <span class="ws-tag ws-tag-green">Connected</span>
+            {% else %}
+            <span class="ws-tag ws-tag-muted">Not configured</span>
+            {% endif %}
+        </div>
+        <div class="ws-card-b">
+            {% if slack_configured %}
+            <p
+                style="
+                    font-size: 0.85rem;
+                    color: var(--green);
+                    margin-bottom: 1rem;
+                "
+            >
+                ● Slack webhook configured
+            </p>
+            {% else %}
+            <p
+                style="
+                    font-size: 0.85rem;
+                    color: var(--text-dim);
+                    margin-bottom: 1rem;
+                "
+            >
+                ● Not configured — add
+                <code
+                    style="
+                        font-size: 0.8rem;
+                        background: var(--bg);
+                        padding: 1px 4px;
+                    "
+                    >SLACK_WEBHOOK_URL</code
+                >
+                to your
+                <code
+                    style="
+                        font-size: 0.8rem;
+                        background: var(--bg);
+                        padding: 1px 4px;
+                    "
+                    >.env</code
+                >
+                file
+            </p>
+            {% endif %}
+
+            <p
+                style="
+                    font-size: 0.8rem;
+                    color: var(--text-dim);
+                    margin-bottom: 1rem;
+                "
+            >
+                Notifications sent: task completed/missed, burnout flagged,
+                anomaly detected, score corrections, weekly team digest.
+            </p>
+
+            <form method="POST" style="margin: 0">
+                <input
+                    type="hidden"
+                    name="_csrf_token"
+                    value="{{ csrf_token }}"
+                />
+                <input type="hidden" name="action" value="test_slack" />
+                <button type="submit" class="ws-btn ws-btn-sm">
+                    Send Test Message
+                </button>
+            </form>
+        </div>
+    </div>
 </div>
 {% endblock %} {% block scripts %}
 <script>
