@@ -29,6 +29,7 @@ from database import (
     WorkerIdentity,
     db,
 )
+from routes.security import current_workspace_member
 from scoring import correct_case
 
 workspace_bp = Blueprint("workspace", __name__, url_prefix="/workspace")
@@ -42,7 +43,7 @@ workspace_bp = Blueprint("workspace", __name__, url_prefix="/workspace")
 def ws_login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if not session.get("ws_member_id"):
+        if not current_workspace_member():
             return redirect(url_for("workspace.workspace_login"))
         return f(*args, **kwargs)
 
@@ -52,10 +53,30 @@ def ws_login_required(f):
 def ws_admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if not session.get("ws_member_id"):
-            return redirect(url_for("workspace.workspace_login"))
-        if session.get("ws_member_role") not in ("admin", "hr"):
+        member = current_workspace_member(require_admin=True)
+        if not member:
+            if not session.get("ws_member_id"):
+                return redirect(url_for("workspace.workspace_login"))
             return jsonify({"error": "Admin or HR role required"}), 403
+        return f(*args, **kwargs)
+
+    return decorated
+
+
+def ws_strict_admin_required(f):
+    """Strict admin-only — HR role is not sufficient."""
+
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        member_id = session.get("ws_member_id")
+        org_id = session.get("ws_org_id")
+        if not member_id or not org_id:
+            return redirect(url_for("workspace.workspace_login"))
+        member = OrgMember.query.filter_by(
+            id=member_id, org_id=org_id, is_active=True
+        ).first()
+        if not member or member.role != "admin":
+            return jsonify({"error": "Admin role required"}), 403
         return f(*args, **kwargs)
 
     return decorated
@@ -590,7 +611,7 @@ def workspace_task_create():
 
 
 @workspace_bp.route("/tasks/<int:task_id>/update", methods=["POST"])
-@ws_login_required
+@ws_admin_required
 def workspace_task_update(task_id):
     """Mark a task complete, missed, or cancelled. Awards/deducts points."""
     org_id = session["ws_org_id"]
@@ -690,8 +711,59 @@ def workspace_link_identity():
     jira_account_id = data.get("jira_account_id", "").strip()
     display_name = data.get("display_name", "").strip()
     email = data.get("email", "").strip()
+
     if not discord_id and not worker_id:
         return jsonify({"error": "discord_id or worker_id required"}), 400
+
+    # --- Duplicate checks within the same org ---
+
+    # 1) discord_id uniqueness
+    if discord_id:
+        dup = WorkerIdentity.query.filter_by(
+            org_id=org_id, discord_id=discord_id
+        ).first()
+        if dup and (not worker_id or dup.worker_id != worker_id):
+            return jsonify(
+                {
+                    "error": f'discord_id "{discord_id}" already linked to worker {dup.worker_id}'
+                }
+            ), 409
+
+    # 2) org_employee_id uniqueness
+    if org_employee_id:
+        dup = WorkerIdentity.query.filter_by(
+            org_id=org_id, org_employee_id=org_employee_id
+        ).first()
+        if dup and (not worker_id or dup.worker_id != worker_id):
+            return jsonify(
+                {
+                    "error": f'Employee ID "{org_employee_id}" already linked to worker {dup.worker_id}'
+                }
+            ), 409
+
+    # 3) jira_account_id uniqueness
+    if jira_account_id:
+        dup = WorkerIdentity.query.filter_by(
+            org_id=org_id, jira_account_id=jira_account_id
+        ).first()
+        if dup and (not worker_id or dup.worker_id != worker_id):
+            return jsonify(
+                {
+                    "error": f'Jira account ID "{jira_account_id}" already linked to worker {dup.worker_id}'
+                }
+            ), 409
+
+    # 4) worker_id uniqueness within org (one worker can only have one identity)
+    if worker_id:
+        dup = WorkerIdentity.query.filter_by(org_id=org_id, worker_id=worker_id).first()
+        if dup and (not discord_id or dup.discord_id != discord_id):
+            return jsonify(
+                {
+                    "error": f'Worker {worker_id} already linked to discord_id "{dup.discord_id or "?"}"'
+                }
+            ), 409
+
+    # --- Update or create ---
     existing = (
         WorkerIdentity.query.filter_by(org_id=org_id, discord_id=discord_id).first()
         if discord_id
@@ -1192,7 +1264,7 @@ def workspace_members():
 
 
 @workspace_bp.route("/members/invite", methods=["POST"])
-@ws_admin_required
+@ws_strict_admin_required
 def workspace_members_invite():
     org_id = session["ws_org_id"]
     name = request.form.get("name", "").strip()
@@ -1220,7 +1292,7 @@ def workspace_members_invite():
 
 
 @workspace_bp.route("/members/<int:member_id>/role", methods=["POST"])
-@ws_admin_required
+@ws_strict_admin_required
 def workspace_members_role(member_id):
     org_id = session["ws_org_id"]
     data = request.get_json(force=True)
@@ -1243,7 +1315,7 @@ def workspace_members_role(member_id):
 
 
 @workspace_bp.route("/members/<int:member_id>/remove", methods=["POST"])
-@ws_admin_required
+@ws_strict_admin_required
 def workspace_members_remove(member_id):
     org_id = session["ws_org_id"]
     if member_id == session["ws_member_id"]:
@@ -1282,7 +1354,7 @@ def workspace_settings():
 
 
 @workspace_bp.route("/settings/jira", methods=["POST"])
-@ws_admin_required
+@ws_strict_admin_required
 def workspace_settings_jira():
     org_id = session["ws_org_id"]
     data = request.get_json(force=True)
@@ -1297,7 +1369,7 @@ def workspace_settings_jira():
 
 
 @workspace_bp.route("/settings/regen-key", methods=["POST"])
-@ws_admin_required
+@ws_strict_admin_required
 def workspace_settings_regen_key():
     org_id = session["ws_org_id"]
     org = db.session.get(Organisation, org_id)

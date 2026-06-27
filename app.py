@@ -16,7 +16,7 @@ from routes.community import community_bp
 from routes.dashboard import dashboard_bp
 from routes.dashboard_v2 import dashboard_v2_bp
 from routes.observer import observer_bp
-from routes.security import ensure_csrf_token
+from routes.security import ensure_csrf_token, validate_csrf
 from routes.work import work_bp
 from routes.workspace import workspace_bp
 
@@ -37,6 +37,11 @@ app.register_blueprint(community_bp, url_prefix="/api")
 app.register_blueprint(observer_bp, url_prefix="/api")
 app.register_blueprint(work_bp, url_prefix="/api")
 app.register_blueprint(workspace_bp)
+
+
+@app.before_request
+def csrf_check():
+    return validate_csrf()
 
 
 @app.context_processor

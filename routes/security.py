@@ -31,7 +31,11 @@ def validate_csrf():
     if not session.get("user") and not session.get("ws_member_id"):
         return None
 
-    supplied = request.headers.get("X-CSRF-Token") or request.form.get("_csrf_token")
+    supplied = (
+        request.headers.get("X-CSRF-Token")
+        or request.headers.get("X-CSRFToken")
+        or request.form.get("_csrf_token")
+    )
     expected = session.get("_csrf_token")
     if not supplied or not expected or not secrets.compare_digest(supplied, expected):
         return jsonify({"error": "Invalid CSRF token"}), 403
