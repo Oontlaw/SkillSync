@@ -18,7 +18,7 @@ def _model_path(guild_id):
 
 
 def _recent_hourly_counts(guild_id, hours_back=24):
-    """Get actual message counts per hour for the last N hours."""
+    """Get raw message counts per hour for the last N hours. Diagnostic utility."""
     cutoff = datetime.utcnow() - timedelta(hours=hours_back)
     rows = (
         MessageRecord.query.filter(
@@ -89,8 +89,12 @@ def train(guild_id, days=30):
 
 def predict_next_24h(guild_id, days=30):
     """Predict message counts for the next 24 hours.
+    Uses 10 features: hour_sin/cos, dow_sin/cos, roll_6/12/24,
+    guild_hourly_mean, guild_hourly_std, is_peak_hour.
     Returns array of shape (24,) with predicted counts per hour.
     Also logs each hourly prediction to PredictionLog for later outcome resolution."""
+    from database import GuildActivityBaseline
+
     path = _model_path(guild_id)
     if not os.path.exists(path):
         return None
@@ -99,9 +103,16 @@ def predict_next_24h(guild_id, days=30):
     now = datetime.utcnow()
     current_dow = now.weekday()
 
+    # Load guild baseline
+    baseline = GuildActivityBaseline.query.filter_by(guild_id=guild_id).first()
+    hourly_mean = (
+        baseline.hourly_mean if baseline and baseline.hourly_mean else [0.0] * 24
+    )
+    hourly_std = baseline.hourly_std if baseline and baseline.hourly_std else [1.0] * 24
+    peak_hours = set(baseline.peak_hours) if baseline and baseline.peak_hours else set()
+
     # Use LIVE rolling averages from actual recent data
     avg_6, avg_12, avg_24 = _live_rolling_averages(guild_id)
-    last_counts = np.array([avg_6, avg_12, avg_24])
 
     # Build 24 hourly feature vectors predicting today's hours (0-23)
     X_pred = []
@@ -116,9 +127,12 @@ def predict_next_24h(guild_id, days=30):
                 hour_cos,
                 dow_sin,
                 dow_cos,
-                last_counts[0],
-                last_counts[1],
-                last_counts[2],
+                avg_6,
+                avg_12,
+                avg_24,
+                hourly_mean[h],
+                max(hourly_std[h], 0.1),
+                1.0 if h in peak_hours else 0.0,
             ]
         )
     X_pred = np.array(X_pred)
@@ -279,8 +293,11 @@ def resolve_outcomes(days_back=7):
             pred_val = float(log.prediction_value)
             log.error_magnitude = abs(pred_val - actual)
             log.error_signed = pred_val - actual
-            # Correct if within 50% of actual (or within 2 messages for very low counts)
-            threshold = max(actual * 0.5, 2)
+            # Adaptive threshold: low-traffic hours use absolute tolerance, high-traffic use relative
+            if actual > 5:
+                threshold = max(actual * 0.75, 3)
+            else:
+                threshold = max(actual * 1.0, 2)
             log.was_correct = abs(pred_val - actual) <= threshold
 
             # Update error history for feedback loop
@@ -291,6 +308,33 @@ def resolve_outcomes(days_back=7):
         resolved += 1
 
     db.session.commit()
+
+    # Update cross-model forecast error signal in UserBehaviorBaseline
+    try:
+        from collections import defaultdict
+
+        from database import UserBehaviorBaseline, Worker
+
+        guild_errors = defaultdict(list)
+        for log in pending:
+            if log.error_signed is not None:
+                meta = json.loads(log.metadata_json) if log.metadata_json else {}
+                guild_id = meta.get("guild_id")
+                if guild_id:
+                    guild_errors[guild_id].append(log.error_signed)
+        for guild_id, errors in guild_errors.items():
+            mean_err = float(np.mean(errors))
+            workers = Worker.query.filter(Worker.discord_id != None).all()
+            for w in workers:
+                baseline = UserBehaviorBaseline.query.filter_by(
+                    discord_id=w.discord_id, guild_id=guild_id
+                ).first()
+                if baseline:
+                    baseline.forecast_error_mean = round(mean_err, 4)
+        db.session.commit()
+    except Exception as e:
+        print(f"[forecast] Cross-model signal update failed: {e}")
+
     return resolved
 
 
@@ -346,98 +390,3 @@ def train_all_guilds(days=30):
         result = train(g.guild_id, days=days)
         results.append({"guild_id": g.guild_id, "name": g.name, **result})
     return results
-
-
-def log_anomaly_prediction(discord_id, score, is_anomaly, severity):
-    """Log an anomaly prediction to PredictionLog."""
-    try:
-        import json
-        from datetime import datetime
-
-        from database import PredictionLog, db
-
-        entry = PredictionLog(
-            model_name="anomaly",
-            prediction_value=float(score),
-            confidence=float(min(1.0, max(0.0, abs(score) / max(abs(-0.15), 0.01)))),
-            metadata_json=json.dumps(
-                {
-                    "discord_id": discord_id,
-                    "is_anomaly": is_anomaly,
-                    "severity": severity,
-                    "threshold": -0.15,
-                }
-            ),
-            prediction_time=datetime.utcnow(),
-        )
-        db.session.add(entry)
-        db.session.commit()
-    except Exception as e:
-        print(f"[forecast] Anomaly prediction log failed: {e}")
-
-
-def log_burnout_prediction(
-    discord_id, worker_id, raw_score, burnout_score, is_flagged, signals
-):
-    """Log a burnout prediction to PredictionLog."""
-    try:
-        import json
-        from datetime import datetime
-
-        from database import PredictionLog, db
-
-        entry = PredictionLog(
-            model_name="burnout",
-            prediction_value=float(burnout_score),
-            confidence=float(min(1.0, max(0.0, abs(raw_score) / max(abs(0.0), 0.01)))),
-            metadata_json=json.dumps(
-                {
-                    "discord_id": discord_id,
-                    "worker_id": worker_id,
-                    "is_flagged": is_flagged,
-                    "raw_score": round(raw_score, 4),
-                    "signals": signals,
-                    "threshold": 0.0,
-                }
-            ),
-            prediction_time=datetime.utcnow(),
-        )
-        db.session.add(entry)
-        db.session.commit()
-    except Exception as e:
-        print(f"[forecast] Burnout prediction log failed: {e}")
-
-
-def log_corrector_prediction(worker_id, original_score, corrected_score, reason):
-    """Log a corrector prediction to PredictionLog."""
-    try:
-        import json
-        from datetime import datetime
-
-        from database import PredictionLog, db
-
-        entry = PredictionLog(
-            model_name="corrector",
-            prediction_value=float(corrected_score - original_score),
-            features_json=json.dumps(
-                {
-                    "worker_id": worker_id,
-                    "original_score": original_score,
-                    "corrected_score": corrected_score,
-                    "reason": reason,
-                }
-            ),
-            metadata_json=json.dumps(
-                {
-                    "worker_id": worker_id,
-                    "original_score": original_score,
-                    "corrected_score": corrected_score,
-                    "reason": reason,
-                }
-            ),
-            prediction_time=datetime.utcnow(),
-        )
-        db.session.add(entry)
-        db.session.commit()
-    except Exception as e:
-        print(f"[forecast] Corrector prediction log failed: {e}")

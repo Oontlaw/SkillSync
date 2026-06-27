@@ -62,16 +62,36 @@ def get_all_accuracy_metrics(days=7):
     """Return accuracy metrics for all models."""
     from ml.forecast import get_accuracy_metrics
 
-    return {
-        "forecast": get_accuracy_metrics(days=days),
-    }
+    metrics = {"forecast": get_accuracy_metrics(days=days)}
+    try:
+        metrics["anomaly"] = anomaly.get_precision_recall(days=30)
+    except Exception as e:
+        metrics["anomaly"] = {"error": str(e)}
+    try:
+        metrics["burnout"] = burnout.get_precision_recall(days=30)
+    except Exception as e:
+        metrics["burnout"] = {"error": str(e)}
+    return metrics
 
 
 def train_all(days=30, min_msgs=10):
     """Train all ML models and return results."""
     results = {}
 
-    # 0. Resolve pending predictions first
+    # 0a. Update long-term baselines (must run before all models)
+    try:
+        from ml.features import update_guild_baselines, update_user_baselines
+
+        user_baseline_count = update_user_baselines(days_long=90, days_short=7)
+        guild_baseline_count = update_guild_baselines()
+        results["baselines"] = {
+            "user_baselines_updated": user_baseline_count,
+            "guild_baselines_updated": guild_baseline_count,
+        }
+    except Exception as e:
+        results["baselines"] = {"error": str(e)}
+
+    # 0b. Resolve pending predictions first
     try:
         results["outcome_resolution"] = resolve_all_outcomes()
     except Exception as e:
@@ -315,5 +335,23 @@ def get_model_health():
                 )
     except Exception as e:
         health["burnout_precision_error"] = str(e)
+
+    # Baseline confidence and drift count
+    try:
+        from database import UserBehaviorBaseline
+
+        baselines = UserBehaviorBaseline.query.all()
+        if baselines:
+            mean_confidence = float(np.mean([b.baseline_confidence for b in baselines]))
+            drifting_count = sum(1 for b in baselines if b.is_drifting)
+            health["baseline_confidence"] = round(mean_confidence, 3)
+            health["drifting_users"] = drifting_count
+            health["total_baselines"] = len(baselines)
+        else:
+            health["baseline_confidence"] = 0.0
+            health["drifting_users"] = 0
+            health["total_baselines"] = 0
+    except Exception as e:
+        health["baseline_confidence_error"] = str(e)
 
     return health

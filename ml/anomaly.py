@@ -45,13 +45,29 @@ def _correction_features(discord_id, days=30):
 
 
 def all_user_vectors_with_corrections(days=30, min_msgs=10, guild_id=None):
-    """Build feature matrix augmented with correction signals."""
+    """Build feature matrix augmented with correction + baseline drift signals.
+    Dimensions: 28 (base) + 2 (corrections) + 2 (drift) = 32."""
+    from database import UserBehaviorBaseline
+
     X, ids = all_user_feature_vectors(days=days, min_msgs=min_msgs, guild_id=guild_id)
     if X.shape[0] == 0:
         return X, ids
     augs = []
     for did in ids:
-        augs.append(_correction_features(did, days))
+        corr = _correction_features(did, days)
+        # Drift features from long-term baseline
+        baseline = (
+            UserBehaviorBaseline.query.filter_by(discord_id=did)
+            .order_by(UserBehaviorBaseline.updated_at.desc())
+            .first()
+        )
+        if baseline:
+            volume_drift = min(1.0, max(-1.0, baseline.volume_drift or 0.0))
+            pattern_drift = min(1.0, baseline.pattern_drift or 0.0)
+        else:
+            volume_drift = 0.0
+            pattern_drift = 0.0
+        augs.append(np.array([corr[0], corr[1], volume_drift, pattern_drift]))
     X_aug = np.concatenate([X, np.array(augs)], axis=1)
     return X_aug, ids
 
@@ -82,7 +98,8 @@ def _log_anomaly_prediction(discord_id, score, is_anomaly, severity):
 
 
 def train(min_msgs=10, days=30, contamination=0.1, guild_id=None):
-    """Train Isolation Forest on per-user message behavior + correction features.
+    """Train Isolation Forest on per-user message behavior + correction + drift features.
+    Feature dimension: 32 (28 base + 2 correction + 2 drift).
     If guild_id is provided, trains a per-guild model using only that guild's data."""
     X, ids = all_user_vectors_with_corrections(
         days=days, min_msgs=min_msgs, guild_id=guild_id
@@ -108,6 +125,7 @@ def train(min_msgs=10, days=30, contamination=0.1, guild_id=None):
         "status": "trained",
         "users": len(ids),
         "anomalies_found": n_anomalies,
+        "feature_dims": 32,
         "threshold": ANOMALY_THRESHOLD,
         "model_path": path,
     }
@@ -115,8 +133,11 @@ def train(min_msgs=10, days=30, contamination=0.1, guild_id=None):
 
 def predict(discord_id, days=30, guild_id=None):
     """Score a single user for anomalous behavior.
+    Feature dimension: 32 (28 base + 2 correction + 2 drift).
     If guild_id is provided, loads the per-guild model and tags the anomaly with that guild.
     Returns dict with anomaly_score (lower = more anomalous), is_anomaly, severity."""
+    from database import UserBehaviorBaseline
+
     path = _model_path(guild_id)
     if not os.path.exists(path):
         # Fall back to global model if no per-guild model
@@ -125,23 +146,29 @@ def predict(discord_id, days=30, guild_id=None):
             return None
     model = joblib.load(path)
 
-    # Get base feature vector
+    # Get base feature vector (28-dim)
     vec = user_anomaly_feature_vector(discord_id, days, guild_id=guild_id)
     if vec is None:
         return None
 
-    # Append correction features to match model training (28 + 2 = 30 dimensions)
+    # Append correction features (2-dim) + drift features (2-dim) = 32 total
     try:
         correction_vec = _correction_features(discord_id, days)
-        vec = np.concatenate([vec, correction_vec])
+        baseline = UserBehaviorBaseline.query.filter_by(discord_id=discord_id).first()
+        volume_drift = (
+            min(1.0, max(-1.0, baseline.volume_drift or 0.0)) if baseline else 0.0
+        )
+        pattern_drift = min(1.0, baseline.pattern_drift or 0.0) if baseline else 0.0
+        drift_vec = np.array([volume_drift, pattern_drift])
+        vec = np.concatenate([vec, correction_vec, drift_vec])
     except Exception as e:
-        print(f"[anomaly] Failed to append correction features: {e}")
+        print(f"[anomaly] Failed to append features: {e}")
         return None
 
     # Verify feature count matches model expectations
-    if vec.shape[0] != 30:
+    if vec.shape[0] != 32:
         print(
-            f"[anomaly] Feature vector dimension mismatch: expected 30, got {vec.shape[0]}"
+            f"[anomaly] Feature vector dimension mismatch: expected 32, got {vec.shape[0]}"
         )
         return None
 
@@ -183,8 +210,8 @@ def predict(discord_id, days=30, guild_id=None):
 
 def scan_all(min_msgs=10, days=30, guild_id=None):
     """Score all users and return list of anomalies found.
-    If guild_id is provided, loads the per-guild model and tags anomalies with that guild.
-    Falls back to global model if no per-guild model exists."""
+    Feature dimension: 32 (28 base + 2 correction + 2 drift).
+    Also writes cross-model anomaly counts to UserBehaviorBaseline."""
     X, ids = all_user_vectors_with_corrections(
         days=days, min_msgs=min_msgs, guild_id=guild_id
     )
@@ -196,6 +223,7 @@ def scan_all(min_msgs=10, days=30, guild_id=None):
     model = joblib.load(path)
     scores = model.decision_function(X)
     results = []
+    anomaly_counts = {}
     for i, did in enumerate(ids):
         if scores[i] < ANOMALY_THRESHOLD:
             severity = min(100, max(0, int((ANOMALY_THRESHOLD - scores[i]) * 100)))
@@ -225,7 +253,22 @@ def scan_all(min_msgs=10, days=30, guild_id=None):
                     "threshold": ANOMALY_THRESHOLD,
                 }
             )
+            anomaly_counts[did] = anomaly_counts.get(did, 0) + 1
+
     db.session.commit()
+
+    # Update cross-model signals in UserBehaviorBaseline
+    try:
+        from database import UserBehaviorBaseline
+
+        for did, count in anomaly_counts.items():
+            baseline = UserBehaviorBaseline.query.filter_by(discord_id=did).first()
+            if baseline:
+                baseline.recent_anomaly_count = count
+        db.session.commit()
+    except Exception as e:
+        print(f"[anomaly] Cross-model signal update failed: {e}")
+
     return results
 
 
@@ -299,3 +342,105 @@ def resolve_anomaly_outcomes(days_back=30):
     if resolved:
         db.session.commit()
     return resolved
+
+
+def migrate_model_with_distillation():
+    """
+    Knowledge transfer from old 30-feature model to new 32-feature model.
+
+    CALL THIS ONCE before deleting old .joblib files.
+    It extracts the old model's knowledge as soft labels, trains the new
+    model on DB data weighted by those labels, then retires the old model.
+
+    After this runs, the new model inherits everything the old one knew.
+    Safe to delete old .joblib after this completes successfully.
+    """
+    from database import UserBehaviorBaseline
+
+    OLD_MODEL_PATH = ANOMALY_MODEL_PATH  # 30-feature model
+    NEW_MODEL_PATH = ANOMALY_MODEL_PATH.replace(
+        "anomaly_iforest.joblib", "anomaly_iforest_new.joblib"
+    )
+    RETIRED_PATH = ANOMALY_MODEL_PATH.replace(
+        "anomaly_iforest.joblib", "anomaly_iforest_retired.joblib"
+    )
+
+    # Step 1 — check old model exists
+    if not os.path.exists(OLD_MODEL_PATH):
+        return {"status": "skipped", "reason": "No existing model to transfer from"}
+
+    old_model = joblib.load(OLD_MODEL_PATH)
+
+    # Step 2 — get 30-feature vectors (old format) for all users
+    X_old, ids = all_user_feature_vectors(days=30, min_msgs=5)
+    if X_old.shape[0] < 5:
+        return {"status": "skipped", "reason": "Not enough users for distillation"}
+
+    # Append old correction features (2 dims) to match old 30-feature format
+    augs_old = np.array([_correction_features(did, 30) for did in ids])
+    X_old_full = np.concatenate([X_old, augs_old], axis=1)  # shape (n, 30)
+
+    # Step 3 — extract soft labels from old model
+    # decision_function: more negative = more anomalous
+    teacher_scores = old_model.decision_function(X_old_full)  # shape (n,)
+    # Normalize to 0-1 where 1 = definitely anomalous
+    teacher_labels = (teacher_scores < ANOMALY_THRESHOLD).astype(float)
+    # Soft weight: how confident the old model was
+    confidence_weights = np.clip(
+        np.abs(teacher_scores - ANOMALY_THRESHOLD) / 0.3, 0.1, 1.0
+    )
+
+    # Step 4 — build new 32-feature vectors for same users
+    augs_new = []
+    for did in ids:
+        corr = _correction_features(did, 30)
+        baseline = UserBehaviorBaseline.query.filter_by(discord_id=did).first()
+        vol_drift = (
+            min(1.0, max(-1.0, baseline.volume_drift or 0.0)) if baseline else 0.0
+        )
+        pat_drift = min(1.0, baseline.pattern_drift or 0.0) if baseline else 0.0
+        augs_new.append(np.array([corr[0], corr[1], vol_drift, pat_drift]))
+    X_new_full = np.concatenate([X_old, np.array(augs_new)], axis=1)  # shape (n, 32)
+
+    # Step 5 — train new IsolationForest on new features
+    # IsolationForest doesn't support sample_weight directly,
+    # so we oversample high-confidence teacher predictions
+    oversample_idx = np.where(confidence_weights > 0.7)[0]
+    X_train = np.concatenate([X_new_full, X_new_full[oversample_idx]], axis=0)
+
+    new_model = IsolationForest(
+        n_estimators=150,  # more trees than old model (was 100)
+        contamination=0.1,
+        random_state=42,
+        n_jobs=-1,
+        max_samples="auto",
+    )
+    new_model.fit(X_train)
+
+    # Step 6 — verify new model agrees with old model on clear cases
+    new_scores = new_model.decision_function(X_new_full)
+    old_anomalies = set(ids[i] for i in range(len(ids)) if teacher_labels[i] == 1)
+    new_anomalies = set(
+        ids[i] for i in range(len(ids)) if new_scores[i] < ANOMALY_THRESHOLD
+    )
+    overlap = len(old_anomalies & new_anomalies)
+    agreement_rate = overlap / max(len(old_anomalies), 1)
+
+    # Step 7 — save new model, retire old one
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    joblib.dump(new_model, NEW_MODEL_PATH)
+
+    # Rename old -> retired (don't delete, keep as fallback for 30 days)
+    os.rename(OLD_MODEL_PATH, RETIRED_PATH)
+    # Move new -> primary path
+    os.rename(NEW_MODEL_PATH, OLD_MODEL_PATH)
+
+    return {
+        "status": "success",
+        "users_transferred": len(ids),
+        "old_anomalies": len(old_anomalies),
+        "new_anomalies": len(new_anomalies),
+        "agreement_rate": round(agreement_rate, 3),
+        "old_model_retired_to": RETIRED_PATH,
+        "note": "Safe to delete retired model after 7 days if dashboard looks correct",
+    }

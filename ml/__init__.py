@@ -18,6 +18,7 @@ __all__ = [
     "corrector",
     "engine",
     "federated",
+    "growth",
     "work_features",
     "work_anomaly",
 ]

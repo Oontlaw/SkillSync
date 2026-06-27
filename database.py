@@ -216,6 +216,91 @@ class MessageRecord(db.Model):
         return f"<MessageRecord {self.discord_id} | len={self.message_length}>"
 
 
+class UserBehaviorBaseline(db.Model):
+    """Long-term behavioral baseline per user — accumulates forever.
+    Updated weekly via engine.train_all(). Never deleted.
+    Used by anomaly detection to compare short-term vs long-term behavior."""
+
+    __tablename__ = "user_behavior_baselines"
+
+    id = db.Column(db.Integer, primary_key=True)
+    discord_id = db.Column(db.String(50), nullable=False, index=True)
+    guild_id = db.Column(db.String(50), nullable=True, index=True)
+
+    # Long-term hourly profile (24 values, JSON list of floats, normalized)
+    hourly_profile_90d = db.Column(db.JSON, nullable=True)
+
+    # Long-term message stats
+    mean_daily_msgs_90d = db.Column(db.Float, nullable=True)
+    std_daily_msgs_90d = db.Column(db.Float, nullable=True)
+    mean_msg_length_90d = db.Column(db.Float, nullable=True)
+    off_hours_ratio_90d = db.Column(db.Float, nullable=True)
+
+    # Short-term stats (last 7 days) — updated each training run
+    mean_daily_msgs_7d = db.Column(db.Float, nullable=True)
+    off_hours_ratio_7d = db.Column(db.Float, nullable=True)
+
+    # Drift signals — computed by comparing 7d vs 90d
+    volume_drift = db.Column(
+        db.Float, nullable=True
+    )  # (7d_mean - 90d_mean) / max(90d_std, 1)
+    pattern_drift = db.Column(
+        db.Float, nullable=True
+    )  # cosine distance between hourly profiles
+    is_drifting = db.Column(db.Boolean, default=False)  # True if either drift > 2.0
+
+    # Cross-model signals — written by other models, read by anomaly + burnout
+    recent_anomaly_count = db.Column(db.Integer, default=0)  # from anomaly.py
+    recent_burnout_score = db.Column(db.Float, nullable=True)  # from burnout.py
+    forecast_error_mean = db.Column(db.Float, nullable=True)  # from forecast.py
+
+    # Confidence — grows as data accumulates
+    total_msgs_seen = db.Column(db.Integer, default=0)
+    baseline_confidence = db.Column(db.Float, default=0.0)  # 0.0-1.0, grows with data
+
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("discord_id", "guild_id", name="uq_user_baseline_guild"),
+    )
+
+    def __repr__(self):
+        drift = "DRIFTING" if self.is_drifting else "stable"
+        return f"<UserBehaviorBaseline {self.discord_id} | {drift} | conf={self.baseline_confidence}>"
+
+
+class GuildActivityBaseline(db.Model):
+    """Long-term hourly activity baseline per guild.
+    Used by forecast.py to add guild-specific features."""
+
+    __tablename__ = "guild_activity_baselines"
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False, unique=True, index=True)
+
+    # 24-value JSON list — mean message count per hour over all history
+    hourly_mean = db.Column(db.JSON, nullable=True)
+    # 24-value JSON list — std dev per hour
+    hourly_std = db.Column(db.JSON, nullable=True)
+    # Peak hours (top 6 hours by mean activity), JSON list of ints
+    peak_hours = db.Column(db.JSON, nullable=True)
+    # Total messages seen (used for confidence weighting)
+    total_msgs_seen = db.Column(db.Integer, default=0)
+    # Days of data seen
+    days_of_history = db.Column(db.Integer, default=0)
+
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<GuildActivityBaseline {self.guild_id} | {self.days_of_history}d | {self.total_msgs_seen} msgs>"
+
+
 class GuildInfo(db.Model):
     """Stores scanned guild/server information."""
 

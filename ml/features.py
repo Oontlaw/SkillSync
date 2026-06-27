@@ -1,7 +1,18 @@
-import numpy as np
 from collections import defaultdict
 from datetime import datetime, timedelta
-from database import db, MessageRecord, ScoreLog, VoiceActivity, BehavioralAnomaly, BurnoutRisk, GuildMember, Worker
+
+import numpy as np
+
+from database import (
+    BehavioralAnomaly,
+    BurnoutRisk,
+    GuildMember,
+    MessageRecord,
+    ScoreLog,
+    VoiceActivity,
+    Worker,
+    db,
+)
 
 
 def user_hourly_profile(discord_id, days=30, guild_id=None):
@@ -11,7 +22,7 @@ def user_hourly_profile(discord_id, days=30, guild_id=None):
     q = MessageRecord.query.filter(
         MessageRecord.discord_id == discord_id,
         MessageRecord.created_at >= cutoff,
-        MessageRecord.hour_of_day != None
+        MessageRecord.hour_of_day != None,
     )
     if guild_id:
         q = q.filter(MessageRecord.guild_id == guild_id)
@@ -32,15 +43,11 @@ def user_message_stats(discord_id, days=30, guild_id=None):
     If guild_id is provided, only messages from that guild are included."""
     cutoff = datetime.utcnow() - timedelta(days=days)
     q = MessageRecord.query.filter(
-        MessageRecord.discord_id == discord_id,
-        MessageRecord.created_at >= cutoff
+        MessageRecord.discord_id == discord_id, MessageRecord.created_at >= cutoff
     )
     if guild_id:
         q = q.filter(MessageRecord.guild_id == guild_id)
-    rows = q.with_entities(
-        MessageRecord.message_length,
-        MessageRecord.created_at
-    ).all()
+    rows = q.with_entities(MessageRecord.message_length, MessageRecord.created_at).all()
     if len(rows) < 5:
         return None
     lengths = np.array([r.message_length for r in rows])
@@ -52,14 +59,14 @@ def user_message_stats(discord_id, days=30, guild_id=None):
     daily_mean = float(daily_vals.mean()) if len(daily_vals) > 0 else 0
     daily_std = float(daily_vals.std()) if len(daily_vals) > 1 else 0
     return {
-        'mean_len': float(lengths.mean()),
-        'std_len': float(lengths.std()) if len(lengths) > 1 else 0,
-        'p95_len': float(np.percentile(lengths, 95)),
-        'max_len': float(lengths.max()),
-        'daily_mean': daily_mean,
-        'daily_std': daily_std,
-        'cv': daily_std / daily_mean if daily_mean > 0 else 0,
-        'total_msgs': len(rows),
+        "mean_len": float(lengths.mean()),
+        "std_len": float(lengths.std()) if len(lengths) > 1 else 0,
+        "p95_len": float(np.percentile(lengths, 95)),
+        "max_len": float(lengths.max()),
+        "daily_mean": daily_mean,
+        "daily_std": daily_std,
+        "cv": daily_std / daily_mean if daily_mean > 0 else 0,
+        "total_msgs": len(rows),
     }
 
 
@@ -71,7 +78,9 @@ def user_anomaly_feature_vector(discord_id, days=30, guild_id=None):
     stats = user_message_stats(discord_id, days, guild_id=guild_id)
     if profile is None or stats is None:
         return None
-    extra = np.array([stats['mean_len'], stats['std_len'], stats['p95_len'], stats['cv']])
+    extra = np.array(
+        [stats["mean_len"], stats["std_len"], stats["p95_len"], stats["cv"]]
+    )
     return np.concatenate([profile, extra])
 
 
@@ -85,9 +94,11 @@ def all_user_feature_vectors(days=30, min_msgs=10, guild_id=None):
     )
     if guild_id:
         q = q.filter(MessageRecord.guild_id == guild_id)
-    ids = q.group_by(MessageRecord.discord_id).having(
-        db.func.count(MessageRecord.id) >= min_msgs
-    ).all()
+    ids = (
+        q.group_by(MessageRecord.discord_id)
+        .having(db.func.count(MessageRecord.id) >= min_msgs)
+        .all()
+    )
     ids = [r[0] for r in ids]
     X_list, valid_ids = [], []
     for did in ids:
@@ -100,49 +111,40 @@ def all_user_feature_vectors(days=30, min_msgs=10, guild_id=None):
     return np.array(X_list), valid_ids
 
 
-def guild_hourly_matrix(guild_id, days=30):
-    """Build hourly activity matrix for a guild over last N days.
-    Returns (n_days*24, 3) with columns: hour, day_of_week, message_count."""
-    cutoff = datetime.utcnow() - timedelta(days=days)
-    rows = MessageRecord.query.filter(
-        MessageRecord.guild_id == guild_id,
-        MessageRecord.created_at >= cutoff,
-        MessageRecord.hour_of_day != None
-    ).with_entities(
-        MessageRecord.hour_of_day,
-        MessageRecord.day_of_week,
-        MessageRecord.created_at
-    ).all()
-    if not rows:
-        return None
-    # Aggregate by (date, hour)
-    agg = defaultdict(int)
-    for hour, dow, created in rows:
-        key = (created.date(), hour, dow)
-        agg[key] += 1
-    if not agg:
-        return None
-    X = np.array([[k[1], k[2], v] for k, v in agg.items()])
-    return X
-
-
 def guild_forecast_features(guild_id, days=30, window=7):
-    """Build feature matrix for hourly forecasting.
-    Returns (X, y, timestamps) for regression.
-    Features: hour (sin/cos), day_of_week (sin/cos), rolling_avg_{6,12,24}h.
-    """
+    """Build feature matrix for hourly forecasting with guild-specific baseline.
+    Features (10 total):
+      hour_sin, hour_cos, dow_sin, dow_cos,
+      roll_6, roll_12, roll_24,
+      guild_hourly_mean, guild_hourly_std, is_peak_hour
+    Returns (X, y, timestamps)."""
+    from database import GuildActivityBaseline
+
     cutoff = datetime.utcnow() - timedelta(days=days)
-    rows = MessageRecord.query.filter(
-        MessageRecord.guild_id == guild_id,
-        MessageRecord.created_at >= cutoff,
-        MessageRecord.hour_of_day != None
-    ).with_entities(
-        MessageRecord.hour_of_day,
-        MessageRecord.day_of_week,
-        MessageRecord.created_at
-    ).all()
+    rows = (
+        MessageRecord.query.filter(
+            MessageRecord.guild_id == guild_id,
+            MessageRecord.created_at >= cutoff,
+            MessageRecord.hour_of_day != None,
+        )
+        .with_entities(
+            MessageRecord.hour_of_day,
+            MessageRecord.day_of_week,
+            MessageRecord.created_at,
+        )
+        .all()
+    )
     if not rows:
         return None, None, None
+
+    # Load guild baseline (may be None on first run)
+    baseline = GuildActivityBaseline.query.filter_by(guild_id=guild_id).first()
+    hourly_mean = (
+        baseline.hourly_mean if baseline and baseline.hourly_mean else [0.0] * 24
+    )
+    hourly_std = baseline.hourly_std if baseline and baseline.hourly_std else [1.0] * 24
+    peak_hours = set(baseline.peak_hours) if baseline and baseline.peak_hours else set()
+
     # Aggregate into hourly buckets
     hourly = defaultdict(int)
     timestamps = {}
@@ -152,9 +154,10 @@ def guild_forecast_features(guild_id, days=30, window=7):
         timestamps[bucket] = (hour, dow)
     if not hourly:
         return None, None, None
+
     sorted_buckets = sorted(hourly.keys())
     counts = np.array([hourly[b] for b in sorted_buckets])
-    # Build features
+
     X_list, y_list, ts_list = [], [], []
     for i, bucket in enumerate(sorted_buckets):
         hour, dow = timestamps[bucket]
@@ -162,13 +165,44 @@ def guild_forecast_features(guild_id, days=30, window=7):
         hour_cos = np.cos(2 * np.pi * hour / 24)
         dow_sin = np.sin(2 * np.pi * dow / 7)
         dow_cos = np.cos(2 * np.pi * dow / 7)
-        # Rolling averages
-        roll_6 = counts[max(0, i - 6):i].mean() if i >= 6 else counts[:i + 1].mean() if i > 0 else 0
-        roll_12 = counts[max(0, i - 12):i].mean() if i >= 12 else counts[:i + 1].mean() if i > 0 else 0
-        roll_24 = counts[max(0, i - 24):i].mean() if i >= 24 else counts[:i + 1].mean() if i > 0 else 0
-        X_list.append([hour_sin, hour_cos, dow_sin, dow_cos, roll_6, roll_12, roll_24])
+        roll_6 = (
+            counts[max(0, i - 6) : i].mean()
+            if i >= 6
+            else (counts[: i + 1].mean() if i > 0 else 0)
+        )
+        roll_12 = (
+            counts[max(0, i - 12) : i].mean()
+            if i >= 12
+            else (counts[: i + 1].mean() if i > 0 else 0)
+        )
+        roll_24 = (
+            counts[max(0, i - 24) : i].mean()
+            if i >= 24
+            else (counts[: i + 1].mean() if i > 0 else 0)
+        )
+
+        # Guild-specific baseline features
+        g_mean = hourly_mean[hour]
+        g_std = max(hourly_std[hour], 0.1)
+        is_peak = 1.0 if hour in peak_hours else 0.0
+
+        X_list.append(
+            [
+                hour_sin,
+                hour_cos,
+                dow_sin,
+                dow_cos,
+                roll_6,
+                roll_12,
+                roll_24,
+                g_mean,
+                g_std,
+                is_peak,
+            ]
+        )
         y_list.append(counts[i])
         ts_list.append(bucket.isoformat())
+
     return np.array(X_list), np.array(y_list), ts_list
 
 
@@ -184,7 +218,7 @@ def staff_feature_vectors(days=30):
     - consistency_score: 0-100 based on daily CV
     Returns (X, worker_ids, discord_ids, names).
     """
-    from database import Worker, ScoreLog
+    from database import ScoreLog, Worker
     from scoring import POINTS
 
     cutoff_30 = datetime.utcnow() - timedelta(days=days)
@@ -198,7 +232,7 @@ def staff_feature_vectors(days=30):
         # Anomaly frequency
         anomaly_count = BehavioralAnomaly.query.filter(
             BehavioralAnomaly.discord_id == did,
-            BehavioralAnomaly.detected_at >= cutoff_30
+            BehavioralAnomaly.detected_at >= cutoff_30,
         ).count()
         anomaly_freq = min(1.0, anomaly_count / 10)
 
@@ -206,26 +240,29 @@ def staff_feature_vectors(days=30):
         reversals = ScoreLog.query.filter(
             ScoreLog.worker_id == w.id,
             ScoreLog.change < 0,
-            ScoreLog.reason.ilike('%reversal%'),
-            ScoreLog.created_at >= cutoff_30
+            ScoreLog.reason.ilike("%reversal%"),
+            ScoreLog.created_at >= cutoff_30,
         ).count()
         total_actions = ScoreLog.query.filter(
             ScoreLog.worker_id == w.id,
-            ScoreLog.source == 'discord',
-            ScoreLog.created_at >= cutoff_30
+            ScoreLog.source == "discord",
+            ScoreLog.created_at >= cutoff_30,
         ).count()
         reversal_rate = reversals / max(total_actions, 1)
 
         # Voice
-        voice_avg = db.session.query(db.func.avg(VoiceActivity.duration_seconds)).filter(
-            VoiceActivity.discord_id == did,
-            VoiceActivity.created_at >= cutoff_30
-        ).scalar() or 0
+        voice_avg = (
+            db.session.query(db.func.avg(VoiceActivity.duration_seconds))
+            .filter(
+                VoiceActivity.discord_id == did, VoiceActivity.created_at >= cutoff_30
+            )
+            .scalar()
+            or 0
+        )
 
         # Off-hour ratio
         total_msgs = MessageRecord.query.filter(
-            MessageRecord.discord_id == did,
-            MessageRecord.created_at >= cutoff_30
+            MessageRecord.discord_id == did, MessageRecord.created_at >= cutoff_30
         ).count()
         off_hours = 0
         if total_msgs > 0:
@@ -238,13 +275,17 @@ def staff_feature_vectors(days=30):
         off_hour_ratio = off_hours / max(total_msgs, 1)
 
         # Activity consistency (CV of daily counts)
-        daily_counts = db.session.query(
-            db.func.date(MessageRecord.created_at).label('day'),
-            db.func.count(MessageRecord.id).label('c')
-        ).filter(
-            MessageRecord.discord_id == did,
-            MessageRecord.created_at >= cutoff_30
-        ).group_by(db.func.date(MessageRecord.created_at)).all()
+        daily_counts = (
+            db.session.query(
+                db.func.date(MessageRecord.created_at).label("day"),
+                db.func.count(MessageRecord.id).label("c"),
+            )
+            .filter(
+                MessageRecord.discord_id == did, MessageRecord.created_at >= cutoff_30
+            )
+            .group_by(db.func.date(MessageRecord.created_at))
+            .all()
+        )
         if daily_counts:
             daily_vals = np.array([d.c for d in daily_counts])
             daily_mean = daily_vals.mean()
@@ -255,15 +296,17 @@ def staff_feature_vectors(days=30):
             consistency = 50
             cv = 0.5
 
-        vec = np.array([
-            anomaly_freq,
-            reversal_rate,
-            min(1.0, voice_avg / 3600),
-            min(1.0, total_actions / 50),
-            off_hour_ratio,
-            min(cv, 1.0),
-            consistency / 100,
-        ])
+        vec = np.array(
+            [
+                anomaly_freq,
+                reversal_rate,
+                min(1.0, voice_avg / 3600),
+                min(1.0, total_actions / 50),
+                off_hour_ratio,
+                min(cv, 1.0),
+                consistency / 100,
+            ]
+        )
         X_list.append(vec)
         wids.append(w.id)
         dids.append(did)
@@ -283,20 +326,21 @@ def community_prior_for_worker(worker_id):
     cutoff_7 = datetime.utcnow() - timedelta(days=7)
 
     total_msgs_30 = MessageRecord.query.filter(
-        MessageRecord.discord_id == did,
-        MessageRecord.created_at >= cutoff_30
+        MessageRecord.discord_id == did, MessageRecord.created_at >= cutoff_30
     ).count()
     if total_msgs_30 < 10:
         return None
 
     # 1. Activity consistency (inverted CV of daily counts)
-    daily_counts = db.session.query(
-        db.func.date(MessageRecord.created_at).label('day'),
-        db.func.count(MessageRecord.id).label('c')
-    ).filter(
-        MessageRecord.discord_id == did,
-        MessageRecord.created_at >= cutoff_30
-    ).group_by(db.func.date(MessageRecord.created_at)).all()
+    daily_counts = (
+        db.session.query(
+            db.func.date(MessageRecord.created_at).label("day"),
+            db.func.count(MessageRecord.id).label("c"),
+        )
+        .filter(MessageRecord.discord_id == did, MessageRecord.created_at >= cutoff_30)
+        .group_by(db.func.date(MessageRecord.created_at))
+        .all()
+    )
     if daily_counts and len(daily_counts) > 1:
         vals = np.array([d.c for d in daily_counts])
         cv = vals.std() / max(vals.mean(), 0.1)
@@ -315,22 +359,28 @@ def community_prior_for_worker(worker_id):
 
     # 3. Anomaly rate (anomalies per 30 days, capped at 10)
     anomaly_count = BehavioralAnomaly.query.filter(
-        BehavioralAnomaly.discord_id == did,
-        BehavioralAnomaly.detected_at >= cutoff_30
+        BehavioralAnomaly.discord_id == did, BehavioralAnomaly.detected_at >= cutoff_30
     ).count()
     anomaly_rate = min(10, anomaly_count) / 10.0
 
     # 4. Score trajectory (second half vs first half of 30-day window)
-    recent_scores = ScoreLog.query.filter(
-        ScoreLog.worker_id == worker_id,
-        ScoreLog.created_at >= cutoff_30
-    ).order_by(ScoreLog.created_at).all()
+    recent_scores = (
+        ScoreLog.query.filter(
+            ScoreLog.worker_id == worker_id, ScoreLog.created_at >= cutoff_30
+        )
+        .order_by(ScoreLog.created_at)
+        .all()
+    )
     if len(recent_scores) >= 4:
         mid = len(recent_scores) // 2
         first_half = sum(abs(s.change) for s in recent_scores[:mid])
         second_half = sum(abs(s.change) for s in recent_scores[mid:])
         if first_half + second_half > 0:
-            score_trajectory = 1.0 if second_half > first_half else (0.0 if second_half < first_half else 0.5)
+            score_trajectory = (
+                1.0
+                if second_half > first_half
+                else (0.0 if second_half < first_half else 0.5)
+            )
         else:
             score_trajectory = 0.5
     else:
@@ -338,17 +388,237 @@ def community_prior_for_worker(worker_id):
 
     # 5. Recent activity ratio (msgs/day last 7d / msgs/day last 30d)
     total_msgs_7 = MessageRecord.query.filter(
-        MessageRecord.discord_id == did,
-        MessageRecord.created_at >= cutoff_7
+        MessageRecord.discord_id == did, MessageRecord.created_at >= cutoff_7
     ).count()
     daily_30 = total_msgs_30 / 30.0
     daily_7 = total_msgs_7 / 7.0
     recent_activity_ratio = min(2.0, daily_7 / max(daily_30, 0.1))
 
     return {
-        'activity_consistency': round(activity_consistency, 4),
-        'off_hours_ratio': round(off_hours_ratio, 4),
-        'anomaly_rate': round(anomaly_rate, 4),
-        'score_trajectory': round(score_trajectory, 4),
-        'recent_activity_ratio': round(recent_activity_ratio, 4),
+        "activity_consistency": round(activity_consistency, 4),
+        "off_hours_ratio": round(off_hours_ratio, 4),
+        "anomaly_rate": round(anomaly_rate, 4),
+        "score_trajectory": round(score_trajectory, 4),
+        "recent_activity_ratio": round(recent_activity_ratio, 4),
     }
+
+
+def update_user_baselines(days_long=90, days_short=7, min_msgs=5):
+    """Compute and upsert UserBehaviorBaseline for all users with data.
+    Called by engine.train_all() before model training.
+    This is the core of long-term memory — data accumulates forever."""
+    from scipy.spatial.distance import cosine as cosine_distance
+
+    from database import UserBehaviorBaseline
+
+    now = datetime.utcnow()
+    cutoff_long = now - timedelta(days=days_long)
+    cutoff_short = now - timedelta(days=days_short)
+
+    # Get all users with enough data
+    users = (
+        db.session.query(MessageRecord.discord_id, MessageRecord.guild_id)
+        .filter(MessageRecord.created_at >= cutoff_long)
+        .group_by(MessageRecord.discord_id, MessageRecord.guild_id)
+        .having(db.func.count(MessageRecord.id) >= min_msgs)
+        .all()
+    )
+
+    updated = 0
+    for discord_id, guild_id in users:
+        # --- Long-term (90d) profile ---
+        long_rows = (
+            MessageRecord.query.filter(
+                MessageRecord.discord_id == discord_id,
+                MessageRecord.guild_id == guild_id,
+                MessageRecord.created_at >= cutoff_long,
+                MessageRecord.hour_of_day != None,
+            )
+            .with_entities(
+                MessageRecord.hour_of_day,
+                MessageRecord.message_length,
+                MessageRecord.created_at,
+            )
+            .all()
+        )
+
+        if not long_rows:
+            continue
+
+        # Hourly profile (normalized)
+        hourly_counts = np.zeros(24)
+        for hour, _, _ in long_rows:
+            hourly_counts[hour] += 1
+        total = hourly_counts.sum()
+        hourly_profile = (hourly_counts / max(total, 1)).tolist()
+
+        # Daily stats
+        day_counts = defaultdict(int)
+        for _, _, created in long_rows:
+            day_counts[created.date()] += 1
+        daily_vals = (
+            np.array(list(day_counts.values())) if day_counts else np.array([0])
+        )
+        mean_daily = float(daily_vals.mean())
+        std_daily = float(daily_vals.std()) if len(daily_vals) > 1 else 0.0
+
+        # Message length
+        lengths = np.array([r[1] for r in long_rows if r[1]])
+        mean_length = float(lengths.mean()) if len(lengths) > 0 else 0.0
+
+        # Off-hours ratio (outside 9-17)
+        off_hours = sum(1 for h, _, _ in long_rows if h < 9 or h > 16)
+        off_hours_ratio_90d = off_hours / max(len(long_rows), 1)
+
+        # --- Short-term (7d) stats ---
+        short_rows = [r for r in long_rows if r[2] >= cutoff_short]
+        if short_rows:
+            short_day_counts = defaultdict(int)
+            for _, _, created in short_rows:
+                short_day_counts[created.date()] += 1
+            short_vals = np.array(list(short_day_counts.values()))
+            mean_daily_7d = float(short_vals.mean()) if len(short_vals) > 0 else 0.0
+            off_hours_7d = sum(1 for h, _, _ in short_rows if h < 9 or h > 16)
+            off_hours_ratio_7d = off_hours_7d / max(len(short_rows), 1)
+        else:
+            mean_daily_7d = 0.0
+            off_hours_ratio_7d = 0.0
+
+        # --- Drift signals ---
+        volume_drift = (mean_daily_7d - mean_daily) / max(std_daily, 1.0)
+
+        # Pattern drift: cosine distance between short-term and long-term hourly profile
+        if short_rows:
+            short_hourly = np.zeros(24)
+            for h, _, _ in short_rows:
+                short_hourly[h] += 1
+            short_total = short_hourly.sum()
+            if short_total > 0 and total > 0:
+                short_profile = short_hourly / short_total
+                try:
+                    pattern_drift = float(
+                        cosine_distance(hourly_profile, short_profile)
+                    )
+                except Exception:
+                    pattern_drift = 0.0
+            else:
+                pattern_drift = 0.0
+        else:
+            pattern_drift = 0.0
+
+        is_drifting = abs(volume_drift) > 2.0 or pattern_drift > 0.3
+
+        # Confidence: grows logarithmically with total messages seen
+        total_msgs = len(long_rows)
+        confidence = float(min(1.0, np.log1p(total_msgs) / np.log1p(1000)))
+
+        # Upsert
+        existing = UserBehaviorBaseline.query.filter_by(
+            discord_id=discord_id, guild_id=guild_id
+        ).first()
+        if existing:
+            existing.hourly_profile_90d = hourly_profile
+            existing.mean_daily_msgs_90d = mean_daily
+            existing.std_daily_msgs_90d = std_daily
+            existing.mean_msg_length_90d = mean_length
+            existing.off_hours_ratio_90d = off_hours_ratio_90d
+            existing.mean_daily_msgs_7d = mean_daily_7d
+            existing.off_hours_ratio_7d = off_hours_ratio_7d
+            existing.volume_drift = round(volume_drift, 4)
+            existing.pattern_drift = round(pattern_drift, 4)
+            existing.is_drifting = is_drifting
+            existing.total_msgs_seen = total_msgs
+            existing.baseline_confidence = round(confidence, 4)
+            existing.updated_at = now
+        else:
+            db.session.add(
+                UserBehaviorBaseline(
+                    discord_id=discord_id,
+                    guild_id=guild_id,
+                    hourly_profile_90d=hourly_profile,
+                    mean_daily_msgs_90d=mean_daily,
+                    std_daily_msgs_90d=std_daily,
+                    mean_msg_length_90d=mean_length,
+                    off_hours_ratio_90d=off_hours_ratio_90d,
+                    mean_daily_msgs_7d=mean_daily_7d,
+                    off_hours_ratio_7d=off_hours_ratio_7d,
+                    volume_drift=round(volume_drift, 4),
+                    pattern_drift=round(pattern_drift, 4),
+                    is_drifting=is_drifting,
+                    total_msgs_seen=total_msgs,
+                    baseline_confidence=round(confidence, 4),
+                )
+            )
+        updated += 1
+
+    db.session.commit()
+    return updated
+
+
+def update_guild_baselines():
+    """Compute and upsert GuildActivityBaseline for all guilds.
+    Uses ALL historical data — no cutoff. Called by engine.train_all()."""
+    from database import GuildActivityBaseline, GuildInfo
+
+    guilds = GuildInfo.query.all()
+    updated = 0
+
+    for g in guilds:
+        rows = (
+            MessageRecord.query.filter(
+                MessageRecord.guild_id == g.guild_id,
+                MessageRecord.hour_of_day != None,
+            )
+            .with_entities(
+                MessageRecord.hour_of_day,
+                MessageRecord.created_at,
+            )
+            .all()
+        )
+
+        if not rows:
+            continue
+
+        # Count occurrences per (hour, day) then average across days
+        day_hour_counts = defaultdict(lambda: defaultdict(int))
+        for hour, created in rows:
+            day_hour_counts[created.date()][hour] += 1
+
+        hourly_mean = []
+        hourly_std = []
+        for h in range(24):
+            vals = [day_hour_counts[d][h] for d in day_hour_counts]
+            arr = np.array(vals) if vals else np.array([0])
+            hourly_mean.append(round(float(arr.mean()), 4))
+            hourly_std.append(round(float(arr.std()), 4) if len(arr) > 1 else 0.0)
+
+        # Peak hours: top 6 by mean
+        sorted_hours = sorted(range(24), key=lambda h: hourly_mean[h], reverse=True)
+        peak_hours = sorted_hours[:6]
+
+        total_msgs = len(rows)
+        days_seen = len(set(created.date() for _, created in rows))
+
+        existing = GuildActivityBaseline.query.filter_by(guild_id=g.guild_id).first()
+        if existing:
+            existing.hourly_mean = hourly_mean
+            existing.hourly_std = hourly_std
+            existing.peak_hours = peak_hours
+            existing.total_msgs_seen = total_msgs
+            existing.days_of_history = days_seen
+            existing.updated_at = datetime.utcnow()
+        else:
+            db.session.add(
+                GuildActivityBaseline(
+                    guild_id=g.guild_id,
+                    hourly_mean=hourly_mean,
+                    hourly_std=hourly_std,
+                    peak_hours=peak_hours,
+                    total_msgs_seen=total_msgs,
+                    days_of_history=days_seen,
+                )
+            )
+        updated += 1
+
+    db.session.commit()
+    return updated

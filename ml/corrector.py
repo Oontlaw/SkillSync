@@ -1,53 +1,79 @@
+import json
 import os
-import numpy as np
-import joblib
 from collections import defaultdict
 from datetime import datetime, timedelta
-from sklearn.linear_model import LogisticRegression, Ridge
-from sklearn.model_selection import cross_val_score, LeaveOneOut
-from sklearn.preprocessing import StandardScaler
-import json
-from database import db, PredictionLog
 
-MODELS_DIR = os.path.join(os.path.dirname(__file__), 'models')
-CORRECTOR_MODEL_PATH = os.path.join(MODELS_DIR, 'score_corrector.joblib')
-SCALER_PATH = os.path.join(MODELS_DIR, 'corrector_scaler.joblib')
+import joblib
+import numpy as np
+from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.model_selection import LeaveOneOut, cross_val_score
+from sklearn.preprocessing import StandardScaler
+
+from database import PredictionLog, db
+
+MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
+CORRECTOR_MODEL_PATH = os.path.join(MODELS_DIR, "score_corrector.joblib")
+SCALER_PATH = os.path.join(MODELS_DIR, "corrector_scaler.joblib")
 MIN_CORRECTIONS = 5
 
 
-def _log_corrector_prediction(worker_id, original_change, predicted_change, direction, confidence):
+def _log_corrector_prediction(
+    worker_id, original_change, predicted_change, direction, confidence
+):
     """Log a corrector recommendation to PredictionLog.
     Outcome is resolved by resolve_corrector_outcomes() when an AdminCorrection
     record appears after prediction_time for the same worker_id.
     """
     try:
         entry = PredictionLog(
-            model_name='corrector',
+            model_name="corrector",
             prediction_value=float(predicted_change),
             confidence=float(confidence),
-            metadata_json=json.dumps({
-                'worker_id': worker_id,
-                'original_change': original_change,
-                'direction': direction,
-            }),
+            metadata_json=json.dumps(
+                {
+                    "worker_id": worker_id,
+                    "original_change": original_change,
+                    "direction": direction,
+                }
+            ),
             prediction_time=datetime.utcnow(),
         )
         db.session.add(entry)
         db.session.commit()
         return entry.id
     except Exception as e:
-        print(f'[corrector] PredictionLog write failed: {e}')
+        print(f"[corrector] PredictionLog write failed: {e}")
         return None
 
 
 def log_corrector_prediction(worker_id, original_score, corrected_score, reason):
-    """Log a corrector prediction using the unified logging function."""
+    """Log a corrector prediction to PredictionLog."""
     try:
-        from ml.forecast import log_corrector_prediction as unified_log
-        return unified_log(worker_id, original_score, corrected_score, reason)
+        entry = PredictionLog(
+            model_name="corrector",
+            prediction_value=float(corrected_score - original_score),
+            features_json=json.dumps(
+                {
+                    "worker_id": worker_id,
+                    "original_score": original_score,
+                    "corrected_score": corrected_score,
+                    "reason": reason,
+                }
+            ),
+            metadata_json=json.dumps(
+                {
+                    "worker_id": worker_id,
+                    "original_score": original_score,
+                    "corrected_score": corrected_score,
+                    "reason": reason,
+                }
+            ),
+            prediction_time=datetime.utcnow(),
+        )
+        db.session.add(entry)
+        db.session.commit()
     except Exception as e:
-        print(f'[corrector] Unified logging failed: {e}')
-        return None
+        print(f"[corrector] PredictionLog write failed: {e}")
 
 
 def resolve_corrector_outcomes(days_back=30):
@@ -59,11 +85,13 @@ def resolve_corrector_outcomes(days_back=30):
       - Mark was_correct = True if abs(error) <= 2.0 points, else False
     """
     import json as _json
+
     from database import AdminCorrection
+
     cutoff = datetime.utcnow() - timedelta(days=days_back)
 
     pending = PredictionLog.query.filter(
-        PredictionLog.model_name == 'corrector',
+        PredictionLog.model_name == "corrector",
         PredictionLog.was_correct == None,
         PredictionLog.prediction_time >= cutoff,
     ).all()
@@ -72,14 +100,18 @@ def resolve_corrector_outcomes(days_back=30):
     for log in pending:
         try:
             meta = _json.loads(log.metadata_json) if log.metadata_json else {}
-            worker_id = meta.get('worker_id')
+            worker_id = meta.get("worker_id")
             if not worker_id:
                 continue
 
-            actual = AdminCorrection.query.filter(
-                AdminCorrection.worker_id == int(worker_id),
-                AdminCorrection.created_at > log.prediction_time,
-            ).order_by(AdminCorrection.created_at).first()
+            actual = (
+                AdminCorrection.query.filter(
+                    AdminCorrection.worker_id == int(worker_id),
+                    AdminCorrection.created_at > log.prediction_time,
+                )
+                .order_by(AdminCorrection.created_at)
+                .first()
+            )
 
             if not actual:
                 continue
@@ -93,12 +125,12 @@ def resolve_corrector_outcomes(days_back=30):
             log.outcome_time = actual.created_at
             resolved += 1
         except Exception as e:
-            print(f'[corrector] resolve error on log {log.id}: {e}')
+            print(f"[corrector] resolve error on log {log.id}: {e}")
             continue
 
     if resolved:
         db.session.commit()
-    return {'resolved': resolved, 'pending_checked': len(pending)}
+    return {"resolved": resolved, "pending_checked": len(pending)}
 
 
 def _build_training_data(days=365):
@@ -113,14 +145,16 @@ def _build_training_data(days=365):
       y_reg: corrected_score_change (regression)
       y_cls: direction label (0=decrease, 1=unchanged, 2=increase)
     """
-    from database import db, AdminCorrection, ScoreLog, Worker
+    from database import AdminCorrection, ScoreLog, Worker, db
     from scoring import _compute_score
 
     cutoff_365 = datetime.utcnow() - timedelta(days=days)
 
-    corrections = AdminCorrection.query.filter(
-        AdminCorrection.created_at >= cutoff_365
-    ).order_by(AdminCorrection.created_at).all()
+    corrections = (
+        AdminCorrection.query.filter(AdminCorrection.created_at >= cutoff_365)
+        .order_by(AdminCorrection.created_at)
+        .all()
+    )
 
     if len(corrections) < MIN_CORRECTIONS:
         return None, None, None, None, len(corrections)
@@ -134,12 +168,14 @@ def _build_training_data(days=365):
         direction = 0 if delta < 0 else (2 if delta > 0 else 1)
         total_score = _compute_score(wid)
 
-        X.append([
-            abs(c.original_score_change),
-            delta,
-            corr_count[wid],
-            total_score,
-        ])
+        X.append(
+            [
+                abs(c.original_score_change),
+                delta,
+                corr_count[wid],
+                total_score,
+            ]
+        )
         y_reg.append(c.corrected_score_change)
         y_cls.append(direction)
         corr_count[wid] += 1
@@ -155,7 +191,10 @@ def train(days=365):
     """
     X, y_reg, y_cls, corrections, count = _build_training_data(days=days)
     if X is None or len(y_reg) < MIN_CORRECTIONS:
-        return {'status': 'skipped', 'reason': f'Only {count} corrections in DB (need {MIN_CORRECTIONS})'}
+        return {
+            "status": "skipped",
+            "reason": f"Only {count} corrections in DB (need {MIN_CORRECTIONS})",
+        }
 
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
@@ -169,7 +208,9 @@ def train(days=365):
     cv_r2 = None
     if len(y_reg) >= 3:
         try:
-            cv_scores = cross_val_score(reg, X_scaled, y_reg, cv=LeaveOneOut(), scoring='r2')
+            cv_scores = cross_val_score(
+                reg, X_scaled, y_reg, cv=LeaveOneOut(), scoring="r2"
+            )
             cv_scores = cv_scores[~np.isnan(cv_scores)]
             if len(cv_scores) > 0:
                 cv_r2 = float(np.mean(cv_scores))
@@ -185,22 +226,28 @@ def train(days=365):
     cv_acc = None
     if len(y_cls) >= 3 and len(np.unique(y_cls)) > 1:
         try:
-            cv_acc = float(np.mean(cross_val_score(cls, X_scaled, y_cls, cv=LeaveOneOut(), scoring='accuracy')))
+            cv_acc = float(
+                np.mean(
+                    cross_val_score(
+                        cls, X_scaled, y_cls, cv=LeaveOneOut(), scoring="accuracy"
+                    )
+                )
+            )
         except Exception:
             pass
     if cv_acc is None:
         cv_acc = train_acc
 
     os.makedirs(MODELS_DIR, exist_ok=True)
-    joblib.dump({'regressor': reg, 'classifier': cls}, CORRECTOR_MODEL_PATH)
+    joblib.dump({"regressor": reg, "classifier": cls}, CORRECTOR_MODEL_PATH)
     joblib.dump(scaler, SCALER_PATH)
 
     return {
-        'status': 'trained',
-        'corrections_used': len(y_reg),
-        'r2_score': round(cv_r2, 4),
-        'classifier_accuracy': round(cv_acc, 4),
-        'n_features': X.shape[1],
+        "status": "trained",
+        "corrections_used": len(y_reg),
+        "r2_score": round(cv_r2, 4),
+        "classifier_accuracy": round(cv_acc, 4),
+        "n_features": X.shape[1],
     }
 
 
@@ -215,18 +262,20 @@ def predict(original_change, worker_id=None, worker_stats=None):
 
     model_data = joblib.load(CORRECTOR_MODEL_PATH)
     scaler = joblib.load(SCALER_PATH)
-    reg = model_data['regressor']
-    cls = model_data['classifier']
+    reg = model_data["regressor"]
+    cls = model_data["classifier"]
 
     if worker_stats is not None:
         vec = np.array(worker_stats).reshape(1, -1)
     elif worker_id is not None:
-        from database import db, AdminCorrection
+        from database import AdminCorrection, db
         from scoring import _compute_score
 
         past_corrections = AdminCorrection.query.filter_by(worker_id=worker_id).count()
         total_score = _compute_score(worker_id)
-        vec = np.array([[abs(original_change), 0, past_corrections, total_score]]).reshape(1, -1)
+        vec = np.array(
+            [[abs(original_change), 0, past_corrections, total_score]]
+        ).reshape(1, -1)
     else:
         vec = np.array([[abs(original_change), 0, 0, 0]]).reshape(1, -1)
 
@@ -235,12 +284,12 @@ def predict(original_change, worker_id=None, worker_stats=None):
     pred_dir = int(cls.predict(vec_scaled)[0])
     dir_proba = float(max(cls.predict_proba(vec_scaled)[0]))
 
-    direction_map = {0: 'decrease', 1: 'unchanged', 2: 'increase'}
-    direction = direction_map.get(pred_dir, 'unknown')
+    direction_map = {0: "decrease", 1: "unchanged", 2: "increase"}
+    direction = direction_map.get(pred_dir, "unknown")
     result = {
-        'predicted_change': round(pred_change, 1),
-        'direction': direction,
-        'confidence': round(dir_proba, 3),
+        "predicted_change": round(pred_change, 1),
+        "direction": direction,
+        "confidence": round(dir_proba, 3),
     }
     _log_corrector_prediction(
         worker_id=worker_id,
@@ -255,9 +304,9 @@ def predict(original_change, worker_id=None, worker_stats=None):
 def get_stats():
     """Return training statistics from the persisted model."""
     if not os.path.exists(CORRECTOR_MODEL_PATH):
-        return {'trained': False}
+        return {"trained": False}
     model_data = joblib.load(CORRECTOR_MODEL_PATH)
     return {
-        'trained': True,
-        'model_path': CORRECTOR_MODEL_PATH,
+        "trained": True,
+        "model_path": CORRECTOR_MODEL_PATH,
     }
