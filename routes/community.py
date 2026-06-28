@@ -23,6 +23,7 @@ def community_event():
     # Log the community event
     event = CommunityEvent(
         discord_id=discord_id,
+        guild_id=data.get("guild_id"),
         event_type=event_type,
         detail=detail,
         score_impact=score_impact,

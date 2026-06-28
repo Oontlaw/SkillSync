@@ -3,6 +3,7 @@ import secrets
 import time
 import requests
 from flask import Blueprint, redirect, request, session, url_for
+from urllib.parse import urlencode
 from database import db, GuildInfo
 
 auth_bp = Blueprint('auth', __name__)
@@ -14,8 +15,34 @@ DISCORD_API = 'https://discord.com/api/v10'
 PERM_ADMINISTRATOR = 1 << 3
 PERM_MANAGE_GUILD = 1 << 5
 
-# Server-side pending states (removed in favor of session-based state)
-# _pending_states = {}
+OAUTH_STATE_TTL_SECONDS = 10 * 60
+_pending_states = {}
+
+
+def _remember_state(state):
+    now = time.time()
+    expired = [
+        key
+        for key, created_at in _pending_states.items()
+        if now - created_at > OAUTH_STATE_TTL_SECONDS
+    ]
+    for key in expired:
+        _pending_states.pop(key, None)
+    _pending_states[state] = now
+
+
+def _consume_state(state):
+    if not state:
+        return False
+    saved_state = session.pop('oauth_state', None)
+    if saved_state and secrets.compare_digest(state, saved_state):
+        _pending_states.pop(state, None)
+        return True
+
+    created_at = _pending_states.pop(state, None)
+    if not created_at:
+        return False
+    return time.time() - created_at <= OAUTH_STATE_TTL_SECONDS
 
 
 def _redirect_uri():
@@ -31,24 +58,23 @@ def _redirect_uri():
 def login():
     state = secrets.token_hex(16)
     session['oauth_state'] = state
+    _remember_state(state)
     uri = _redirect_uri()
-    
-    # Debug logging to verify credentials and URI
-    print(f'[Auth] Login attempt - ClientID: {CLIENT_ID}, URI: {uri}, State: {state}')
-    
-    return redirect(
-        f'{DISCORD_API}/oauth2/authorize?client_id={CLIENT_ID}'
-        f'&redirect_uri={uri}'
-        f'&response_type=code&scope=identify%20guilds'
-        f'&state={state}'
-    )
+    params = {
+        'client_id': CLIENT_ID,
+        'redirect_uri': uri,
+        'response_type': 'code',
+        'scope': 'identify guilds',
+        'state': state,
+    }
+
+    return redirect(f'{DISCORD_API}/oauth2/authorize?{urlencode(params)}')
 
 
 @auth_bp.route('/callback')
 def callback():
     returned_state = request.args.get('state')
-    saved_state = session.pop('oauth_state', None)
-    if not returned_state or returned_state != saved_state:
+    if not _consume_state(returned_state):
         return 'Invalid state parameter. Possible CSRF attack.', 403
 
     code = request.args.get('code')

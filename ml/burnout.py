@@ -207,7 +207,7 @@ def train(contamination=0.1, days=30):
     }
 
 
-def score_worker(discord_id, days=30):
+def score_worker(discord_id, days=30, guild_id=None):
     """Score a single worker for burnout risk using weighted signals."""
     from database import BurnoutRisk
     from database import Worker as WorkerModel
@@ -253,6 +253,7 @@ def score_worker(discord_id, days=30):
                 BurnoutRisk(
                     worker_id=worker.id,
                     discord_id=discord_id,
+                    guild_id=guild_id,
                     name=worker.name,
                     score=float(burnout_score_int),
                     signals=signals_str,

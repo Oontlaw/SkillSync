@@ -90,10 +90,22 @@ def index(template_name="dashboard.html"):
 
     accessible_ids = get_accessible_guild_ids()
 
+    # Guild selector — ?guild_id scopes all queries to that guild
+    selected_guild_id = request.args.get("guild_id")
+    if selected_guild_id and selected_guild_id not in accessible_ids:
+        selected_guild_id = None
+
+    # When a specific guild is selected, narrow accessible_ids to just that guild
+    # so all downstream queries auto-filter. Keep the full list for the dropdown.
+    if selected_guild_id:
+        guild_filter_ids = [selected_guild_id]
+    else:
+        guild_filter_ids = accessible_ids
+
     # Guild-scoped filter for ScoreLog (include legacy rows with NULL guild_id)
     if accessible_ids:
         scorelog_filter = db.or_(
-            ScoreLog.guild_id.in_(accessible_ids), ScoreLog.guild_id == None
+            ScoreLog.guild_id.in_(guild_filter_ids), ScoreLog.guild_id == None
         )
     else:
         scorelog_filter = None
@@ -186,10 +198,10 @@ def index(template_name="dashboard.html"):
 
     # Common guild filter for message/voice queries
     guild_filter = (
-        MessageRecord.guild_id.in_(accessible_ids) if accessible_ids else None
+        MessageRecord.guild_id.in_(guild_filter_ids) if guild_filter_ids else None
     )
     voice_guild_filter = (
-        VoiceActivity.guild_id.in_(accessible_ids) if accessible_ids else None
+        VoiceActivity.guild_id.in_(guild_filter_ids) if guild_filter_ids else None
     )
 
     # Behavioral analytics
@@ -304,8 +316,8 @@ def index(template_name="dashboard.html"):
                 db.session.query(GuildMember.member_id).filter(
                     GuildMember.is_staff == True,
                     GuildMember.is_bot == False,
-                    GuildMember.guild_id.in_(accessible_ids)
-                    if accessible_ids
+                    GuildMember.guild_id.in_(guild_filter_ids)
+                    if guild_filter_ids
                     else True,
                 )
             )
@@ -348,10 +360,10 @@ def index(template_name="dashboard.html"):
 
     # Guild scan overview — only guilds the user can access AND the bot is in
     guilds = (
-        GuildInfo.query.filter(GuildInfo.guild_id.in_(accessible_ids))
+        GuildInfo.query.filter(GuildInfo.guild_id.in_(guild_filter_ids))
         .order_by(GuildInfo.name)
         .all()
-        if accessible_ids
+        if guild_filter_ids
         else []
     )
     total_guilds = len(guilds)
@@ -360,13 +372,13 @@ def index(template_name="dashboard.html"):
         dict(
             db.session.query(GuildMember.guild_id, func.count(GuildMember.id))
             .filter(
-                GuildMember.guild_id.in_(accessible_ids),
+                GuildMember.guild_id.in_(guild_filter_ids),
                 GuildMember.is_bot == False,
             )
             .group_by(GuildMember.guild_id)
             .all()
         )
-        if accessible_ids
+        if guild_filter_ids
         else {}
     )
     total_members_tracked = sum(guild_member_count_map.values())
@@ -380,9 +392,9 @@ def index(template_name="dashboard.html"):
         GuildMember.query.filter(
             GuildMember.is_staff == True,
             GuildMember.is_bot == False,
-            GuildMember.guild_id.in_(accessible_ids),
+            GuildMember.guild_id.in_(guild_filter_ids),
         ).count()
-        if accessible_ids
+        if guild_filter_ids
         else 0
     )
 
@@ -391,11 +403,11 @@ def index(template_name="dashboard.html"):
         BehavioralAnomaly.cleared_at == None,
         BehavioralAnomaly.detected_at > datetime.utcnow() - timedelta(hours=48),
     )
-    if accessible_ids:
+    if guild_filter_ids:
         recent_anomalies = recent_anomalies.filter(
             db.or_(
                 BehavioralAnomaly.guild_id == None,
-                BehavioralAnomaly.guild_id.in_(accessible_ids),
+                BehavioralAnomaly.guild_id.in_(guild_filter_ids),
             )
         )
     recent_anomalies = (
@@ -410,9 +422,9 @@ def index(template_name="dashboard.html"):
     join_leave_query = MemberJoinLeave.query.filter(
         MemberJoinLeave.created_at >= cutoff
     )
-    if accessible_ids:
+    if guild_filter_ids:
         join_leave_query = join_leave_query.filter(
-            MemberJoinLeave.guild_id.in_(accessible_ids)
+            MemberJoinLeave.guild_id.in_(guild_filter_ids)
         )
 
     total_joins_7d = join_leave_query.filter(
@@ -432,9 +444,9 @@ def index(template_name="dashboard.html"):
         MemberJoinLeave.event_type == "join",
         MemberJoinLeave.hour_of_day != None,
     )
-    if accessible_ids:
+    if guild_filter_ids:
         hourly_joins_data = hourly_joins_data.filter(
-            MemberJoinLeave.guild_id.in_(accessible_ids)
+            MemberJoinLeave.guild_id.in_(guild_filter_ids)
         )
     hourly_joins_data = hourly_joins_data.group_by(MemberJoinLeave.hour_of_day).all()
     for h, c in hourly_joins_data:
@@ -447,9 +459,9 @@ def index(template_name="dashboard.html"):
         MemberJoinLeave.event_type == "leave",
         MemberJoinLeave.hour_of_day != None,
     )
-    if accessible_ids:
+    if guild_filter_ids:
         hourly_leaves_data = hourly_leaves_data.filter(
-            MemberJoinLeave.guild_id.in_(accessible_ids)
+            MemberJoinLeave.guild_id.in_(guild_filter_ids)
         )
     hourly_leaves_data = hourly_leaves_data.group_by(MemberJoinLeave.hour_of_day).all()
     for h, c in hourly_leaves_data:
@@ -460,9 +472,9 @@ def index(template_name="dashboard.html"):
         func.date(MemberJoinLeave.created_at).label("day"),
         func.count(MemberJoinLeave.id),
     ).filter(MemberJoinLeave.created_at >= cutoff, MemberJoinLeave.event_type == "join")
-    if accessible_ids:
+    if guild_filter_ids:
         daily_joins_data = daily_joins_data.filter(
-            MemberJoinLeave.guild_id.in_(accessible_ids)
+            MemberJoinLeave.guild_id.in_(guild_filter_ids)
         )
     daily_joins_dict = {
         str(d[0]): d[1]
@@ -475,9 +487,9 @@ def index(template_name="dashboard.html"):
     ).filter(
         MemberJoinLeave.created_at >= cutoff, MemberJoinLeave.event_type == "leave"
     )
-    if accessible_ids:
+    if guild_filter_ids:
         daily_leaves_data = daily_leaves_data.filter(
-            MemberJoinLeave.guild_id.in_(accessible_ids)
+            MemberJoinLeave.guild_id.in_(guild_filter_ids)
         )
     daily_leaves_dict = {
         str(d[0]): d[1]
@@ -528,9 +540,18 @@ def index(template_name="dashboard.html"):
                 h.get("round", i + 1) for i, h in enumerate(fed["history"])
             ]
 
+    # Detect empty state for guild-scoped view (brand new guild, no data yet)
+    is_empty = bool(selected_guild_id) and (
+        total_messages_logged == 0
+        and total_workers == 0
+        and total_moderation_actions == 0
+        and total_voice_sessions == 0
+    )
+
     return render_template(
         template_name,
         user=user,
+        selected_guild_id=selected_guild_id,
         accessible_guilds=session.get("accessible_guilds", []),
         invite_url=BOT_INVITE_URL,
         logged_out=False,
@@ -588,6 +609,7 @@ def index(template_name="dashboard.html"):
         health_drift_detected=health_drift_detected,
         health_drift_reasons=health_drift_reasons,
         growth_status=growth_status,
+        is_empty=is_empty,
     )
 
 

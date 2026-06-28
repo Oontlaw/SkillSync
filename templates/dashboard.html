@@ -52,6 +52,84 @@ endblock %} {% block content %}
 </div>
 {% endif %}
 
+<!-- Guild Selector -->
+{% if accessible_guilds and accessible_guilds|length > 1 %}
+<div style="margin-bottom: 20px; display: flex; align-items: center; gap: 10px">
+    <label
+        for="guildSelector"
+        style="
+            font-size: 12px;
+            color: var(--text-muted);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        "
+        >Server:</label
+    >
+    <select
+        id="guildSelector"
+        onchange="if (this.value) window.location.href = this.value;"
+        style="
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 13px;
+            color: var(--text-primary);
+            font-family: Inter, sans-serif;
+            cursor: pointer;
+            min-width: 200px;
+        "
+    >
+        <option value="/" {% if not selected_guild_id %}selected{% endif %}>
+            All Servers
+        </option>
+        {% for g in accessible_guilds %}
+        <option
+            value="/?guild_id={{ g.id }}"
+            {%
+            if
+            selected_guild_id=""
+            ="g.id"
+            %}
+            selected{%
+            endif
+            %}
+        >
+            {{ g.name }}
+        </option>
+        {% endfor %}
+    </select>
+</div>
+{% endif %} {% if is_empty %}
+<!-- Empty State -->
+<div class="empty-state" style="text-align: center; padding: 64px 24px">
+    <div style="font-size: 48px; margin-bottom: 16px">🌙</div>
+    <h2
+        style="
+            font-size: 20px;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            font-family: var(--font-secondary);
+        "
+    >
+        SkillSync is warming up
+    </h2>
+    <p
+        style="
+            font-size: 14px;
+            color: var(--text-secondary);
+            max-width: 480px;
+            margin: 0 auto;
+        "
+    >
+        Data will appear here as your community becomes active. Activity
+        tracking, moderation analytics, and ML anomaly detection begin
+        collecting immediately — no setup required.
+    </p>
+</div>
+{% else %}
+
 <!-- 1. OVERVIEW SECTION -->
 <section class="ws-section">
     <div class="section-header">
@@ -96,9 +174,10 @@ endblock %} {% block content %}
         </div>
         <div class="stat-card">
             <div class="stat-value" data-live="total_online_pct">
-                {{ total_staff_tracked }}
+                {{ (total_online_members / total_members_tracked * 100) |
+                round(1) if total_members_tracked else 0 }}%
             </div>
-            <div class="stat-label">Staff</div>
+            <div class="stat-label">Online</div>
         </div>
     </div>
 </section>
@@ -1197,8 +1276,7 @@ endblock %} {% block content %}
         {% endif %}
     </div>
 </section>
-
-{% endblock %} {% block scripts %}
+{% endif %} {% endblock %} {% block scripts %}
 
 <script>
     console.log('dashboard.js: block loaded');
@@ -1428,6 +1506,3 @@ endblock %} {% block content %}
 </script>
 
 {% endblock %}
-
-
-

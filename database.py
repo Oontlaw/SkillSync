@@ -192,6 +192,7 @@ class CommunityEvent(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     discord_id = db.Column(db.String(50), nullable=False, index=True)
+    guild_id = db.Column(db.String(50), nullable=True, index=True)
     event_type = db.Column(
         db.String(100), nullable=False
     )  # message / moderation / rule_break / helpful
@@ -554,6 +555,7 @@ class BurnoutRisk(db.Model):
         db.Integer, db.ForeignKey("workers.id"), nullable=False, index=True
     )
     discord_id = db.Column(db.String(50), nullable=False)
+    guild_id = db.Column(db.String(50), nullable=True, index=True)
     name = db.Column(db.String(100), nullable=True)
     score = db.Column(db.Float, default=0.0, index=True)
     anomaly_freq = db.Column(db.Float, default=0.0)

@@ -1,4 +1,5 @@
 import asyncio
+import os
 from datetime import datetime, timezone
 
 import discord
@@ -183,8 +184,64 @@ async def handle_ready(bot):
 
 
 async def handle_guild_join(bot, guild):
-    """Fires when the bot joins a new server. Full scan immediately."""
+    """Fires when the bot joins a new server. Full scan immediately.
+    Posts a welcome embed to the system channel or first available text channel.
+    """
     log(f"JOINED new guild: {guild.name} (ID: {guild.id})")
     print(f"[SkillSync] Joined new guild: {guild.name}")
     prefix_cache[str(guild.id)] = ["!ss "]
     await scan_guild(guild)
+
+    # Post welcome embed
+    client_id = os.getenv("DISCORD_CLIENT_ID", "1513743115364597790")
+    embed = discord.Embed(
+        title="SkillSync is here!",
+        description=(
+            "Thank you for adding SkillSync! I'm a workforce intelligence bot that helps "
+            "you understand your community through activity tracking, moderation analytics, "
+            "and ML-powered anomaly detection.\n\n"
+            "**What I track:**\n"
+            "\u2022 Moderation actions (bans, kicks, timeouts, warns)\n"
+            "\u2022 Staff activity and scoring\n"
+            "\u2022 Message volume and community engagement\n"
+            "\u2022 Voice activity sessions\n"
+            "\u2022 ML anomaly and burnout detection\n\n"
+            "No setup required \u2014 I am already collecting data."
+        ),
+        color=discord.Color.from_str("#155e75"),
+    )
+    permissions = 1099780156550
+    invite_link = f"https://discord.com/api/oauth2/authorize?client_id={client_id}&permissions={permissions}&scope=bot%20applications.commands"
+    embed.add_field(
+        name="Add to another server",
+        value=f"[Click here]({invite_link})",
+        inline=False,
+    )
+    embed.add_field(
+        name="View your dashboard",
+        value=(
+            "To view your server's dashboard, visit the SkillSync web app and log in "
+            "with Discord. You need **Manage Server** or **Administrator** permission "
+            "to access the dashboard for this server."
+        ),
+        inline=False,
+    )
+    embed.set_footer(text="SkillSync — Watches over you in your sleep")
+
+    # Try system channel first, then first text channel with send permissions
+    target_channel = guild.system_channel
+    if target_channel is None:
+        for channel in guild.text_channels:
+            perms = channel.permissions_for(guild.me)
+            if perms.send_messages and perms.read_messages and perms.embed_links:
+                target_channel = channel
+                break
+
+    if target_channel:
+        try:
+            await target_channel.send(embed=embed)
+            log(f"Welcome message posted in #{target_channel.name} in {guild.name}")
+        except Exception as e:
+            log(f"Could not post welcome embed in {guild.name}: {e}")
+    else:
+        log(f"No suitable channel found for welcome embed in {guild.name}")
