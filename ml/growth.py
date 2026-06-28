@@ -13,11 +13,9 @@ import joblib
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 
+from ml import model_path
+
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
-
-
-def _model_path(guild_id, model_type):
-    return os.path.join(MODELS_DIR, f"growth_{model_type}_{guild_id}.joblib")
 
 
 def _build_features(guild_id, days=90):
@@ -94,7 +92,7 @@ def train(guild_id, days=90):
             n_jobs=-1,
         )
         model.fit(X, y)
-        joblib.dump(model, _model_path(guild_id, name))
+        joblib.dump(model, model_path("growth", guild_id, name))
         score = float(model.score(X, y))
         results[name] = {"r2_score": round(score, 3), "samples": len(y)}
     return {"status": "trained", "guild_id": guild_id, **results}
@@ -105,8 +103,8 @@ def predict_next_7d(guild_id):
     Uses real lag features computed from MemberJoinLeave table."""
     from database import MemberJoinLeave
 
-    join_path = _model_path(guild_id, "join")
-    leave_path = _model_path(guild_id, "leave")
+    join_path = model_path("growth", guild_id, "join")
+    leave_path = model_path("growth", guild_id, "leave")
     if not os.path.exists(join_path) or not os.path.exists(leave_path):
         return None
     join_model = joblib.load(join_path)

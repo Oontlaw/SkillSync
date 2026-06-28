@@ -8,13 +8,10 @@ import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 
 from database import MessageRecord, PredictionLog, db
+from ml import model_path
 from ml.features import guild_forecast_features
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
-
-
-def _model_path(guild_id):
-    return os.path.join(MODELS_DIR, f"forecast_{guild_id}.joblib")
 
 
 def _recent_hourly_counts(guild_id, hours_back=24):
@@ -77,7 +74,7 @@ def train(guild_id, days=30):
     )
     model.fit(X, y)
     os.makedirs(MODELS_DIR, exist_ok=True)
-    joblib.dump(model, _model_path(guild_id))
+    joblib.dump(model, model_path("forecast", guild_id))
     score = model.score(X, y)
     return {
         "status": "trained",
@@ -95,7 +92,7 @@ def predict_next_24h(guild_id, days=30):
     Also logs each hourly prediction to PredictionLog for later outcome resolution."""
     from database import GuildActivityBaseline
 
-    path = _model_path(guild_id)
+    path = model_path("forecast", guild_id)
     if not os.path.exists(path):
         return None
     model = joblib.load(path)

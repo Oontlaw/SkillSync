@@ -13,6 +13,7 @@ import numpy as np
 from sklearn.ensemble import IsolationForest
 
 from database import BehavioralAnomaly, Worker, WorkerIdentity, db
+from ml import model_path
 from ml.work_features import all_work_feature_vectors, work_feature_vector_for_worker
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
@@ -24,10 +25,6 @@ BURNOUT_SIGNALS = {
     "score_trend_negative": -0.2,
     "streak_collapse": True,
 }
-
-
-def _model_path(org_id: int) -> str:
-    return os.path.join(MODELS_DIR, f"work_anomaly_{org_id}.joblib")
 
 
 def _severity_float(severity_str: str) -> float:
@@ -71,7 +68,7 @@ def train(
     model.fit(X)
 
     os.makedirs(MODELS_DIR, exist_ok=True)
-    joblib.dump(model, _model_path(org_id))
+    joblib.dump(model, model_path("work_anomaly", org_id))
 
     predictions = model.predict(X)
     anomalies = int(np.sum(predictions == -1))
@@ -92,15 +89,15 @@ def predict(worker_id: int, org_id: int, days: int = 30) -> dict:
 
     Returns dict with worker_id, anomaly_score, is_anomaly, severity, features.
     """
-    model_path = _model_path(org_id)
-    if not os.path.exists(model_path):
+    mpath = model_path("work_anomaly", org_id)
+    if not os.path.exists(mpath):
         return {
             "worker_id": worker_id,
             "error": "Model not trained for this org",
             "is_anomaly": False,
         }
 
-    model = joblib.load(model_path)
+    model = joblib.load(mpath)
     fv = work_feature_vector_for_worker(worker_id, org_id, days=days)
 
     fv_2d = fv.reshape(1, -1)

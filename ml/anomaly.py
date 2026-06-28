@@ -7,18 +7,12 @@ import numpy as np
 from sklearn.ensemble import IsolationForest
 
 from database import PredictionLog, db
+from ml import model_path
 from ml.features import all_user_feature_vectors, user_anomaly_feature_vector
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 ANOMALY_MODEL_PATH = os.path.join(MODELS_DIR, "anomaly_iforest.joblib")
 ANOMALY_THRESHOLD = -0.15
-
-
-def _model_path(guild_id=None):
-    """Return model path — per-guild if guild_id given, global otherwise."""
-    if guild_id:
-        return os.path.join(MODELS_DIR, f"anomaly_iforest_{guild_id}.joblib")
-    return ANOMALY_MODEL_PATH
 
 
 def _correction_features(discord_id, days=30):
@@ -117,7 +111,7 @@ def train(min_msgs=10, days=30, contamination=0.1, guild_id=None):
     )
     model.fit(X)
     os.makedirs(MODELS_DIR, exist_ok=True)
-    path = _model_path(guild_id)
+    path = model_path("anomaly", guild_id) if guild_id else ANOMALY_MODEL_PATH
     joblib.dump(model, path)
     scores = model.decision_function(X)
     n_anomalies = int((scores < ANOMALY_THRESHOLD).sum())
@@ -138,7 +132,7 @@ def predict(discord_id, days=30, guild_id=None):
     Returns dict with anomaly_score (lower = more anomalous), is_anomaly, severity."""
     from database import UserBehaviorBaseline
 
-    path = _model_path(guild_id)
+    path = model_path("anomaly", guild_id) if guild_id else ANOMALY_MODEL_PATH
     if not os.path.exists(path):
         # Fall back to global model if no per-guild model
         path = ANOMALY_MODEL_PATH
