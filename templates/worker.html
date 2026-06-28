@@ -1,4 +1,5 @@
-{% extends "base.html" %} {% block title %}{{ worker.name }} – SkillSync{% endblock %} {% block content %}
+{% extends "base.html" %} {% block title %}{{ worker.name }} – SkillSync{%
+endblock %} {% block content %}
 
 <section class="ws-section">
     <div class="section-header">
@@ -7,51 +8,138 @@
         <p class="ws-subtitle">{{ worker.email }}</p>
     </div>
 
-    <div class="ws-card flex justify-between items-center" style="padding: 20px 24px;">
+    <div
+        class="ws-card flex justify-between items-center"
+        style="padding: 20px 24px"
+    >
         <div>
-            <span class="ws-tag {% if worker.role == 'admin' %}purple{% elif worker.role == 'hr' %}blue{% else %}green{% endif %}" style="font-size: 13px; padding: 4px 10px;">{{ worker.role }}</span>
+            <span
+                class="ws-tag {% if worker.role == 'admin' %}purple{% elif worker.role == 'hr' %}blue{% else %}green{% endif %}"
+                style="font-size: 13px; padding: 4px 10px"
+                >{{ worker.role }}</span
+            >
         </div>
-        <div style="text-align: right;">
-            <p style="color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 2px;">Total Score</p>
-            <p style="font-family: var(--font-secondary); font-size: 28px; font-weight: 800; color: {% if worker.score >= 0 %}var(--green){% else %}var(--red){% endif %}; margin: 0; line-height: 1;">{{ worker.score }} pts</p>
+        <div style="text-align: right">
+            <p
+                style="
+                    color: var(--text-dim);
+                    font-size: 11px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.08em;
+                    margin-bottom: 2px;
+                "
+            >
+                Total Score
+            </p>
+            <p
+                style="font-family: var(--font-secondary); font-size: 28px; font-weight: 800; color: {% if worker.score >= 0 %}var(--green){% else %}var(--red){% endif %}; margin: 0; line-height: 1;"
+            >
+                {{ worker.score }} pts
+            </p>
         </div>
     </div>
 </section>
 
 <section class="ws-section">
-    <div class="section-header" style="margin-bottom: 16px;">
+    <div class="section-header" style="margin-bottom: 16px">
         <div class="section-eyebrow">Intelligence</div>
-        <h2 class="ws-title" style="font-size: 20px;">Intelligence Hub</h2>
+        <h2 class="ws-title" style="font-size: 20px">Intelligence Hub</h2>
         <p class="ws-subtitle">Activity consistency and behavioral patterns.</p>
     </div>
 
-    <div class="ws-grid-8-4" style="grid-template-columns: 1.2fr 2fr;">
+    <div class="ws-grid-8-4" style="grid-template-columns: 1.2fr 2fr">
         <!-- Left Consistency Stats -->
         {% if activity_consistency %}
-        <div class="ws-card" style="margin-bottom: 0; border-color: rgba(59, 130, 246, 0.25);">
-            <div class="card-header" style="margin-bottom: 16px;">
-                <div class="card-title" style="color: var(--blue);">Activity Consistency</div>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 12px;">
-                <div class="ws-stat" style="margin-bottom: 0; padding: 12px; border-radius: var(--radius-sm);">
-                    <div class="ws-stat-label" style="font-size: 9px; margin-top: 0;">Consistency Score</div>
-                    <div class="ws-stat-value" style="font-size: 20px; color: {% if activity_consistency.score >= 70 %}var(--green){% elif activity_consistency.score >= 40 %}var(--orange){% else %}var(--red){% endif %};">{{ activity_consistency.score }}</div>
+        <div
+            class="ws-card"
+            style="margin-bottom: 0; border-color: rgba(59, 130, 246, 0.25)"
+        >
+            <div class="card-header" style="margin-bottom: 16px">
+                <div class="card-title" style="color: var(--blue)">
+                    Activity Consistency
                 </div>
-                <div class="ws-stat" style="margin-bottom: 0; padding: 12px; border-radius: var(--radius-sm);">
-                    <div class="ws-stat-label" style="font-size: 9px; margin-top: 0;">Activity Trend</div>
-                    <div class="ws-stat-value" style="font-size: 16px; font-family: var(--font-secondary); font-weight: 700;">
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 12px">
+                <div
+                    class="ws-stat"
+                    style="
+                        margin-bottom: 0;
+                        padding: 12px;
+                        border-radius: var(--radius-sm);
+                    "
+                >
+                    <div
+                        class="ws-stat-label"
+                        style="font-size: 9px; margin-top: 0"
+                    >
+                        Consistency Score
+                    </div>
+                    <div
+                        class="ws-stat-value"
+                        style="font-size: 20px; color: {% if activity_consistency.score >= 70 %}var(--green){% elif activity_consistency.score >= 40 %}var(--orange){% else %}var(--red){% endif %};"
+                    >
+                        {{ activity_consistency.score }}
+                    </div>
+                </div>
+                <div
+                    class="ws-stat"
+                    style="
+                        margin-bottom: 0;
+                        padding: 12px;
+                        border-radius: var(--radius-sm);
+                    "
+                >
+                    <div
+                        class="ws-stat-label"
+                        style="font-size: 9px; margin-top: 0"
+                    >
+                        Activity Trend
+                    </div>
+                    <div
+                        class="ws-stat-value"
+                        style="
+                            font-size: 16px;
+                            font-family: var(--font-secondary);
+                            font-weight: 700;
+                        "
+                    >
                         {% if activity_consistency.trend == 'up' %}
-                        <span style="color: var(--green);">↑ {{ ((activity_consistency.recent_total / ([activity_consistency.prior_total, 1]|max)) * 100 - 100)|round|int }}%</span>
+                        <span style="color: var(--green)"
+                            >↑ {{ ((activity_consistency.recent_total /
+                            ([activity_consistency.prior_total, 1]|max)) * 100 -
+                            100)|round|int }}%</span
+                        >
                         {% elif activity_consistency.trend == 'down' %}
-                        <span style="color: var(--red);">↓ {{ ((activity_consistency.recent_total / ([activity_consistency.prior_total, 1]|max)) * 100 - 100)|round|int }}%</span>
+                        <span style="color: var(--red)"
+                            >↓ {{ ((activity_consistency.recent_total /
+                            ([activity_consistency.prior_total, 1]|max)) * 100 -
+                            100)|round|int }}%</span
+                        >
                         {% else %}
-                        <span style="color: var(--text-dim);">→ Flat</span>
+                        <span style="color: var(--text-dim)">→ Flat</span>
                         {% endif %}
                     </div>
                 </div>
-                <div class="ws-stat" style="margin-bottom: 0; padding: 12px; border-radius: var(--radius-sm);">
-                    <div class="ws-stat-label" style="font-size: 9px; margin-top: 0;">Off-Hours Ratio</div>
-                    <div class="ws-stat-value" style="font-size: 16px; color: {% if activity_consistency.off_hours_ratio > 50 %}var(--red){% elif activity_consistency.off_hours_ratio > 30 %}var(--orange){% else %}var(--text-primary){% endif %};">{{ activity_consistency.off_hours_ratio }}%</div>
+                <div
+                    class="ws-stat"
+                    style="
+                        margin-bottom: 0;
+                        padding: 12px;
+                        border-radius: var(--radius-sm);
+                    "
+                >
+                    <div
+                        class="ws-stat-label"
+                        style="font-size: 9px; margin-top: 0"
+                    >
+                        Off-Hours Ratio
+                    </div>
+                    <div
+                        class="ws-stat-value"
+                        style="font-size: 16px; color: {% if activity_consistency.off_hours_ratio > 50 %}var(--red){% elif activity_consistency.off_hours_ratio > 30 %}var(--orange){% else %}var(--text-primary){% endif %};"
+                    >
+                        {{ activity_consistency.off_hours_ratio }}%
+                    </div>
                 </div>
             </div>
         </div>
@@ -59,35 +147,110 @@
 
         <!-- Right Behavior Card -->
         {% if behavior %}
-        <div class="ws-card" style="margin-bottom: 0; border-color: rgba(139, 92, 246, 0.25);">
-            <div class="card-header" style="margin-bottom: 16px;">
-                <div class="card-title" style="color: var(--purple);">Behavioral Analytics</div>
+        <div
+            class="ws-card"
+            style="margin-bottom: 0; border-color: rgba(139, 92, 246, 0.25)"
+        >
+            <div class="card-header" style="margin-bottom: 16px">
+                <div class="card-title" style="color: var(--purple)">
+                    Behavioral Analytics
+                </div>
             </div>
-            <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 20px;">
+            <div
+                style="
+                    display: grid;
+                    grid-template-columns: 1fr 1.2fr;
+                    gap: 20px;
+                "
+            >
                 <div>
-                    <div class="ws-stat" style="margin-bottom: 0; padding: 10px; border-radius: var(--radius-sm); margin-bottom: 10px;">
-                        <div class="ws-stat-label" style="font-size: 9px; margin-top: 0;">Total Messages</div>
-                        <div class="ws-stat-value" style="font-size: 18px;">{{ behavior.total_messages }}</div>
+                    <div
+                        class="ws-stat"
+                        style="
+                            margin-bottom: 0;
+                            padding: 10px;
+                            border-radius: var(--radius-sm);
+                            margin-bottom: 10px;
+                        "
+                    >
+                        <div
+                            class="ws-stat-label"
+                            style="font-size: 9px; margin-top: 0"
+                        >
+                            Total Messages
+                        </div>
+                        <div class="ws-stat-value" style="font-size: 18px">
+                            {{ behavior.total_messages }}
+                        </div>
                     </div>
-                    <div class="ws-stat" style="margin-bottom: 0; padding: 10px; border-radius: var(--radius-sm);">
-                        <div class="ws-stat-label" style="font-size: 9px; margin-top: 0;">Avg Length</div>
-                        <div class="ws-stat-value" style="font-size: 16px; font-weight: 600;">{{ behavior.avg_length }} chars</div>
+                    <div
+                        class="ws-stat"
+                        style="
+                            margin-bottom: 0;
+                            padding: 10px;
+                            border-radius: var(--radius-sm);
+                        "
+                    >
+                        <div
+                            class="ws-stat-label"
+                            style="font-size: 9px; margin-top: 0"
+                        >
+                            Avg Length
+                        </div>
+                        <div
+                            class="ws-stat-value"
+                            style="font-size: 16px; font-weight: 600"
+                        >
+                            {{ behavior.avg_length }} chars
+                        </div>
                     </div>
 
-                    <div style="margin-top: 16px;">
-                        <p style="color: var(--text-dim); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">Top Channels</p>
-                        <div class="ws-scroll" style="max-height: 110px;">
+                    <div style="margin-top: 16px">
+                        <p
+                            style="
+                                color: var(--text-dim);
+                                font-size: 10px;
+                                font-weight: 700;
+                                text-transform: uppercase;
+                                letter-spacing: 0.05em;
+                                margin-bottom: 6px;
+                            "
+                        >
+                            Top Channels
+                        </p>
+                        <div class="ws-scroll" style="max-height: 110px">
                             {% for ch, count in behavior.channels.items() %}
-                            <div class="flex justify-between items-center" style="padding: 4px 0; border-bottom: 1px solid var(--border-primary);">
-                                <span style="color: var(--text-secondary); font-size: 12px; font-weight: 500;">#{{ ch }}</span>
-                                <span style="color: var(--blue); font-size: 12px; font-weight: 700;">{{ count }}</span>
+                            <div
+                                class="flex justify-between items-center"
+                                style="
+                                    padding: 4px 0;
+                                    border-bottom: 1px solid
+                                        var(--border-primary);
+                                "
+                            >
+                                <span
+                                    style="
+                                        color: var(--text-secondary);
+                                        font-size: 12px;
+                                        font-weight: 500;
+                                    "
+                                    >#{{ ch }}</span
+                                >
+                                <span
+                                    style="
+                                        color: var(--blue);
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                    "
+                                    >{{ count }}</span
+                                >
                             </div>
                             {% endfor %}
                         </div>
                     </div>
                 </div>
                 <div>
-                    <div class="ws-chart-sm" style="height: 220px;">
+                    <div class="ws-chart-sm" style="height: 220px">
                         <canvas id="workerHourlyChart"></canvas>
                     </div>
                 </div>
@@ -98,31 +261,105 @@
 </section>
 
 <section class="ws-section">
-    <div class="section-header" style="margin-bottom: 16px;">
+    <div class="section-header" style="margin-bottom: 16px">
         <div class="section-eyebrow">Performance</div>
-        <h2 class="ws-title" style="font-size: 20px;">Performance Hub</h2>
+        <h2 class="ws-title" style="font-size: 20px">Performance Hub</h2>
         <p class="ws-subtitle">Mentions, mod quality, and score history.</p>
     </div>
 
     <div class="ws-grid-2col">
         <!-- Mentions -->
         {% if mention_stats %}
-        <div class="ws-card" style="margin-bottom: 0; border-color: rgba(168, 85, 247, 0.25);">
+        <div
+            class="ws-card"
+            style="margin-bottom: 0; border-color: rgba(168, 85, 247, 0.25)"
+        >
             <div class="card-header">
-                <div class="card-title" style="color: var(--purple);">Mention Dynamics</div>
+                <div class="card-title" style="color: var(--purple)">
+                    Mention Dynamics
+                </div>
             </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
-                <div class="ws-stat" style="margin-bottom: 0; padding: 12px; text-align: center; border-radius: var(--radius-sm);">
-                    <div class="ws-stat-label" style="font-size: 9px; margin-top: 0;">Sent</div>
-                    <div class="ws-stat-value" style="font-size: 18px; font-family: var(--font-secondary);">{{ mention_stats.sent }}</div>
+            <div
+                style="
+                    display: grid;
+                    grid-template-columns: 1fr 1fr 1fr;
+                    gap: 10px;
+                "
+            >
+                <div
+                    class="ws-stat"
+                    style="
+                        margin-bottom: 0;
+                        padding: 12px;
+                        text-align: center;
+                        border-radius: var(--radius-sm);
+                    "
+                >
+                    <div
+                        class="ws-stat-label"
+                        style="font-size: 9px; margin-top: 0"
+                    >
+                        Sent
+                    </div>
+                    <div
+                        class="ws-stat-value"
+                        style="
+                            font-size: 18px;
+                            font-family: var(--font-secondary);
+                        "
+                    >
+                        {{ mention_stats.sent }}
+                    </div>
                 </div>
-                <div class="ws-stat" style="margin-bottom: 0; padding: 12px; text-align: center; border-radius: var(--radius-sm);">
-                    <div class="ws-stat-label" style="font-size: 9px; margin-top: 0;">Received</div>
-                    <div class="ws-stat-value" style="font-size: 18px; font-family: var(--font-secondary);">{{ mention_stats.received }}</div>
+                <div
+                    class="ws-stat"
+                    style="
+                        margin-bottom: 0;
+                        padding: 12px;
+                        text-align: center;
+                        border-radius: var(--radius-sm);
+                    "
+                >
+                    <div
+                        class="ws-stat-label"
+                        style="font-size: 9px; margin-top: 0"
+                    >
+                        Received
+                    </div>
+                    <div
+                        class="ws-stat-value"
+                        style="
+                            font-size: 18px;
+                            font-family: var(--font-secondary);
+                        "
+                    >
+                        {{ mention_stats.received }}
+                    </div>
                 </div>
-                <div class="ws-stat" style="margin-bottom: 0; padding: 12px; text-align: center; border-radius: var(--radius-sm);">
-                    <div class="ws-stat-label" style="font-size: 9px; margin-top: 0;">Avg Reply</div>
-                    <div class="ws-stat-value" style="font-size: 16px; font-family: var(--font-secondary);">{{ mention_stats.avg_reply_seconds }}s</div>
+                <div
+                    class="ws-stat"
+                    style="
+                        margin-bottom: 0;
+                        padding: 12px;
+                        text-align: center;
+                        border-radius: var(--radius-sm);
+                    "
+                >
+                    <div
+                        class="ws-stat-label"
+                        style="font-size: 9px; margin-top: 0"
+                    >
+                        Avg Reply
+                    </div>
+                    <div
+                        class="ws-stat-value"
+                        style="
+                            font-size: 16px;
+                            font-family: var(--font-secondary);
+                        "
+                    >
+                        {{ mention_stats.avg_reply_seconds }}s
+                    </div>
                 </div>
             </div>
         </div>
@@ -130,26 +367,106 @@
 
         <!-- Mod Quality -->
         {% if mod_quality and mod_quality.total_actions > 0 %}
-        <div class="ws-card" style="margin-bottom: 0; border-color: rgba(245, 158, 11, 0.25);">
+        <div
+            class="ws-card"
+            style="margin-bottom: 0; border-color: rgba(245, 158, 11, 0.25)"
+        >
             <div class="card-header">
-                <div class="card-title" style="color: var(--orange);">Mod Quality Index</div>
+                <div class="card-title" style="color: var(--orange)">
+                    Mod Quality Index
+                </div>
             </div>
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
-                <div class="ws-stat" style="margin-bottom: 0; padding: 10px; text-align: center; border-radius: var(--radius-sm);">
-                    <div class="ws-stat-label" style="font-size: 8px; margin-top: 0;">Quality</div>
-                    <div class="ws-stat-value" style="font-size: 16px; color: {% if mod_quality.quality_score >= 80 %}var(--green){% elif mod_quality.quality_score >= 50 %}var(--orange){% else %}var(--red){% endif %};">{{ mod_quality.quality_score }}</div>
+            <div
+                style="
+                    display: grid;
+                    grid-template-columns: repeat(4, 1fr);
+                    gap: 8px;
+                "
+            >
+                <div
+                    class="ws-stat"
+                    style="
+                        margin-bottom: 0;
+                        padding: 10px;
+                        text-align: center;
+                        border-radius: var(--radius-sm);
+                    "
+                >
+                    <div
+                        class="ws-stat-label"
+                        style="font-size: 8px; margin-top: 0"
+                    >
+                        Quality
+                    </div>
+                    <div
+                        class="ws-stat-value"
+                        style="font-size: 16px; color: {% if mod_quality.quality_score >= 80 %}var(--green){% elif mod_quality.quality_score >= 50 %}var(--orange){% else %}var(--red){% endif %};"
+                    >
+                        {{ mod_quality.quality_score }}
+                    </div>
                 </div>
-                <div class="ws-stat" style="margin-bottom: 0; padding: 10px; text-align: center; border-radius: var(--radius-sm);">
-                    <div class="ws-stat-label" style="font-size: 8px; margin-top: 0;">Actions</div>
-                    <div class="ws-stat-value" style="font-size: 16px;">{{ mod_quality.total_actions }}</div>
+                <div
+                    class="ws-stat"
+                    style="
+                        margin-bottom: 0;
+                        padding: 10px;
+                        text-align: center;
+                        border-radius: var(--radius-sm);
+                    "
+                >
+                    <div
+                        class="ws-stat-label"
+                        style="font-size: 8px; margin-top: 0"
+                    >
+                        Actions
+                    </div>
+                    <div class="ws-stat-value" style="font-size: 16px">
+                        {{ mod_quality.total_actions }}
+                    </div>
                 </div>
-                <div class="ws-stat" style="margin-bottom: 0; padding: 10px; text-align: center; border-radius: var(--radius-sm);">
-                    <div class="ws-stat-label" style="font-size: 8px; margin-top: 0;">Warn Ratio</div>
-                    <div class="ws-stat-value" style="font-size: 16px; font-weight: 600;">{{ mod_quality.action_warn_ratio }}</div>
+                <div
+                    class="ws-stat"
+                    style="
+                        margin-bottom: 0;
+                        padding: 10px;
+                        text-align: center;
+                        border-radius: var(--radius-sm);
+                    "
+                >
+                    <div
+                        class="ws-stat-label"
+                        style="font-size: 8px; margin-top: 0"
+                    >
+                        Warn Ratio
+                    </div>
+                    <div
+                        class="ws-stat-value"
+                        style="font-size: 16px; font-weight: 600"
+                    >
+                        {{ mod_quality.action_warn_ratio }}
+                    </div>
                 </div>
-                <div class="ws-stat" style="margin-bottom: 0; padding: 10px; text-align: center; border-radius: var(--radius-sm);">
-                    <div class="ws-stat-label" style="font-size: 8px; margin-top: 0;">Reversal</div>
-                    <div class="ws-stat-value" style="font-size: 16px; color: {% if mod_quality.reversal_rate > 10 %}var(--red){% else %}var(--green){% endif %};">{{ mod_quality.reversal_rate }}%</div>
+                <div
+                    class="ws-stat"
+                    style="
+                        margin-bottom: 0;
+                        padding: 10px;
+                        text-align: center;
+                        border-radius: var(--radius-sm);
+                    "
+                >
+                    <div
+                        class="ws-stat-label"
+                        style="font-size: 8px; margin-top: 0"
+                    >
+                        Reversal
+                    </div>
+                    <div
+                        class="ws-stat-value"
+                        style="font-size: 16px; color: {% if mod_quality.reversal_rate > 10 %}var(--red){% else %}var(--green){% endif %};"
+                    >
+                        {{ mod_quality.reversal_rate }}%
+                    </div>
                 </div>
             </div>
         </div>
@@ -158,79 +475,209 @@
 </section>
 
 <section class="ws-section">
-    <div class="section-header" style="margin-bottom: 16px;">
+    <div class="section-header" style="margin-bottom: 16px">
         <div class="section-eyebrow">Operational</div>
-        <h2 class="ws-title" style="font-size: 20px;">Operational Logs</h2>
+        <h2 class="ws-title" style="font-size: 20px">Operational Logs</h2>
         <p class="ws-subtitle">Assigned tasks and score history.</p>
     </div>
 
     <div class="ws-grid-2col">
         <!-- Tasks -->
-        <div class="ws-card" style="margin-bottom: 0;">
+        <div class="ws-card" style="margin-bottom: 0">
             <div class="card-header">
                 <div class="card-title">Assigned Tasks</div>
             </div>
             {% if tasks %}
-            <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; flex-direction: column; gap: 8px">
                 {% for task in tasks %}
-                <div class="flex justify-between items-center" style="padding: 12px; border: 1px solid var(--border-primary); border-radius: var(--radius-md); background-color: var(--bg-primary);">
-                    <div style="min-width: 0;">
-                        <p style="color: var(--text-primary); font-size: 13px; font-weight: 600; margin: 0;" class="truncate">{{ task.title }}</p>
-                        <span class="ws-tag {% if task.status == 'completed' %}green{% elif task.status == 'missed' %}red{% elif task.status == 'anomaly' %}orange{% endif %}" style="font-size: 9px; margin-top: 6px; padding: 1px 6px;">{{ task.status }}</span>
+                <div
+                    class="flex justify-between items-center"
+                    style="
+                        padding: 12px;
+                        border: 1px solid var(--border-primary);
+                        border-radius: var(--radius-md);
+                        background-color: var(--bg-primary);
+                    "
+                >
+                    <div style="min-width: 0">
+                        <p
+                            style="
+                                color: var(--text-primary);
+                                font-size: 13px;
+                                font-weight: 600;
+                                margin: 0;
+                            "
+                            class="truncate"
+                        >
+                            {{ task.title }}
+                        </p>
+                        <span
+                            class="ws-tag {% if task.status == 'completed' %}green{% elif task.status == 'missed' %}red{% elif task.status == 'anomaly' %}orange{% endif %}"
+                            style="
+                                font-size: 9px;
+                                margin-top: 6px;
+                                padding: 1px 6px;
+                            "
+                            >{{ task.status }}</span
+                        >
                     </div>
-                    <span style="font-size: 13px; font-weight: 700; color: {% if task.points_awarded >= 0 %}var(--green){% else %}var(--red){% endif %}; margin-left: 16px; flex-shrink: 0;">{% if task.points_awarded >= 0 %}+{% endif %}{{ task.points_awarded }} pts</span>
+                    <span
+                        style="font-size: 13px; font-weight: 700; color: {% if task.points_awarded >= 0 %}var(--green){% else %}var(--red){% endif %}; margin-left: 16px; flex-shrink: 0;"
+                        >{% if task.points_awarded >= 0 %}+{% endif %}{{
+                        task.points_awarded }} pts</span
+                    >
                 </div>
                 {% endfor %}
             </div>
             {% else %}
-            <div class="empty-state">
-                No tasks assigned
-            </div>
+            <div class="empty-state">No tasks assigned</div>
             {% endif %}
         </div>
 
         <!-- Score History with corrections -->
-        <div class="ws-card" style="margin-bottom: 0;">
+        <div class="ws-card" style="margin-bottom: 0">
             <div class="card-header">
                 <div class="card-title">Score History</div>
             </div>
             {% if logs %}
-            <div class="ws-scroll" style="max-height: 320px;">
+            <div class="ws-scroll" style="max-height: 320px">
                 {% for log in logs %}
-                <div id="case-{{ log.id }}" style="padding: 12px; border: 1px solid var(--border-primary); border-radius: var(--radius-md); background-color: var(--bg-primary); margin-bottom: 8px;">
+                <div
+                    id="case-{{ log.id }}"
+                    style="
+                        padding: 12px;
+                        border: 1px solid var(--border-primary);
+                        border-radius: var(--radius-md);
+                        background-color: var(--bg-primary);
+                        margin-bottom: 8px;
+                    "
+                >
                     <div class="flex justify-between items-start">
-                        <div style="min-width: 0;">
-                            <p style="color: var(--text-primary); font-size: 13px; font-weight: 500; margin: 0;">{{ log.reason }}</p>
+                        <div style="min-width: 0">
+                            <p
+                                style="
+                                    color: var(--text-primary);
+                                    font-size: 13px;
+                                    font-weight: 500;
+                                    margin: 0;
+                                "
+                            >
+                                {{ log.reason }}
+                            </p>
                             <div class="flex items-center gap-2 mt-2">
-                                <span style="color: var(--text-dim); font-size: 10px; font-family: monospace; font-weight: bold;">#{{ log.id }}</span>
-                                <span style="color: var(--text-dim); font-size: 10px;">· {{ log.source }} · <span class="utc-time" data-utc="{{ log.created_at.isoformat() }}">{{ log.created_at.strftime('%d %b %Y') }}</span></span>
+                                <span
+                                    style="
+                                        color: var(--text-dim);
+                                        font-size: 10px;
+                                        font-family: monospace;
+                                        font-weight: bold;
+                                    "
+                                    >#{{ log.id }}</span
+                                >
+                                <span
+                                    style="
+                                        color: var(--text-dim);
+                                        font-size: 10px;
+                                    "
+                                    >· {{ log.source }} ·
+                                    <span
+                                        class="utc-time"
+                                        data-utc="{{ log.created_at.isoformat() }}"
+                                        >{{ log.created_at.strftime('%d %b %Y')
+                                        }}</span
+                                    ></span
+                                >
                             </div>
                         </div>
-                        <div class="flex items-center gap-2" style="flex-shrink: 0; margin-left: 12px;">
-                            <span style="font-size: 13px; font-weight: 700; color: {% if log.change >= 0 %}var(--green){% else %}var(--red){% endif %};">{% if log.change >= 0 %}+{% endif %}{{ log.change }} pts</span>
-                            <button onclick="showCorrection({{ log.id }}, {{ log.change }})" class="ws-feedback-btn" style="padding: 2px 4px; font-size: 9px; font-weight: bold; background-color: rgba(245,158,11,0.1); color: var(--orange); border: 1px solid rgba(245,158,11,0.2);" title="Correct case">EDIT</button>
+                        <div
+                            class="flex items-center gap-2"
+                            style="flex-shrink: 0; margin-left: 12px"
+                        >
+                            <span
+                                style="font-size: 13px; font-weight: 700; color: {% if log.change >= 0 %}var(--green){% else %}var(--red){% endif %};"
+                                >{% if log.change >= 0 %}+{% endif %}{{
+                                log.change }} pts</span
+                            >
+                            <button
+                                onclick="showCorrection({{ log.id }}, {{ log.change }})"
+                                class="ws-feedback-btn"
+                                style="
+                                    padding: 2px 4px;
+                                    font-size: 9px;
+                                    font-weight: bold;
+                                    background-color: rgba(245, 158, 11, 0.1);
+                                    color: var(--orange);
+                                    border: 1px solid rgba(245, 158, 11, 0.2);
+                                "
+                                title="Correct case"
+                            >
+                                EDIT
+                            </button>
                         </div>
                     </div>
                     <!-- Inline admin correction drawer -->
-                    <div id="corr-form-{{ log.id }}" class="hidden" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-primary); display: flex; gap: 8px; align-items: center;">
-                        <input type="number" id="new-val-{{ log.id }}" value="{{ log.change }}" style="width: 70px; padding: 4px 6px; font-size: 12px;" class="ws-card input">
-                        <input type="text" id="corr-reason-{{ log.id }}" placeholder="Correction reason" style="flex: 1; padding: 4px 6px; font-size: 12px;" class="ws-card input">
-                        <button onclick="submitCorrection({{ log.id }})" class="btn primary" style="padding: 4px 10px; font-size: 11px;">Apply</button>
-                        <button onclick="hideCorrection({{ log.id }})" style="background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 12px; font-weight: bold;">✕</button>
+                    <div
+                        id="corr-form-{{ log.id }}"
+                        class="hidden"
+                        style="
+                            margin-top: 10px;
+                            padding-top: 10px;
+                            border-top: 1px solid var(--border-primary);
+                            display: flex;
+                            gap: 8px;
+                            align-items: center;
+                        "
+                    >
+                        <input
+                            type="number"
+                            id="new-val-{{ log.id }}"
+                            value="{{ log.change }}"
+                            style="
+                                width: 70px;
+                                padding: 4px 6px;
+                                font-size: 12px;
+                            "
+                            class="ws-card input"
+                        />
+                        <input
+                            type="text"
+                            id="corr-reason-{{ log.id }}"
+                            placeholder="Correction reason"
+                            style="flex: 1; padding: 4px 6px; font-size: 12px"
+                            class="ws-card input"
+                        />
+                        <button
+                            onclick="submitCorrection({{ log.id }})"
+                            class="btn primary"
+                            style="padding: 4px 10px; font-size: 11px"
+                        >
+                            Apply
+                        </button>
+                        <button
+                            onclick="hideCorrection({{ log.id }})"
+                            style="
+                                background: none;
+                                border: none;
+                                color: var(--text-dim);
+                                cursor: pointer;
+                                font-size: 12px;
+                                font-weight: bold;
+                            "
+                        >
+                            ✕
+                        </button>
                     </div>
                 </div>
                 {% endfor %}
             </div>
             {% else %}
-            <div class="empty-state">
-                No score history
-            </div>
+            <div class="empty-state">No score history</div>
             {% endif %}
         </div>
     </div>
 
     {% if cumulative_score_data %}
-    <div class="ws-card" style="margin-top: 24px;">
+    <div class="ws-card" style="margin-top: 24px">
         <div class="card-header">
             <div class="card-title">Score Trend</div>
         </div>
@@ -241,37 +688,95 @@
     {% endif %}
 </section>
 
-<section class="ws-section" style="padding-bottom: 48px;">
+<section class="ws-section" style="padding-bottom: 48px">
     <div class="ws-grid-2col">
         <!-- Anomalies -->
-        <div class="ws-card" style="margin-bottom: 0; border-color: rgba(239, 68, 68, 0.25);">
+        <div
+            class="ws-card"
+            style="margin-bottom: 0; border-color: rgba(239, 68, 68, 0.25)"
+        >
             <div class="card-header">
-                <div class="card-title" style="color: var(--red);">Behavioral Anomalies</div>
+                <div class="card-title" style="color: var(--red)">
+                    Behavioral Anomalies
+                </div>
             </div>
             {% if anomalies %}
-            <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; flex-direction: column; gap: 8px">
                 {% for a in anomalies %}
-                <div class="flex justify-between items-center" style="padding: 10px 12px; border: 1px solid var(--border-primary); border-radius: var(--radius-md); background: var(--bg-primary);">
-                    <div style="min-width: 0;">
-                        <span style="color: var(--red); font-weight: 700; font-size: 12px;">{{ a.anomaly_type | replace('_', ' ') | title }}</span>
-                        <p style="color: var(--text-dim); font-size: 11px; margin: 4px 0 0;" class="truncate">{{ a.details }}</p>
+                <div
+                    class="flex justify-between items-center"
+                    style="
+                        padding: 10px 12px;
+                        border: 1px solid var(--border-primary);
+                        border-radius: var(--radius-md);
+                        background: var(--bg-primary);
+                    "
+                >
+                    <div style="min-width: 0">
+                        <span
+                            style="
+                                color: var(--red);
+                                font-weight: 700;
+                                font-size: 12px;
+                            "
+                            >{{ a.anomaly_type | replace('_', ' ') | title
+                            }}</span
+                        >
+                        <p
+                            style="
+                                color: var(--text-dim);
+                                font-size: 11px;
+                                margin: 4px 0 0;
+                            "
+                            class="truncate"
+                        >
+                            {{ a.details }}
+                        </p>
                     </div>
-                    <span class="ws-tag red" style="flex-shrink: 0; font-size: 11px; font-family: var(--font-secondary); padding: 2px 6px;">{{ "%.0f"|format(a.severity) }}%</span>
+                    <span
+                        class="ws-tag red"
+                        style="
+                            flex-shrink: 0;
+                            font-size: 11px;
+                            font-family: var(--font-secondary);
+                            padding: 2px 6px;
+                        "
+                        >{{ "%.0f"|format(a.severity) }}%</span
+                    >
                 </div>
                 {% endfor %}
             </div>
             {% else %}
-            <div class="empty-state" style="padding: 16px;">No behavioral anomalies recorded.</div>
+            <div class="empty-state" style="padding: 16px">
+                No behavioral anomalies recorded.
+            </div>
             {% endif %}
         </div>
 
         <!-- Admin Correction Guide -->
-        <div class="ws-card" style="margin-bottom: 0; border-color: rgba(245, 158, 11, 0.25);">
+        <div
+            class="ws-card"
+            style="margin-bottom: 0; border-color: rgba(245, 158, 11, 0.25)"
+        >
             <div class="card-header">
-                <div class="card-title" style="color: var(--orange);">Admin Correction Guide</div>
+                <div class="card-title" style="color: var(--orange)">
+                    Admin Correction Guide
+                </div>
             </div>
-            <p style="color: var(--text-secondary); font-size: 13px; line-height: 1.6; margin: 0;">
-                To alter a point record, select the <strong style="color: var(--orange);">EDIT</strong> action drawer next to the transaction in the history log. Keep in mind that corrections must target a specific event — arbitrary general adjustments are not permitted. Points will retrain models on the next round.
+            <p
+                style="
+                    color: var(--text-secondary);
+                    font-size: 13px;
+                    line-height: 1.6;
+                    margin: 0;
+                "
+            >
+                To alter a point record, select the
+                <strong style="color: var(--orange)">EDIT</strong> action drawer
+                next to the transaction in the history log. Keep in mind that
+                corrections must target a specific event — arbitrary general
+                adjustments are not permitted. Points will retrain models on the
+                next round.
             </p>
         </div>
     </div>
@@ -279,8 +784,6 @@
 
 {% endblock %} {% block scripts %}
 <script>
-const CSRF_TOKEN = {{ csrf_token | tojson }};
-
     {% if worker_hourly_activity %}
     (function() {
       const wh = shiftHourly({{ worker_hourly_activity | tojson }});
@@ -328,6 +831,5 @@ const CSRF_TOKEN = {{ csrf_token | tojson }};
             showToast('Correction failed', 'error');
         }
     }
-    
 </script>
 {% endblock %}

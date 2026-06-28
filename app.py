@@ -14,7 +14,6 @@ from routes.api import api_bp
 from routes.auth import auth_bp
 from routes.community import community_bp
 from routes.dashboard import dashboard_bp
-from routes.dashboard_v2 import dashboard_v2_bp
 from routes.observer import observer_bp
 from routes.security import ensure_csrf_token, validate_csrf
 from routes.work import work_bp
@@ -30,7 +29,7 @@ migrate = Migrate(
 )
 
 app.register_blueprint(dashboard_bp)
-app.register_blueprint(dashboard_v2_bp, url_prefix="/v2")
+
 app.register_blueprint(auth_bp, url_prefix="/auth")
 app.register_blueprint(api_bp, url_prefix="/api")
 app.register_blueprint(community_bp, url_prefix="/api")
@@ -44,7 +43,7 @@ def csrf_check():
     return validate_csrf()
 
 
-@app.template_filter('multiply')
+@app.template_filter("multiply")
 def multiply_filter(value, arg):
     try:
         return value * arg
