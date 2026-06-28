@@ -8,14 +8,18 @@
         <style>
             @font-face {
                 font-family: "Inter";
-                src: local('Inter'), url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+                src:
+                    local("Inter"),
+                    url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
                 font-weight: 400 700;
                 font-style: normal;
                 font-display: swap;
             }
             @font-face {
                 font-family: "Syne";
-                src: local('Syne'), url("https://fonts.googleapis.com/css2?family=Syne:wght@400;700&display=swap");
+                src:
+                    local("Syne"),
+                    url("https://fonts.googleapis.com/css2?family=Syne:wght@400;700&display=swap");
                 font-weight: 400 700;
                 font-style: normal;
                 font-display: swap;
@@ -43,7 +47,7 @@
                 >
                     <span
                         style="
-                            font-family: 'Syne', sans-serif;
+                            font-family: &quot;Syne&quot;, sans-serif;
                             font-weight: 800;
                             font-size: 20px;
                             color: var(--text-on-dark);
@@ -53,7 +57,7 @@
                     >
                 </div>
 
-                <nav style="flex: 1; padding: 24px 0;">
+                <nav style="flex: 1; padding: 24px 0">
                     <a
                         href="/"
                         class="nav-link {% if request.path == '/' %}active{% endif %}"
@@ -107,7 +111,9 @@
                             stroke-linecap="round"
                             stroke-linejoin="round"
                         >
-                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                            <path
+                                d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"
+                            ></path>
                         </svg>
                         <span>{{ g.name }}</span>
                     </a>
@@ -121,8 +127,22 @@
                         background-color: rgba(0, 0, 0, 0.2);
                     "
                 >
-                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px">
-                        <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+                    <div
+                        style="
+                            display: flex;
+                            align-items: center;
+                            justify-content: space-between;
+                            gap: 12px;
+                        "
+                    >
+                        <div
+                            style="
+                                display: flex;
+                                align-items: center;
+                                gap: 10px;
+                                min-width: 0;
+                            "
+                        >
                             {% if user.avatar %}
                             <img
                                 src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png"
@@ -152,7 +172,7 @@
                                 {{ user.name[:1] }}
                             </div>
                             {% endif %}
-                            <div style="min-width: 0;">
+                            <div style="min-width: 0">
                                 <div
                                     style="
                                         font-size: 13px;
@@ -189,7 +209,8 @@
                                 "
                                 onmouseover="
                                     this.style.color = 'var(--text-on-dark)';
-                                    this.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                                    this.style.backgroundColor =
+                                        'rgba(255, 255, 255, 0.05)';
                                 "
                                 onmouseout="
                                     this.style.color = 'var(--text-muted)';
@@ -231,10 +252,7 @@
             <button
                 onclick="toggleSidebar()"
                 class="hamburger-button"
-                style="
-                    padding: 8px;
-                    z-index: 1001;
-                "
+                style="padding: 8px; z-index: 1001"
             >
                 <svg
                     width="20"
@@ -267,7 +285,7 @@
             <a
                 href="/"
                 style="
-                    font-family: 'Syne', sans-serif;
+                    font-family: &quot;Syne&quot;, sans-serif;
                     font-weight: 800;
                     font-size: 20px;
                     color: var(--text-primary);
@@ -290,16 +308,15 @@
                 </form>
                 {% else %}
                 <a href="/auth/login" class="btn">Login</a>
-                <a
-                    href="{{ invite_url }}"
-                    target="_blank"
-                    class="btn primary"
+                <a href="{{ invite_url }}" target="_blank" class="btn primary"
                     >Invite Bot</a
                 >
                 {% endif %}
             </div>
         </header>
-        <main style="min-height: calc(100vh - 80px);">{% block landing_content %}{% endblock %}</main>
+        <main style="min-height: calc(100vh - 80px)">
+            {% block landing_content %}{% endblock %}
+        </main>
         {% endif %}
 
         <div class="toast" id="toast"></div>
@@ -307,17 +324,18 @@
         <script>
             // Global chart helpers aligned with v2 aesthetics
             const font = "Inter";
-            const gridColor = "rgba(0, 0, 0, 0.05)";
-            const textColor = "#494D5F";
-            const bgColor = "var(--bg-card)";
-            const borderColor = "var(--border-primary)";
-            const successColor = "var(--green)";
+            const gridColor = "rgba(21, 94, 117, 0.08)";   // petrol cyan grid lines
+            const textColor = "#5b6878";                     // matches --text-muted in dashboard.css
+            const bgColor = "var(--surface)";
+            const borderColor = "var(--border)";
+            const successColor = "var(--success)";
+            const CSRF_TOKEN = {{ csrf_token | tojson }};
 
             function darkChart(ctx, config) {
                 config.options = config.options || {};
                 config.options.responsive = true;
                 config.options.maintainAspectRatio = false;
-                
+
                 // Styling overrides
                 config.options.plugins = config.options.plugins || {};
                 config.options.plugins.legend = config.options.plugins.legend || {};
@@ -327,7 +345,7 @@
 
                 if (config.type !== 'doughnut' && config.type !== 'pie') {
                     config.options.scales = config.options.scales || {};
-                    
+
                     if (config.options.scales.x) {
                         config.options.scales.x.ticks = config.options.scales.x.ticks || {};
                         config.options.scales.x.ticks.color = textColor;
@@ -335,7 +353,7 @@
                         config.options.scales.x.grid = config.options.scales.x.grid || {};
                         config.options.scales.x.grid.color = gridColor;
                     }
-                    
+
                     if (config.options.scales.y) {
                         config.options.scales.y.ticks = config.options.scales.y.ticks || {};
                         config.options.scales.y.ticks.color = textColor;
@@ -413,6 +431,10 @@
             }
             document.addEventListener("DOMContentLoaded", localizeTimestamps);
 
+            function csrfHeaders(extra = {}) {
+                return { ...extra, "X-CSRFToken": CSRF_TOKEN };
+            }
+
             function getCookie(name) {
                 let cookieValue = null;
                 if (document.cookie && document.cookie !== '') {
@@ -432,7 +454,7 @@
                 const url = type === 'anomaly' ? '/dashboard/ml/anomaly-feedback' : '/dashboard/ml/burnout-feedback';
                 fetch(url, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+                    headers: csrfHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({ id: id, verdict: verdict })
                 }).then(r => {
                     if (r.ok) showToast(verdict === 'confirmed' ? 'Verified as ' + type : 'Dismissed ' + type, 'success');

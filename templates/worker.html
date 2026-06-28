@@ -279,6 +279,8 @@
 
 {% endblock %} {% block scripts %}
 <script>
+const CSRF_TOKEN = {{ csrf_token | tojson }};
+
     {% if worker_hourly_activity %}
     (function() {
       const wh = shiftHourly({{ worker_hourly_activity | tojson }});
@@ -318,7 +320,7 @@
     async function submitCorrection(caseId) {
         const newVal = parseFloat(document.getElementById('new-val-' + caseId).value);
         const reason = document.getElementById('corr-reason-' + caseId).value || 'Admin correction';
-        const res = await fetch('/api/admin/correct', { method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')}, body: JSON.stringify({ case_id: caseId, new_change: newVal, reason: reason, admin_name: {{ (session.get('user', {})).get('name', 'Unknown') | tojson }} }) });
+        const res = await fetch('/api/admin/correct', { method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN}, body: JSON.stringify({ case_id: caseId, new_change: newVal, reason: reason, admin_name: {{ (session.get('user', {})).get('name', 'Unknown') | tojson }} }) });
         if (res.ok) {
             showToast('Correction applied', 'success');
             location.reload();
@@ -327,19 +329,5 @@
         }
     }
     
-    function getCookie(name) {
-        let cookieValue = null;
-        if (document.cookie && document.cookie !== '') {
-            const cookies = document.cookie.split(';');
-            for (let i = 0; i < cookies.length; i++) {
-                const cookie = cookies[i].trim();
-                if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                    break;
-                }
-            }
-        }
-        return cookieValue;
-    }
 </script>
 {% endblock %}

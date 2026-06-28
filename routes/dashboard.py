@@ -280,8 +280,12 @@ def index(template_name="dashboard.html"):
     daily_volume = {str(d.day): d.count for d in daily_vol}
 
     base_date = datetime.utcnow().date() - timedelta(days=6)
-    daily_volume_dates = [(base_date + timedelta(days=i)).strftime("%b %d") for i in range(7)]
-    daily_volume_counts = [daily_volume.get(str(base_date + timedelta(days=i)), 0) for i in range(7)]
+    daily_volume_dates = [
+        (base_date + timedelta(days=i)).strftime("%b %d") for i in range(7)
+    ]
+    daily_volume_counts = [
+        daily_volume.get(str(base_date + timedelta(days=i)), 0) for i in range(7)
+    ]
 
     # Score source breakdown (per-guild scoped)
     source_query = db.session.query(
@@ -294,27 +298,47 @@ def index(template_name="dashboard.html"):
 
     # Community vs staff message breakdown
     community_msg_q = msg_base.filter(MessageRecord.is_public_channel == True)
-    staff_msg_q = community_msg_q.filter(
-        MessageRecord.discord_id.in_(
-            db.session.query(GuildMember.member_id).filter(
-                GuildMember.is_staff == True,
-                GuildMember.is_bot == False,
-                GuildMember.guild_id.in_(accessible_ids) if accessible_ids else True,
+    staff_msg_q = (
+        community_msg_q.filter(
+            MessageRecord.discord_id.in_(
+                db.session.query(GuildMember.member_id).filter(
+                    GuildMember.is_staff == True,
+                    GuildMember.is_bot == False,
+                    GuildMember.guild_id.in_(accessible_ids)
+                    if accessible_ids
+                    else True,
+                )
             )
         )
-    ) if accessible_ids else community_msg_q.filter(db.false())
+        if accessible_ids
+        else community_msg_q.filter(db.false())
+    )
     community_messages_total = community_msg_q.count()
     staff_messages_total = staff_msg_q.count()
 
     # Score source percentages for doughnut chart (actual source keys: discord, system, jira, etc.)
     total_score_events = sum(score_sources.values()) or 1
-    source_discord_pct = round(score_sources.get("discord", 0) / total_score_events * 100, 1)
-    source_system_pct = round(score_sources.get("system", 0) / total_score_events * 100, 1)
+    source_discord_pct = round(
+        score_sources.get("discord", 0) / total_score_events * 100, 1
+    )
+    source_system_pct = round(
+        score_sources.get("system", 0) / total_score_events * 100, 1
+    )
     source_jira_pct = round(score_sources.get("jira", 0) / total_score_events * 100, 1)
-    source_manual_pct = round(score_sources.get("manual", 0) / total_score_events * 100, 1)
+    source_manual_pct = round(
+        score_sources.get("manual", 0) / total_score_events * 100, 1
+    )
     source_other_pct = round(
-        (total_score_events - score_sources.get("discord", 0) - score_sources.get("system", 0)
-         - score_sources.get("jira", 0) - score_sources.get("manual", 0)) / total_score_events * 100, 1
+        (
+            total_score_events
+            - score_sources.get("discord", 0)
+            - score_sources.get("system", 0)
+            - score_sources.get("jira", 0)
+            - score_sources.get("manual", 0)
+        )
+        / total_score_events
+        * 100,
+        1,
     )
     # Keep legacy aliases for template compatibility
     source_msg_pct = source_discord_pct
@@ -433,28 +457,40 @@ def index(template_name="dashboard.html"):
 
     # Daily join/leave data for charts
     daily_joins_data = db.session.query(
-        func.date(MemberJoinLeave.created_at).label("day"), func.count(MemberJoinLeave.id)
-    ).filter(
-        MemberJoinLeave.created_at >= cutoff,
-        MemberJoinLeave.event_type == "join"
-    )
+        func.date(MemberJoinLeave.created_at).label("day"),
+        func.count(MemberJoinLeave.id),
+    ).filter(MemberJoinLeave.created_at >= cutoff, MemberJoinLeave.event_type == "join")
     if accessible_ids:
-        daily_joins_data = daily_joins_data.filter(MemberJoinLeave.guild_id.in_(accessible_ids))
-    daily_joins_dict = {str(d[0]): d[1] for d in daily_joins_data.group_by(func.date(MemberJoinLeave.created_at)).all()}
+        daily_joins_data = daily_joins_data.filter(
+            MemberJoinLeave.guild_id.in_(accessible_ids)
+        )
+    daily_joins_dict = {
+        str(d[0]): d[1]
+        for d in daily_joins_data.group_by(func.date(MemberJoinLeave.created_at)).all()
+    }
 
     daily_leaves_data = db.session.query(
-        func.date(MemberJoinLeave.created_at).label("day"), func.count(MemberJoinLeave.id)
+        func.date(MemberJoinLeave.created_at).label("day"),
+        func.count(MemberJoinLeave.id),
     ).filter(
-        MemberJoinLeave.created_at >= cutoff,
-        MemberJoinLeave.event_type == "leave"
+        MemberJoinLeave.created_at >= cutoff, MemberJoinLeave.event_type == "leave"
     )
     if accessible_ids:
-        daily_leaves_data = daily_leaves_data.filter(MemberJoinLeave.guild_id.in_(accessible_ids))
-    daily_leaves_dict = {str(d[0]): d[1] for d in daily_leaves_data.group_by(func.date(MemberJoinLeave.created_at)).all()}
+        daily_leaves_data = daily_leaves_data.filter(
+            MemberJoinLeave.guild_id.in_(accessible_ids)
+        )
+    daily_leaves_dict = {
+        str(d[0]): d[1]
+        for d in daily_leaves_data.group_by(func.date(MemberJoinLeave.created_at)).all()
+    }
 
     daily_growth_dates = daily_volume_dates
-    daily_joins = [daily_joins_dict.get(str(base_date + timedelta(days=i)), 0) for i in range(7)]
-    daily_leaves = [daily_leaves_dict.get(str(base_date + timedelta(days=i)), 0) for i in range(7)]
+    daily_joins = [
+        daily_joins_dict.get(str(base_date + timedelta(days=i)), 0) for i in range(7)
+    ]
+    daily_leaves = [
+        daily_leaves_dict.get(str(base_date + timedelta(days=i)), 0) for i in range(7)
+    ]
 
     # ML model status
     ml_status = ml_engine.get_model_status()
@@ -480,6 +516,17 @@ def index(template_name="dashboard.html"):
     health_drift_detected = model_health.get("drift_detected", False)
     health_drift_reasons = model_health.get("drift_reasons", [])
     growth_status = ml_status.get("growth", {})
+
+    # Pre-compute federated history for template (no Jinja multiply filter)
+    if isinstance(ml_status, dict):
+        fed = ml_status.get("federated", {})
+        if fed and fed.get("history"):
+            fed["history_accuracy_pct"] = [
+                round(h.get("mean_global_accuracy", 0) * 100, 1) for h in fed["history"]
+            ]
+            fed["history_rounds"] = [
+                h.get("round", i + 1) for i, h in enumerate(fed["history"])
+            ]
 
     return render_template(
         template_name,
@@ -555,6 +602,7 @@ def dashboard_live():
             {
                 "total_online_members": 0,
                 "total_members_tracked": 0,
+                "total_online_pct": 0,
                 "guild_online_map": {},
             }
         )
@@ -570,10 +618,14 @@ def dashboard_live():
         ).count()
     total_online = sum(guild_online_map.values())
     total_members = sum(guild_member_count_map.values())
+    total_online_pct = (
+        round((total_online / total_members) * 100, 1) if total_members else 0
+    )
     return jsonify(
         {
             "total_online_members": total_online,
             "total_members_tracked": total_members,
+            "total_online_pct": total_online_pct,
             "guild_online_map": guild_online_map,
             "guild_member_count_map": guild_member_count_map,
         }

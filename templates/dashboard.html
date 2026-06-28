@@ -7,17 +7,46 @@ endblock %} {% block content %}
 ></div>
 
 {% if health_drift_detected %}
-<div class="drift-banner" style="background: var(--warning-soft); border: 1px solid #fed7aa; border-radius: 10px; padding: 16px 20px; display: flex; align-items: flex-start; gap: 16px; margin-bottom: 24px;">
-    <div class="drift-banner-icon" style="font-size: 20px; line-height: 1;">⚠️</div>
-    <div class="drift-banner-content" style="flex: 1;">
-        <div class="drift-banner-title" style="font-family: var(--font-secondary); font-weight: 700; font-size: 14px; color: #b45309; margin-bottom: 4px;">Model Drift Detected</div>
-        <div class="drift-banner-reason" style="font-size: 12px; color: var(--text-secondary);">
+<div
+    class="drift-banner"
+    style="
+        background: var(--warning-soft);
+        border: 1px solid #fed7aa;
+        border-radius: 10px;
+        padding: 16px 20px;
+        display: flex;
+        align-items: flex-start;
+        gap: 16px;
+        margin-bottom: 24px;
+    "
+>
+    <div class="drift-banner-icon" style="font-size: 20px; line-height: 1">
+        ⚠️
+    </div>
+    <div class="drift-banner-content" style="flex: 1">
+        <div
+            class="drift-banner-title"
+            style="
+                font-family: var(--font-secondary);
+                font-weight: 700;
+                font-size: 14px;
+                color: #b45309;
+                margin-bottom: 4px;
+            "
+        >
+            Model Drift Detected
+        </div>
+        <div
+            class="drift-banner-reason"
+            style="font-size: 12px; color: var(--text-secondary)"
+        >
             {% for reason in health_drift_reasons %}
             <span>• {{ reason }} </span>
             {% endfor %}
         </div>
-        <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">
-            Auto-retrain will trigger on next heartbeat, or click <strong>Retrain All</strong> below.
+        <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px">
+            Auto-retrain will trigger on next heartbeat, or click
+            <strong>Retrain All</strong> below.
         </div>
     </div>
 </div>
@@ -28,7 +57,9 @@ endblock %} {% block content %}
     <div class="section-header">
         <div class="section-eyebrow">Overview</div>
         <h1 class="dashboard-title">Dashboard</h1>
-        <p class="dashboard-subtitle">Workforce intelligence for your Discord communities.</p>
+        <p class="dashboard-subtitle">
+            Workforce intelligence for your Discord communities.
+        </p>
     </div>
 
     <!-- Stats Grid -->
@@ -74,9 +105,9 @@ endblock %} {% block content %}
 
 <!-- 2. INTELLIGENCE ALERTS -->
 <section class="ws-section">
-    <div class="section-header" style="margin-bottom: 16px;">
+    <div class="section-header" style="margin-bottom: 16px">
         <div class="section-eyebrow">Alerts</div>
-        <h2 class="ws-title" style="font-size: 20px;">Intelligence Alerts</h2>
+        <h2 class="ws-title" style="font-size: 20px">Intelligence Alerts</h2>
         <p class="ws-subtitle">Behavioral anomalies and staff burnout risks.</p>
     </div>
 
@@ -88,7 +119,7 @@ endblock %} {% block content %}
                 <div class="card-subtitle">Last 48 hours</div>
             </div>
             {% if anomalies %}
-            <div style="overflow-x: auto;">
+            <div style="overflow-x: auto">
                 <table class="ws-table">
                     <thead>
                         <tr>
@@ -102,8 +133,14 @@ endblock %} {% block content %}
                     <tbody>
                         {% for a in anomalies %}
                         <tr id="anomaly-row-{{ a.id }}">
-                            <td style="font-weight: 600; color: var(--text-primary);">
-                                {{ a.discord_id[:12] if a.discord_id else 'N/A' }}
+                            <td
+                                style="
+                                    font-weight: 600;
+                                    color: var(--text-primary);
+                                "
+                            >
+                                {{ a.discord_id[:12] if a.discord_id else 'N/A'
+                                }}
                             </td>
                             <td>
                                 <span
@@ -115,18 +152,26 @@ endblock %} {% block content %}
                                 <span
                                     class="ws-severity {% if a.severity >= 60 %}high{% elif a.severity >= 25 %}med{% else %}low{% endif %}"
                                 ></span>
-                                <span style="font-size: 12px; font-weight: 500;"
+                                <span style="font-size: 12px; font-weight: 500"
                                     >{{ a.severity }}</span
                                 >
                             </td>
                             <td>
                                 {% if a.feedback == 'confirmed' %}
-                                <span style="color: var(--green); font-size: 12px; font-weight: 500;"
+                                <span
+                                    style="
+                                        color: var(--green);
+                                        font-size: 12px;
+                                        font-weight: 500;
+                                    "
                                     >✓ Confirmed</span
                                 >
                                 {% elif a.feedback == 'dismissed' %}
                                 <span
-                                    style="color: var(--text-dim); font-size: 12px;"
+                                    style="
+                                        color: var(--text-dim);
+                                        font-size: 12px;
+                                    "
                                     >✗ Dismissed</span
                                 >
                                 {% else %}
@@ -165,13 +210,22 @@ endblock %} {% block content %}
             <div class="card-header">
                 <div class="card-title">Staff Burnout</div>
                 <div class="card-subtitle">
-                    {% if burnout_precision and burnout_precision.precision is not none %}
-                    <span class="precision-badge">Precision: <strong>{{ burnout_precision.precision_pct }}%</strong></span>
+                    {% if burnout_precision and burnout_precision.precision is
+                    not none %}
+                    <span class="precision-badge"
+                        >Precision:
+                        <strong
+                            >{{ burnout_precision.precision_pct }}%</strong
+                        ></span
+                    >
                     {% endif %}
                 </div>
             </div>
             {% if burnout_risks %}
-            <div class="ws-scroll" style="display: flex; flex-direction: column; gap: 10px;">
+            <div
+                class="ws-scroll"
+                style="display: flex; flex-direction: column; gap: 10px"
+            >
                 {% for br in burnout_risks %}
                 <div
                     id="burnout-card-{{ br.id }}"
@@ -183,12 +237,19 @@ endblock %} {% block content %}
                         background-color: var(--surface-soft);
                     "
                 >
-                    <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+                    <div
+                        style="
+                            display: flex;
+                            align-items: center;
+                            gap: 12px;
+                            min-width: 0;
+                        "
+                    >
                         <span
                             style="font-family: var(--font-secondary); font-size: 20px; font-weight: 800; line-height: 1; {% if br.score >= 60 %}color: var(--red){% elif br.score >= 25 %}color: var(--orange){% else %}color: var(--green){% endif %}"
                             >{{ "%.0f"|format(br.score) }}</span
                         >
-                        <div style="min-width: 0;">
+                        <div style="min-width: 0">
                             <div
                                 class="truncate"
                                 style="
@@ -209,7 +270,12 @@ endblock %} {% block content %}
                                 "
                             >
                                 {% for s in br.signals.split(',') %}
-                                <span style="display: inline-flex; align-items: center;">
+                                <span
+                                    style="
+                                        display: inline-flex;
+                                        align-items: center;
+                                    "
+                                >
                                     {% if s == 'frequent_anomalies' %}
                                     <svg
                                         xmlns="http://www.w3.org/2000/svg"
@@ -227,8 +293,18 @@ endblock %} {% block content %}
                                         <path
                                             d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
                                         ></path>
-                                        <line x1="12" y1="9" x2="12" y2="13"></line>
-                                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                                        <line
+                                            x1="12"
+                                            y1="9"
+                                            x2="12"
+                                            y2="13"
+                                        ></line>
+                                        <line
+                                            x1="12"
+                                            y1="17"
+                                            x2="12.01"
+                                            y2="17"
+                                        ></line>
                                     </svg>
                                     {% elif s == 'volume_volatility' %}
                                     <svg
@@ -244,9 +320,24 @@ endblock %} {% block content %}
                                         style="color: var(--blue)"
                                     >
                                         <title>Volume Volatility</title>
-                                        <line x1="18" y1="20" x2="18" y2="10"></line>
-                                        <line x1="12" y1="20" x2="12" y2="4"></line>
-                                        <line x1="6" y1="20" x2="6" y2="14"></line>
+                                        <line
+                                            x1="18"
+                                            y1="20"
+                                            x2="18"
+                                            y2="10"
+                                        ></line>
+                                        <line
+                                            x1="12"
+                                            y1="20"
+                                            x2="12"
+                                            y2="4"
+                                        ></line>
+                                        <line
+                                            x1="6"
+                                            y1="20"
+                                            x2="6"
+                                            y2="14"
+                                        ></line>
                                     </svg>
                                     {% elif s == 'increasing_reversals' %}
                                     <svg
@@ -283,9 +374,21 @@ endblock %} {% block content %}
                                         <path
                                             d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"
                                         ></path>
-                                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                                        <line x1="12" y1="19" x2="12" y2="23"></line>
-                                        <line x1="8" y1="23" x2="16" y2="23"></line>
+                                        <path
+                                            d="M19 10v2a7 7 0 0 1-14 0v-2"
+                                        ></path>
+                                        <line
+                                            x1="12"
+                                            y1="19"
+                                            x2="12"
+                                            y2="23"
+                                        ></line>
+                                        <line
+                                            x1="8"
+                                            y1="23"
+                                            x2="16"
+                                            y2="23"
+                                        ></line>
                                     </svg>
                                     {% elif s == 'frequent_corrections' %}
                                     <svg
@@ -315,13 +418,18 @@ endblock %} {% block content %}
                             {% endif %}
                         </div>
                     </div>
-                    <div style="flex-shrink: 0; margin-left: 12px;">
+                    <div style="flex-shrink: 0; margin-left: 12px">
                         {% if br.feedback == 'confirmed' %}
-                        <span style="color: var(--green); font-size: 11px; font-weight: 500;"
+                        <span
+                            style="
+                                color: var(--green);
+                                font-size: 11px;
+                                font-weight: 500;
+                            "
                             >✓ Confirmed</span
                         >
                         {% elif br.feedback == 'dismissed' %}
-                        <span style="color: var(--text-dim); font-size: 11px;"
+                        <span style="color: var(--text-dim); font-size: 11px"
                             >✗ Dismissed</span
                         >
                         {% else %}
@@ -343,9 +451,7 @@ endblock %} {% block content %}
                 {% endfor %}
             </div>
             {% else %}
-            <div class="empty-state">
-                No burnout risks detected.
-            </div>
+            <div class="empty-state">No burnout risks detected.</div>
             {% endif %}
         </div>
     </div>
@@ -353,27 +459,29 @@ endblock %} {% block content %}
 
 <!-- 3. ANALYTICS HUB -->
 <section class="ws-section">
-    <div class="section-header" style="margin-bottom: 16px;">
+    <div class="section-header" style="margin-bottom: 16px">
         <div class="section-eyebrow">Analytics</div>
-        <h2 class="ws-title" style="font-size: 20px;">Analytics Hub</h2>
+        <h2 class="ws-title" style="font-size: 20px">Analytics Hub</h2>
         <p class="ws-subtitle">Activity patterns across your communities.</p>
     </div>
 
     <div class="ws-grid-8-4">
         <!-- Main Charts Area -->
-        <div style="display: flex; flex-direction: column; gap: 20px;">
+        <div style="display: flex; flex-direction: column; gap: 20px">
             {% if guild_hourly and guild_hourly.keys()|length > 0 %}
-            <div class="ws-card" style="margin-bottom: 0;">
+            <div class="ws-card" style="margin-bottom: 0">
                 <div class="card-header">
                     <div class="card-title">Guild Activity Comparison</div>
-                    <div class="card-subtitle">Peak hours per server — timezone distribution</div>
+                    <div class="card-subtitle">
+                        Peak hours per server — timezone distribution
+                    </div>
                 </div>
                 <div class="ws-chart-box">
                     <canvas id="compareChart"></canvas>
                 </div>
             </div>
             {% else %}
-            <div class="ws-card" style="margin-bottom: 0;">
+            <div class="ws-card" style="margin-bottom: 0">
                 <div class="empty-state">
                     No activity data available to generate comparison charts.
                 </div>
@@ -381,25 +489,31 @@ endblock %} {% block content %}
             {% endif %}
 
             <div class="ws-grid-3">
-                <div class="ws-card" style="margin-bottom: 0;">
-                    <div class="card-header" style="margin-bottom: 12px;">
-                        <div class="card-title" style="font-size: 13px;">Community vs Staff</div>
+                <div class="ws-card" style="margin-bottom: 0">
+                    <div class="card-header" style="margin-bottom: 12px">
+                        <div class="card-title" style="font-size: 13px">
+                            Community vs Staff
+                        </div>
                     </div>
                     <div class="ws-chart-sm">
                         <canvas id="staffChart"></canvas>
                     </div>
                 </div>
-                <div class="ws-card" style="margin-bottom: 0;">
-                    <div class="card-header" style="margin-bottom: 12px;">
-                        <div class="card-title" style="font-size: 13px;">Score Sources</div>
+                <div class="ws-card" style="margin-bottom: 0">
+                    <div class="card-header" style="margin-bottom: 12px">
+                        <div class="card-title" style="font-size: 13px">
+                            Score Sources
+                        </div>
                     </div>
                     <div class="ws-chart-sm">
                         <canvas id="sourcesChart"></canvas>
                     </div>
                 </div>
-                <div class="ws-card" style="margin-bottom: 0;">
-                    <div class="card-header" style="margin-bottom: 12px;">
-                        <div class="card-title" style="font-size: 13px;">Aggregate Hourly</div>
+                <div class="ws-card" style="margin-bottom: 0">
+                    <div class="card-header" style="margin-bottom: 12px">
+                        <div class="card-title" style="font-size: 13px">
+                            Aggregate Hourly
+                        </div>
                     </div>
                     <div class="ws-chart-sm">
                         <canvas id="hourlyChart"></canvas>
@@ -408,11 +522,11 @@ endblock %} {% block content %}
             </div>
 
             {% if daily_volume %}
-            <div class="ws-card" style="margin-bottom: 0;">
+            <div class="ws-card" style="margin-bottom: 0">
                 <div class="card-header">
                     <div class="card-title">Message Volume (7 days)</div>
                 </div>
-                <div class="ws-chart-box" style="height: 180px;">
+                <div class="ws-chart-box" style="height: 180px">
                     <canvas id="volumeChart"></canvas>
                 </div>
             </div>
@@ -420,9 +534,9 @@ endblock %} {% block content %}
         </div>
 
         <!-- Side Analytics (Growth & Federated) -->
-        <div style="display: flex; flex-direction: column; gap: 20px;">
+        <div style="display: flex; flex-direction: column; gap: 20px">
             <!-- Growth Analytics -->
-            <div class="ws-card" style="margin-bottom: 0;">
+            <div class="ws-card" style="margin-bottom: 0">
                 <div class="card-header">
                     <div class="card-title">Server Growth</div>
                     <div class="card-subtitle">Last 7 days</div>
@@ -437,24 +551,52 @@ endblock %} {% block content %}
                 >
                     <div
                         class="ws-stat"
-                        style="margin-bottom: 0; padding: 10px; border-radius: var(--radius-sm); text-align: center;"
+                        style="
+                            margin-bottom: 0;
+                            padding: 10px;
+                            border-radius: var(--radius-sm);
+                            text-align: center;
+                        "
                     >
-                        <div class="ws-stat-label" style="font-size: 9px; margin-top: 0;">Joins</div>
+                        <div
+                            class="ws-stat-label"
+                            style="font-size: 9px; margin-top: 0"
+                        >
+                            Joins
+                        </div>
                         <div
                             class="ws-stat-value"
-                            style="color: var(--green); font-size: 16px; font-family: var(--font-secondary);"
+                            style="
+                                color: var(--green);
+                                font-size: 16px;
+                                font-family: var(--font-secondary);
+                            "
                         >
                             +{{ total_joins_7d }}
                         </div>
                     </div>
                     <div
                         class="ws-stat"
-                        style="margin-bottom: 0; padding: 10px; border-radius: var(--radius-sm); text-align: center;"
+                        style="
+                            margin-bottom: 0;
+                            padding: 10px;
+                            border-radius: var(--radius-sm);
+                            text-align: center;
+                        "
                     >
-                        <div class="ws-stat-label" style="font-size: 9px; margin-top: 0;">Leaves</div>
+                        <div
+                            class="ws-stat-label"
+                            style="font-size: 9px; margin-top: 0"
+                        >
+                            Leaves
+                        </div>
                         <div
                             class="ws-stat-value"
-                            style="color: var(--red); font-size: 16px; font-family: var(--font-secondary);"
+                            style="
+                                color: var(--red);
+                                font-size: 16px;
+                                font-family: var(--font-secondary);
+                            "
                         >
                             -{{ total_leaves_7d }}
                         </div>
@@ -462,30 +604,42 @@ endblock %} {% block content %}
                     {% set net_growth = total_joins_7d - total_leaves_7d %}
                     <div
                         class="ws-stat"
-                        style="margin-bottom: 0; padding: 10px; border-radius: var(--radius-sm); text-align: center;"
+                        style="
+                            margin-bottom: 0;
+                            padding: 10px;
+                            border-radius: var(--radius-sm);
+                            text-align: center;
+                        "
                     >
-                        <div class="ws-stat-label" style="font-size: 9px; margin-top: 0;">Net</div>
+                        <div
+                            class="ws-stat-label"
+                            style="font-size: 9px; margin-top: 0"
+                        >
+                            Net
+                        </div>
                         <div
                             class="ws-stat-value"
                             style="color: {% if net_growth >= 0 %}var(--green){% else %}var(--red){% endif %}; font-size: 16px; font-family: var(--font-secondary);"
                         >
-                            {{ net_growth | string | replace("-", "-") }}{%
-                            if net_growth >= 0 %}+{% endif %}
+                            {{ net_growth | string | replace("-", "-") }}{% if
+                            net_growth >= 0 %}+{% endif %}
                         </div>
                     </div>
                 </div>
-                <div class="ws-chart-sm" style="height: 120px;">
+                <div class="ws-chart-sm" style="height: 120px">
                     <canvas id="growthChart"></canvas>
                 </div>
             </div>
 
             <!-- Federated Learning -->
-            {% if ml_status and ml_status.get('federated', {}).get('trained') %} 
+            {% if ml_status and ml_status.get('federated', {}).get('trained') %}
             {% set fed = ml_status['federated'] %}
-            <div class="ws-card" style="margin-bottom: 0;">
+            <div class="ws-card" style="margin-bottom: 0">
                 <div class="card-header">
                     <div class="card-title">FedAvg Learning</div>
-                    <div class="card-subtitle">{{ fed.get('rounds', 0) }} rounds completed</div>
+                    <div class="card-subtitle">
+                        {{ fed.get('rounds', 0) }} rounds completed
+                    </div>
                 </div>
                 <div
                     style="
@@ -497,26 +651,56 @@ endblock %} {% block content %}
                 >
                     <div
                         class="ws-stat"
-                        style="margin-bottom: 0; padding: 10px; border-radius: var(--radius-sm); text-align: center;"
+                        style="
+                            margin-bottom: 0;
+                            padding: 10px;
+                            border-radius: var(--radius-sm);
+                            text-align: center;
+                        "
                     >
-                        <div class="ws-stat-label" style="font-size: 9px; margin-top: 0;">Global Acc</div>
+                        <div
+                            class="ws-stat-label"
+                            style="font-size: 9px; margin-top: 0"
+                        >
+                            Global Acc
+                        </div>
                         <div
                             class="ws-stat-value"
-                            style="color: var(--blue); font-size: 16px; font-family: var(--font-secondary);"
+                            style="
+                                color: var(--blue);
+                                font-size: 16px;
+                                font-family: var(--font-secondary);
+                            "
                         >
-                            {{ "%.1f"|format(fed.get('mean_global_accuracy', 0) * 100) }}%
+                            {{ "%.1f"|format(fed.get('mean_global_accuracy', 0)
+                            * 100) }}%
                         </div>
                     </div>
                     <div
                         class="ws-stat"
-                        style="margin-bottom: 0; padding: 10px; border-radius: var(--radius-sm); text-align: center;"
+                        style="
+                            margin-bottom: 0;
+                            padding: 10px;
+                            border-radius: var(--radius-sm);
+                            text-align: center;
+                        "
                     >
-                        <div class="ws-stat-label" style="font-size: 9px; margin-top: 0;">Local Acc</div>
+                        <div
+                            class="ws-stat-label"
+                            style="font-size: 9px; margin-top: 0"
+                        >
+                            Local Acc
+                        </div>
                         <div
                             class="ws-stat-value"
-                            style="color: var(--green); font-size: 16px; font-family: var(--font-secondary);"
+                            style="
+                                color: var(--green);
+                                font-size: 16px;
+                                font-family: var(--font-secondary);
+                            "
                         >
-                            {{ "%.1f"|format(fed.get('mean_local_accuracy', 0) * 100) }}%
+                            {{ "%.1f"|format(fed.get('mean_local_accuracy', 0) *
+                            100) }}%
                         </div>
                     </div>
                 </div>
@@ -528,8 +712,8 @@ endblock %} {% block content %}
                     <canvas id="fedChart"></canvas>
                 </div>
                 {% endif %}
-                <div class="ws-scroll" style="max-height: 150px;">
-                    <table class="ws-table" style="font-size: 12px;">
+                <div class="ws-scroll" style="max-height: 150px">
+                    <table class="ws-table" style="font-size: 12px">
                         <thead>
                             <tr>
                                 <th>Guild</th>
@@ -544,7 +728,8 @@ endblock %} {% block content %}
                                 <td
                                     style="text-align: right; font-weight: 600; color: {% if c.global_accuracy >= 0.7 %}var(--green){% else %}var(--text-dim){% endif %}"
                                 >
-                                    {{ "%.1f"|format(c.global_accuracy * 100) }}%
+                                    {{ "%.1f"|format(c.global_accuracy * 100)
+                                    }}%
                                 </td>
                                 <td
                                     style="
@@ -552,7 +737,8 @@ endblock %} {% block content %}
                                         color: var(--text-dim);
                                     "
                                 >
-                                    {{ "%.1f"|format(c.get('baseline_accuracy', 0) * 100) }}%
+                                    {{ "%.1f"|format(c.get('baseline_accuracy',
+                                    0) * 100) }}%
                                 </td>
                             </tr>
                             {% endfor %}
@@ -560,11 +746,14 @@ endblock %} {% block content %}
                     </table>
                 </div>
             </div>
-            {% elif ml_status and ml_status.get('federated', {}).get('trained') == false %}
-            <div class="ws-card" style="margin-bottom: 0;">
+            {% elif ml_status and ml_status.get('federated', {}).get('trained')
+            == false %}
+            <div class="ws-card" style="margin-bottom: 0">
                 <div class="card-header">
                     <div class="card-title">Federated Learning</div>
-                    <div class="card-subtitle">Waiting for 2+ active guilds to begin training.</div>
+                    <div class="card-subtitle">
+                        Waiting for 2+ active guilds to begin training.
+                    </div>
                 </div>
             </div>
             {% endif %}
@@ -574,28 +763,41 @@ endblock %} {% block content %}
 
 <!-- 4. OPERATIONAL OVERVIEW -->
 <section class="ws-section">
-    <div class="section-header" style="margin-bottom: 16px;">
+    <div class="section-header" style="margin-bottom: 16px">
         <div class="section-eyebrow">Operational</div>
-        <h2 class="ws-title" style="font-size: 20px;">Operational Overview</h2>
+        <h2 class="ws-title" style="font-size: 20px">Operational Overview</h2>
         <p class="ws-subtitle">Servers, activity, and global leaderboard.</p>
     </div>
 
     <div class="ws-grid-8-4">
         <!-- Server List -->
-        <div class="ws-card" style="margin-bottom: 0;">
+        <div class="ws-card" style="margin-bottom: 0">
             <div class="card-header">
                 <div class="card-title">Server Registry</div>
                 <div class="card-subtitle">
-                    <span>Active: <strong>{{ total_guilds }}</strong></span> · 
-                    <span>Members: <strong><span data-live="total_members">{{ total_members_tracked }}</span></strong></span> · 
-                    <span>Staff: <strong>{{ total_staff_tracked }}</strong></span>
+                    <span>Active: <strong>{{ total_guilds }}</strong></span> ·
+                    <span
+                        >Members:
+                        <strong
+                            ><span data-live="total_members"
+                                >{{ total_members_tracked }}</span
+                            ></strong
+                        ></span
+                    >
+                    ·
+                    <span
+                        >Staff: <strong>{{ total_staff_tracked }}</strong></span
+                    >
                 </div>
             </div>
             {% if guilds %}
             <div
                 style="
                     display: grid;
-                    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+                    grid-template-columns: repeat(
+                        auto-fill,
+                        minmax(220px, 1fr)
+                    );
                     gap: 12px;
                 "
             >
@@ -603,7 +805,7 @@ endblock %} {% block content %}
                 <a href="/guild/{{ guild.guild_id }}" class="ws-guild-card">
                     <div style="display: flex; align-items: center; gap: 12px">
                         <div class="ws-avatar">{{ guild.name[:1] }}</div>
-                        <div style="min-width: 0;">
+                        <div style="min-width: 0">
                             <div
                                 class="truncate"
                                 style="
@@ -626,39 +828,48 @@ endblock %} {% block content %}
                             </div>
                         </div>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 11px; margin-top: 14px; border-t: 1px solid var(--border-primary); pt-3: 12px;">
+                    <div
+                        style="
+                            display: flex;
+                            justify-content: space-between;
+                            font-size: 11px;
+                            margin-top: 14px;
+                            border-t: 1px solid var(--border-primary);
+                            pt-3: 12px;
+                        "
+                    >
                         <span style="color: var(--text-dim)"
-                            >{{ guild_member_count_map.get(guild.guild_id, guild.member_count) }} members</span
+                            >{{ guild_member_count_map.get(guild.guild_id,
+                            guild.member_count) }} members</span
                         >
                         <span
-                            style="color: var(--green); font-weight: 600;"
+                            style="color: var(--green); font-weight: 600"
                             data-live="guild_online"
                             data-guild-id="{{ guild.guild_id }}"
-                            >{{ guild_online_map.get(guild.guild_id, 0) }} online</span
+                            >{{ guild_online_map.get(guild.guild_id, 0) }}
+                            online</span
                         >
                     </div>
                 </a>
                 {% endfor %}
             </div>
             {% else %}
-            <div class="empty-state">
-                No servers registered.
-            </div>
+            <div class="empty-state">No servers registered.</div>
             {% endif %}
         </div>
 
         <!-- Recent Activity Feed -->
-        <div class="ws-card" style="margin-bottom: 0;">
+        <div class="ws-card" style="margin-bottom: 0">
             <div class="card-header">
                 <div class="card-title">Live Activity</div>
                 <div class="card-subtitle">Recent scoring logs</div>
             </div>
             {% if recent_logs %}
-            <div class="ws-scroll" style="max-height: 250px;">
+            <div class="ws-scroll" style="max-height: 250px">
                 {% for log in recent_logs %}
                 <div class="ws-feed-item">
                     <div class="ws-dot"></div>
-                    <div style="flex: 1; min-width: 0;">
+                    <div style="flex: 1; min-width: 0">
                         <div class="flex justify-between items-start">
                             <span
                                 class="truncate"
@@ -672,7 +883,8 @@ endblock %} {% block content %}
                             </span>
                             <span
                                 style="font-size: 12px; font-weight: 700; color: {% if log.change >= 0 %}var(--green){% else %}var(--red){% endif %}; flex-shrink: 0; margin-left: 8px;"
-                                >{% if log.change >= 0 %}+{% endif %}{{ log.change }} pts</span
+                                >{% if log.change >= 0 %}+{% endif %}{{
+                                log.change }} pts</span
                             >
                         </div>
                         <p
@@ -686,19 +898,16 @@ endblock %} {% block content %}
                             {{ log.reason }}
                         </p>
                         <span style="font-size: 10px; color: var(--text-dim)"
-                            >{{ log.source }}{% if log.guild_name %} · {{ log.guild_name }}{% endif %}</span
+                            >{{ log.source }}{% if log.guild_name %} · {{
+                            log.guild_name }}{% endif %}</span
                         >
                     </div>
                 </div>
                 {% endfor %}
             </div>
             {% else %}
-            <div class="empty-state">
-                No recent activities to display.
-            </div>
-            {% endif %} 
-            
-            {% if most_active %}
+            <div class="empty-state">No recent activities to display.</div>
+            {% endif %} {% if most_active %}
             <div
                 style="
                     margin-top: 16px;
@@ -706,13 +915,19 @@ endblock %} {% block content %}
                     border-top: 1px solid var(--border-primary);
                 "
             >
-                <div class="card-header" style="margin-bottom: 12px;">
-                    <div class="card-title" style="font-size: 13px;">Most Active Users</div>
+                <div class="card-header" style="margin-bottom: 12px">
+                    <div class="card-title" style="font-size: 13px">
+                        Most Active Users
+                    </div>
                 </div>
                 <div style="display: flex; flex-direction: column; gap: 8px">
                     {% for active in most_active %}
                     <div class="flex justify-between items-center">
-                        <span style="color: var(--text-secondary); font-size: 12px;"
+                        <span
+                            style="
+                                color: var(--text-secondary);
+                                font-size: 12px;
+                            "
                             >{{ active.name }}</span
                         >
                         <span
@@ -733,7 +948,7 @@ endblock %} {% block content %}
 
     <!-- Leaderboard -->
     {% if leaderboard_data %}
-    <div class="ws-card" style="margin-top: 24px;">
+    <div class="ws-card" style="margin-top: 24px">
         <div class="card-header">
             <div class="card-title">Global Leaderboard</div>
             <div class="card-subtitle">Top staff score rankings</div>
@@ -753,16 +968,20 @@ endblock %} {% block content %}
                 <tbody>
                     {% for entry in leaderboard_data %}
                     <tr>
-                        <td style="color: var(--text-dim); font-weight: 600;">{{ loop.index }}</td>
+                        <td style="color: var(--text-dim); font-weight: 600">
+                            {{ loop.index }}
+                        </td>
                         <td style="color: var(--text-secondary)">
                             {{ entry.guild_name }}
                         </td>
-                        <td style="font-weight: 600;">
+                        <td style="font-weight: 600">
                             <a
                                 href="/worker/{{ entry.worker.id }}"
-                                style="color: var(--text-primary);"
+                                style="color: var(--text-primary)"
                                 onmouseover="this.style.color = 'var(--blue)'"
-                                onmouseout="this.style.color = 'var(--text-primary)'"
+                                onmouseout="
+                                    this.style.color = 'var(--text-primary)'
+                                "
                                 >{{ entry.worker.name }}</a
                             >
                         </td>
@@ -785,7 +1004,9 @@ endblock %} {% block content %}
                                     font-weight: 600;
                                     font-size: 12px;
                                 "
-                                onmouseover="this.style.textDecoration = 'underline'"
+                                onmouseover="
+                                    this.style.textDecoration = 'underline'
+                                "
                                 onmouseout="this.style.textDecoration = 'none'"
                                 >View Profile</a
                             >
@@ -797,10 +1018,7 @@ endblock %} {% block content %}
         </div>
     </div>
     {% else %}
-    <div
-        class="ws-card"
-        style="margin-top: 24px; text-align: center;"
-    >
+    <div class="ws-card" style="margin-top: 24px; text-align: center">
         <div class="empty-state">No scores recorded yet.</div>
     </div>
     {% endif %}
@@ -808,9 +1026,9 @@ endblock %} {% block content %}
 
 <!-- 5. SYSTEM & INTEGRATION -->
 <section class="ws-section" style="padding-bottom: 48px">
-    <div class="section-header" style="margin-bottom: 16px;">
+    <div class="section-header" style="margin-bottom: 16px">
         <div class="section-eyebrow">System</div>
-        <h2 class="ws-title" style="font-size: 20px;">System & Integration</h2>
+        <h2 class="ws-title" style="font-size: 20px">System & Integration</h2>
         <p class="ws-subtitle">ML status, training history, and controls.</p>
     </div>
 
@@ -818,13 +1036,22 @@ endblock %} {% block content %}
     <div class="ws-card">
         <div class="card-header">
             <div class="card-title">Model Retraining Controls</div>
-            <div class="card-subtitle">Train specific pipeline layers or full model set</div>
+            <div class="card-subtitle">
+                Train specific pipeline layers or full model set
+            </div>
         </div>
-        <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
-            {% if ml_status %} 
-            {% set anomaly_ok = ml_status.get('anomaly', {}).get('trained', False) %} 
-            {% set forecast_ok = ml_status.get('forecast', {}).get('trained', False) %} 
-            {% set burnout_ok = ml_status.get('burnout', {}).get('trained', False) %}
+        <div
+            style="
+                display: flex;
+                flex-wrap: wrap;
+                gap: 12px;
+                align-items: center;
+            "
+        >
+            {% if ml_status %} {% set anomaly_ok = ml_status.get('anomaly',
+            {}).get('trained', False) %} {% set forecast_ok =
+            ml_status.get('forecast', {}).get('trained', False) %} {% set
+            burnout_ok = ml_status.get('burnout', {}).get('trained', False) %}
             <button
                 onclick="retrainModel('anomaly', this)"
                 class="ws-btn {% if anomaly_ok %}primary{% endif %}"
@@ -846,8 +1073,9 @@ endblock %} {% block content %}
             >
                 Burnout {{ '✓' if burnout_ok else '○' }}
             </button>
-            {% set corrector_ok = ml_status.get('corrector', {}).get('trained', False) %} 
-            {% set federated_ok = ml_status.get('federated', {}).get('trained', False) %}
+            {% set corrector_ok = ml_status.get('corrector', {}).get('trained',
+            False) %} {% set federated_ok = ml_status.get('federated',
+            {}).get('trained', False) %}
             <button
                 onclick="retrainModel('corrector', this)"
                 class="ws-btn"
@@ -881,15 +1109,26 @@ endblock %} {% block content %}
             </button>
             {% endif %}
         </div>
-        
+
         <!-- Training History list -->
         {% if ml_status and ml_status.training_history %}
-        <div style="margin-top: 24px; border-t: 1px solid var(--border-primary); pt-3: 12px;">
-            <div class="card-header" style="margin-bottom: 12px; border: none; padding-bottom: 0;">
-                <div class="card-title" style="font-size: 14px;">Recent Training History</div>
+        <div
+            style="
+                margin-top: 24px;
+                border-t: 1px solid var(--border-primary);
+                pt-3: 12px;
+            "
+        >
+            <div
+                class="card-header"
+                style="margin-bottom: 12px; border: none; padding-bottom: 0"
+            >
+                <div class="card-title" style="font-size: 14px">
+                    Recent Training History
+                </div>
             </div>
-            <div class="ws-scroll" style="max-height: 180px;">
-                <table class="ws-table" style="font-size: 12px;">
+            <div class="ws-scroll" style="max-height: 180px">
+                <table class="ws-table" style="font-size: 12px">
                     <thead>
                         <tr>
                             <th>Date</th>
@@ -903,42 +1142,50 @@ endblock %} {% block content %}
                     <tbody>
                         {% for run in ml_status.training_history|reverse %}
                         <tr>
-                            <td style="color: var(--text-dim); font-weight: 500;">
-                                {{ run.trained_at[:10] if run.trained_at else 'N/A' }}
+                            <td
+                                style="color: var(--text-dim); font-weight: 500"
+                            >
+                                {{ run.trained_at[:10] if run.trained_at else
+                                'N/A' }}
                             </td>
                             <td style="text-align: center">
                                 <span
                                     class="ws-tag {% if run.anomaly and run.anomaly.status == 'trained' %}green{% elif run.anomaly and run.anomaly.status == 'error' %}red{% endif %}"
                                     style="font-size: 10px; padding: 2px 6px"
-                                    >{{ run.anomaly.status if run.anomaly else 'N/A' }}</span
+                                    >{{ run.anomaly.status if run.anomaly else
+                                    'N/A' }}</span
                                 >
                             </td>
                             <td style="text-align: center">
                                 <span
                                     class="ws-tag {% if run.burnout and run.burnout.status == 'trained' %}green{% elif run.burnout and run.burnout.status == 'error' %}red{% endif %}"
                                     style="font-size: 10px; padding: 2px 6px"
-                                    >{{ run.burnout.status if run.burnout else 'N/A' }}</span
+                                    >{{ run.burnout.status if run.burnout else
+                                    'N/A' }}</span
                                 >
                             </td>
                             <td style="text-align: center">
                                 <span
                                     class="ws-tag {% if run.corrector and run.corrector.status == 'trained' %}purple{% elif run.corrector and run.corrector.status == 'error' %}red{% endif %}"
                                     style="font-size: 10px; padding: 2px 6px"
-                                    >{{ run.corrector.status if run.corrector else 'N/A' }}</span
+                                    >{{ run.corrector.status if run.corrector
+                                    else 'N/A' }}</span
                                 >
                             </td>
                             <td style="text-align: center">
                                 <span
                                     class="ws-tag {% if run.forecast and run.forecast.status == 'trained' %}blue{% elif run.forecast and run.forecast.status == 'error' %}red{% endif %}"
                                     style="font-size: 10px; padding: 2px 6px"
-                                    >{{ run.forecast.status if run.forecast else 'N/A' }}</span
+                                    >{{ run.forecast.status if run.forecast else
+                                    'N/A' }}</span
                                 >
                             </td>
                             <td style="text-align: center">
                                 <span
                                     class="ws-tag {% if run.federated and run.federated.status == 'trained' %}cyan{% elif run.federated and run.federated.status == 'error' %}red{% endif %}"
                                     style="font-size: 10px; padding: 2px 6px"
-                                    >{{ run.federated.status if run.federated else 'N/A' }}</span
+                                    >{{ run.federated.status if run.federated
+                                    else 'N/A' }}</span
                                 >
                             </td>
                         </tr>
@@ -954,6 +1201,7 @@ endblock %} {% block content %}
 {% endblock %} {% block scripts %}
 
 <script>
+    const CSRF_TOKEN = {{ csrf_token | tojson }};
     console.log('dashboard.js: block loaded');
     document.addEventListener('DOMContentLoaded', function() {
         console.log('dashboard.js: DOMContentLoaded fired');
@@ -967,7 +1215,7 @@ endblock %} {% block content %}
         const url = type === 'anomaly' ? '/dashboard/ml/anomaly-feedback' : '/dashboard/ml/burnout-feedback';
         fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+            headers: csrfHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ id: id, verdict: verdict })
         }).then(r => {
             if (r.ok) showToast(verdict === 'confirmed' ? 'Verified as ' + type : 'Dismissed ' + type, 'success');
@@ -980,7 +1228,7 @@ endblock %} {% block content %}
         const url = model === 'federated' ? '/dashboard/ml/federated-train' : '/dashboard/ml/retrain';
         fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+            headers: csrfHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ model: model })
         }).then(r => {
             if (r.ok) {
@@ -994,20 +1242,6 @@ endblock %} {% block content %}
         });
     }
 
-    function getCookie(name) {
-        let cookieValue = null;
-        if (document.cookie && document.cookie !== '') {
-            const cookies = document.cookie.split(';');
-            for (let i = 0; i < cookies.length; i++) {
-                const cookie = cookies[i].trim();
-                if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                    break;
-                }
-            }
-        }
-        return cookieValue;
-    }
 
     // --- Live data polling ---
     let refreshTimer;
@@ -1017,10 +1251,11 @@ endblock %} {% block content %}
             .then(data => {
                 document.querySelectorAll('[data-live="total_members"]').forEach(el => el.textContent = data.total_members_tracked);
                 if (data.total_online_pct) document.querySelectorAll('[data-live="total_online_pct"]').forEach(el => el.textContent = data.total_online_pct + '%');
-                if (data.guilds) {
+                if (data.guild_online_map) {
                     document.querySelectorAll('[data-live="guild_online"]').forEach(el => {
                         const gid = el.dataset.guildId;
-                        if (data.guilds[gid]) el.textContent = data.guilds[gid] + ' online';
+                        const online = data.guild_online_map[gid] ?? 0;
+                        el.textContent = online + ' online';
                     });
                 }
             }).catch(console.warn);
@@ -1043,21 +1278,21 @@ endblock %} {% block content %}
                 const compareLabels = Array.from({length: 24}, (_, i) => i.toString().padStart(2,'0') + ':00');
                 const compareDatasets = [];
                 const guildColors = [
-                    { border: '#155e75', bg: 'rgba(21, 94, 117, 0.08)' },
-                    { border: '#38bdf8', bg: 'rgba(56, 189, 248, 0.08)' },
-                    { border: '#d97706', bg: 'rgba(217, 119, 6, 0.08)' },
-                    { border: '#059669', bg: 'rgba(5, 150, 105, 0.08)' },
-                    { border: '#64748b', bg: 'rgba(100, 116, 139, 0.08)' },
-                    { border: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.08)' },
-                    { border: '#dc2626', bg: 'rgba(220, 38, 38, 0.08)' },
-                    { border: '#3b82f6', bg: 'rgba(59, 130, 246, 0.08)' },
+                    { border: '#155e75', bg: 'rgba(21, 94, 117, 0.10)' },
+                    { border: '#0e7490', bg: 'rgba(14, 116, 144, 0.10)' },
+                    { border: '#d97706', bg: 'rgba(217, 119, 6, 0.10)'  },
+                    { border: '#059669', bg: 'rgba(5, 150, 105, 0.10)'  },
+                    { border: '#7c3aed', bg: 'rgba(124, 58, 237, 0.10)' },
+                    { border: '#dc2626', bg: 'rgba(220, 38, 38, 0.10)'  },
+                    { border: '#64748b', bg: 'rgba(100, 116, 139, 0.10)'},
+                    { border: '#0284c7', bg: 'rgba(2, 132, 199, 0.10)'  },
                 ];
                 {% for guild_id, data in guild_hourly.items() %}
-                const shifted_{{guild_id}} = shiftHourly({{data|tojson}});
+                const shifted_{{ loop.index0 }} = shiftHourly({{data|tojson}});
                 const gc = guildColors[{{ loop.index0 }} % guildColors.length];
                 compareDatasets.push({
-                    label: '{{guild_names_map[guild_id] if guild_id in guild_names_map else guild_id[:8]}}',
-                    data: compareLabels.map((_,i) => shifted_{{guild_id}}[i] || 0),
+                    label: {{ (guild_names_map[guild_id] if guild_id in guild_names_map else guild_id[:8]) | tojson }},
+                    data: compareLabels.map((_,i) => shifted_{{ loop.index0 }}[i] || 0),
                     tension: 0.35,
                     borderColor: gc.border,
                     backgroundColor: gc.bg,
@@ -1085,7 +1320,7 @@ endblock %} {% block content %}
                         type: 'doughnut',
                         data: {
                             labels: ['Community', 'Staff'],
-                            datasets: [{ data: [{{ community_messages_total if community_messages_total else 0 }}, {{ staff_messages_total if staff_messages_total else 0 }}], backgroundColor: ['rgba(59,130,246,0.65)', 'rgba(16,185,129,0.65)'], borderColor: '#ffffff', borderWidth: 2 }]
+                            datasets: [{ data: [{{ community_messages_total if community_messages_total else 0 }}, {{ staff_messages_total if staff_messages_total else 0 }}], backgroundColor: ['rgba(59,130,246,0.65)', 'rgba(16,185,129,0.65)'], borderColor: 'var(--surface-strong)', borderWidth: 2 }]
                         },
                         options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 8 } } } }
                     });
@@ -1099,7 +1334,7 @@ endblock %} {% block content %}
                         type: 'doughnut',
                         data: {
                             labels: ['Discord', 'System', 'Jira', 'Manual', 'Other'],
-                            datasets: [{ data: [{{ source_msg_pct if source_msg_pct else 0 }}, {{ source_voice_pct if source_voice_pct else 0 }}, {{ source_mod_pct if source_mod_pct else 0 }}, {{ source_task_pct if source_task_pct else 0 }}, {{ source_manual_pct if source_manual_pct else 0 }}], backgroundColor: ['rgba(59,130,246,0.65)', 'rgba(16,185,129,0.65)', 'rgba(239,68,68,0.65)', 'rgba(245,158,11,0.65)', 'rgba(132,88,179,0.65)'], borderColor: '#ffffff', borderWidth: 2 }]
+                            datasets: [{ data: [{{ source_msg_pct if source_msg_pct else 0 }}, {{ source_voice_pct if source_voice_pct else 0 }}, {{ source_mod_pct if source_mod_pct else 0 }}, {{ source_task_pct if source_task_pct else 0 }}, {{ source_manual_pct if source_manual_pct else 0 }}], backgroundColor: ['rgba(59,130,246,0.65)', 'rgba(16,185,129,0.65)', 'rgba(239,68,68,0.65)', 'rgba(245,158,11,0.65)', 'rgba(132,88,179,0.65)'], borderColor: 'var(--surface-strong)', borderWidth: 2 }]
                         },
                         options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 6, padding: 4 } } } }
                     });
@@ -1159,21 +1394,14 @@ endblock %} {% block content %}
                     darkChart(fedCtx, {
                         type: 'line',
                         data: {
-                            labels: {{ ml_status.federated.history|map(attribute='round')|list|tojson }},
-                            datasets: [{ label: 'Global Accuracy', data: {{ ml_status.federated.history|map(attribute='mean_global_accuracy')|map('multiply',100)|list|tojson }}, borderColor: 'rgba(59,130,246,0.8)', tension: 0.35, pointRadius: 1 }]
+                            labels: {{ ml_status.federated.history_rounds|tojson }},
+                            datasets: [{ label: 'Global Accuracy', data: {{ ml_status.federated.history_accuracy_pct|tojson }}, borderColor: 'rgba(59,130,246,0.8)', tension: 0.35, pointRadius: 1 }]
                         },
                         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { suggestedMin: 80, suggestedMax: 100, ticks: { callback: value => value + '%' } } } }
                     });
                     {% endif %}
                 }
             } catch(e) { console.warn('fedChart error:', e); }
-        // Chart.js availability check
-        if (typeof Chart === 'undefined') {
-            const warn = document.createElement('div');
-            warn.style.cssText = 'position:fixed;bottom:10px;right:10px;background:#1a1a2e;color:#ffd700;padding:12px 16px;border-radius:8px;font-size:12px;z-index:9999;border:1px solid #ffd700;';
-            warn.innerHTML = '<strong>Chart.js not loaded!</strong><br>CDN may be blocked or slow.';
-            document.body.appendChild(warn);
-        }
 
         // Start live refresh
         refreshOnlineCounts();
