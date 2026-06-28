@@ -68,7 +68,7 @@
                 <th>Score</th>
                 <th>Joined</th>
                 <th>Last Login</th>
-</th>                <th</th> style="width:160px">Actions</th>
+                <th style="width:160px">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -99,7 +99,7 @@
                   {% endif %}
                 </td>
                 <td>
-                  {% if md.score</td> is not none %}
+                  {% if md.score is not none %}
                   <a href="{{ url_for('workspace.workspace_worker_summary', worker_id=md.worker.id) if md.worker else '#' }}" style="text-decoration:none;font-weight:700;{% if md.score > 0 %}color:var(--green){% elif md.score < 0 %}color:var(--red){% else %}color:var(--text-muted){% endif %}">{{ "%+.1f"|format(md.score) }}</a>
                   {% else %}
                   <span style="color:var(--text-muted)">—</span>
@@ -107,7 +107,7 @@
                 </td>
                 <td><span data-utc="{{ md.member.created_at.isoformat() }}">{{ md.member.created_at }}</span></td>
                 <td>
-                  {% if md.member.</td>last_login %}
+                  {% if md.member.last_login %}
                   <span data-utc="{{ md.member.last_login.isoformat() }}">{{ md.member.last_login }}</span>
                   {% else %}
                   <span style="color:var(--text-muted)">Never</span>
@@ -115,7 +115,7 @@
                 </td>
                 <td>
                   <div class="ws-flex gap-8">
-                    <select class="</td>ws-select" style="width:90px;padding:4px 8px;font-size:11px" onchange="changeRole({{ md.member.id }}, this.value)" {% if md.member.id == current_member_id %}disabled{% endif %}>
+                    <select class="ws-select" style="width:90px;padding:4px 8px;font-size:11px" onchange="changeRole({{ md.member.id }}, this.value)" {% if md.member.id == current_member_id %}disabled{% endif %}>
                       <option value="member" {% if md.member.role == 'member' %}selected{% endif %}>member</option>
                       <option value="hr" {% if md.member.role == 'hr' %}selected{% endif %}>hr</option>
                       <option value="admin" {% if md.member.role == 'admin' %}selected{% endif %}>admin</option>

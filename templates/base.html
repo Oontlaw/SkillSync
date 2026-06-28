@@ -7,23 +7,15 @@
         <script src="{{ url_for('static', filename='chart.umd.min.js') }}"></script>
         <style>
             @font-face {
-                font-family: "Cal Sans UI";
-                src: url('{{ url_for("static", filename="fonts/CalSansUI.woff2") }}')
-                    format("woff2-variations");
-                font-weight: 300 700;
-                font-style: normal;
-                font-display: swap;
-            }
-            @font-face {
                 font-family: "Inter";
-                src: url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+                src: local('Inter'), url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
                 font-weight: 400 700;
                 font-style: normal;
                 font-display: swap;
             }
             @font-face {
                 font-family: "Syne";
-                src: url("https://fonts.googleapis.com/css2?family=Syne:wght@400;700&display=swap");
+                src: local('Syne'), url("https://fonts.googleapis.com/css2?family=Syne:wght@400;700&display=swap");
                 font-weight: 400 700;
                 font-style: normal;
                 font-display: swap;

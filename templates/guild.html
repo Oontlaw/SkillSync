@@ -407,6 +407,7 @@
 
 {% endblock %} {% block scripts %}
 <script>
+document.addEventListener('DOMContentLoaded', function() {
     try {
         const gc = document.getElementById('guildCompositionChart');
         if (gc) darkChart(gc, { type: 'doughnut', data: { labels: ['Online', 'Offline', 'Observed'], datasets: [{ data: [{{ online_count }}, {{ tracked_offline }}, {{ tracked_chatted }}], backgroundColor: ['rgba(16,185,129,0.7)', 'rgba(75,85,99,0.5)', 'rgba(59,130,246,0.5)'], borderColor: 'var(--bg-card)', borderWidth: 2 }] }, options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 8 } } } } });
@@ -472,7 +473,38 @@
       } });
     })();
     {% endif %}
-    
+
+    {% if guild_voice_hourly %}
+    (function() {
+      const el = document.getElementById('guildVoiceHourlyChart');
+      if (!el) return;
+      const vh = shiftHourly({{ guild_voice_hourly | tojson }});
+      const h = Array.from({length:24},(_,i)=>`${i}:00`);
+      const d = h.map((_,i) => vh[i] || 0);
+      darkChart(el, {
+        type: 'bar',
+        data: {
+          labels: h,
+          datasets: [{
+            label: 'Voice Sessions',
+            data: d,
+            backgroundColor: 'rgba(139,92,246,0.5)',
+            borderColor: '#8b5cf6',
+            borderWidth: 1,
+            borderRadius: 3,
+          }]
+        },
+        options: {
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { maxTicksLimit: 12, font: { family: font } } },
+            y: { beginAtZero: true, ticks: { font: { family: font } } }
+          }
+        }
+      });
+    })();
+    {% endif %}
+
     {% if guild_voice_sessions > 0 %}
     (function() {
       const el = document.getElementById('guildVoiceHourlyChart'); if (!el) return;
@@ -481,5 +513,6 @@
       darkChart(el, { type: 'bar', data: { labels: h, datasets: [{ label: 'Sessions', data: h.map((_,i)=>vh[i]||0), backgroundColor: 'rgba(16,185,129,0.45)', borderColor: '#10b981', borderWidth: 1, borderRadius: 2 }] }, options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 8, font: { size: 9, family: font } } }, y: { beginAtZero: true, ticks: { font: { size: 9, family: font } } } } } });
     })();
     {% endif %}
+});
 </script>
 {% endblock %}

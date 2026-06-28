@@ -1,46 +1,70 @@
 /* SkillSync Overhauled Dashboard CSS */
 :root {
-    --bg-primary: #F4F3EF;          /* page background (warm white tint) */
-    --bg-sidebar: #171820;          /* near-black for sidebar */
-    --bg-card: #FFFFFF;             /* light surface card background */
-    --bg-panel-dark: #171820;       /* near-black panel surface */
-    --bg-panel-slate: #494D5F;      /* dark slate surface */
+    /* Dark Mist + Petrol Cyan Theme */
+    --page-bg: #eef3f6;              /* main page background - light slate/mist */
+    --page-bg-2: #e7eef3;            /* slightly darker for depth */
+    --surface: #fbfcfd;              /* near-white cards */
+    --surface-strong: #ffffff;       /* white cards */
+    --surface-soft: #f8fbfc;         /* very light cyan for soft accents */
+    --border: #d7e0e7;               /* soft slate border */
+    --border-soft: #e5ebf0;          /* softer border for tables */
+    --text-main: #111827;            /* very dark text */
+    --text-muted: #5b6878;           /* slate gray */
+    --text-soft: #7a8796;            /* softer text for secondary elements */
+    --accent: #155e75;               /* petrol cyan primary accent */
+    --accent-2: #0e7490;              /* darker petrol cyan for secondary accent */
+    --accent-soft: #e6f8fb;          /* light cyan for soft accents */
+    --accent-border: #b8e8f0;        /* darker cyan for borders */
+    --sidebar-bg: #111820;           /* keep dark sidebar */
+    --sidebar-active: #252c36;       /* keep sidebar active state */
+    --warning: #d97706;              /* amber warning */
+    --warning-soft: #fff7ed;         /* soft cream for warning panel */
+    --danger: #dc2626;               /* red danger */
+    --success: #059669;              /* green success */
     
-    --text-primary: #111111;        /* primary dark text */
-    --text-secondary: #494D5F;      /* slate secondary text */
-    --text-dim: #6B6F7A;            /* muted slate-gray text */
-    --text-muted: #8A8F9A;
-    --text-on-dark: #F4F4F4;        /* high contrast light text for dark panels */
-    
-    --accent-primary: #8458B3;      /* purple accent */
-    --accent-secondary: #A0D2EB;    /* soft blue */
-    --accent-tertiary: #D0BDF4;     /* soft lavender */
-    
-    --border-primary: #E2E8F0;      /* subtle light border */
-    --border-secondary: #CBD5E1;
-    --border-dark: #2D313E;         /* subtle dark panel border */
-    
-    --green: #10B981;
+    /* Chart colors based on palette */
+    --green: #10b981;
     --green-bg: rgba(16, 185, 129, 0.1);
-    --red: #EF4444;
+    --red: #ef4444;
     --red-bg: rgba(239, 68, 68, 0.1);
-    --orange: #F59E0B;
+    --orange: #f59e0b;
     --orange-bg: rgba(245, 158, 11, 0.1);
-    --blue: #3B82F6;
+    --blue: #3b82f6;
     --blue-bg: rgba(59, 130, 246, 0.1);
-    --purple: #8B5CF6;
+    --purple: #8b5cf6;
     --purple-bg: rgba(139, 92, 246, 0.1);
-    --cyan: #22D3EE;
+    --cyan: #22d3ee;
     --cyan-bg: rgba(34, 211, 238, 0.1);
+
+    --chart-petrol-cyan: #155e75;    /* petrol cyan */
+    --chart-cyan: #38bdf8;          /* cyan */
+    --chart-slate: #64748b;         /* slate */
+    --chart-amber: #d97706;         /* amber (updated from #f59e0b) */
+    --chart-green: #059669;         /* green (updated from #10b981) */
+    --chart-red: #dc2626;            /* red (updated from #ef4444) */
     
-    --font-primary: "Inter", sans-serif;
-    --font-secondary: "Syne", sans-serif;
-    
-    --radius-sm: 4px;
-    --radius-md: 8px;
-    
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.04);
+    /* Additional CSS variables for backward compatibility */
+    --bg-primary: var(--page-bg);
+    --bg-card: var(--surface);
+    --bg-sidebar: var(--sidebar-bg);
+    --text-primary: var(--text-main);
+    --text-secondary: var(--text-muted);
+    --text-dim: #8A9BAB;
+    --accent-primary: var(--accent);
+    --accent-secondary: var(--accent-soft);
+    --border-primary: var(--border);
+    --border-secondary: #c4d1e0;
+    --border-dark: var(--sidebar-active);
+    --text-on-dark: #ffffff;
+    --font-primary: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-secondary: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --shadow-sm: 0 10px 24px rgba(15, 23, 42, 0.06);
+    --shadow-md: 0 12px 28px rgba(15, 23, 42, 0.08);
+    --shadow-lg: 0 16px 40px rgba(15, 23, 42, 0.1);
 }
 
 /* Base Styles */
@@ -49,12 +73,18 @@
 }
 
 body {
-    font-family: var(--font-primary);
-    background-color: var(--bg-primary);
-    color: var(--text-primary);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background-color: var(--page-bg);
+    background-image:
+        radial-gradient(circle at 12% 0%, rgba(15, 23, 42, 0.08), transparent 32rem),
+        radial-gradient(circle at 88% 6%, rgba(21, 94, 117, 0.08), transparent 34rem),
+        linear-gradient(180deg, #eef3f6 0%, #e7eef3 45%, #f7f8f8 100%);
+    color: var(--text-main);
     margin: 0;
     padding: 0;
     line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -100,7 +130,7 @@ a {
     display: flex;
     align-items: center;
     padding: 10px 16px;
-    color: var(--text-muted);
+    color: var(--text-soft);
     font-size: 13px;
     font-weight: 500;
     text-decoration: none;
@@ -115,7 +145,7 @@ a {
 }
 
 .sidebar .nav-link.active {
-    background-color: rgba(255, 255, 255, 0.08);
+    background-color: rgba(21, 94, 117, 0.15);
     color: var(--text-on-dark);
     font-weight: 600;
 }
@@ -183,7 +213,7 @@ a {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    color: var(--accent-primary);
+    color: var(--accent-2);
     margin-bottom: 6px;
 }
 
@@ -207,23 +237,6 @@ a {
     grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
     gap: 16px;
     margin-bottom: 24px;
-}
-
-.stat-card, .ws-stat {
-    background-color: var(--bg-card);
-    border: 1px solid var(--border-primary);
-    border-radius: var(--radius-md);
-    padding: 20px 24px;
-    box-shadow: var(--shadow-sm);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.stat-card:hover, .ws-stat:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md);
 }
 
 .stat-value, .ws-stat-value {
@@ -260,13 +273,31 @@ a {
 
 /* Cards & Panels */
 .ws-card, .card {
-    background-color: var(--bg-card);
-    border: 1px solid var(--border-primary);
-    border-radius: var(--radius-md);
+    background-color: var(--surface-strong);
+    border: 1px solid var(--border);
+    border-radius: 10px;
     padding: 24px;
     margin-bottom: 20px;
-    box-shadow: var(--shadow-sm);
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
     position: relative;
+    transition: all 0.2s ease;
+}
+
+/* Stat cards with subtle petrol-cyan top border */
+.stat-card, .ws-stat {
+    background-color: var(--surface-strong);
+    border: 1px solid var(--border);
+    border-top: 2px solid rgba(14, 116, 144, 0.45);
+    border-radius: 10px 12px;
+    padding: 20px 24px;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+    transition: all 0.2s ease;
+}
+
+.ws-card:hover, .card:hover, .stat-card:hover, .ws-stat:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+    border-color: var(--border-soft);
 }
 
 /* Custom dark slate & near-black card styles */
@@ -283,11 +314,17 @@ a {
 }
 
 .card-dark .card-title, 
-.card-dark .ws-card-t,
-.ws-card-dark .card-title,
-.card-slate .card-title,
-.ws-card-slate .card-title {
+    .card-dark .ws-card-t,
+    .ws-card-dark .card-title,
+    .card-slate .card-title,
+    .ws-card-slate .card-title {
     color: var(--text-on-dark);
+}
+
+.card-light .card-title,
+.card-light .ws-card-t,
+.ws-card-light .card-title {
+    color: var(--text-main);
 }
 
 .card-header, .ws-card-h {
@@ -329,19 +366,19 @@ a {
     letter-spacing: 0.08em;
     color: var(--text-dim);
     padding: 10px 14px;
-    border-bottom: 1.5px solid var(--border-primary);
-    background-color: transparent;
+    border-bottom: 1.5px solid var(--border-soft);
+    background-color: var(--surface-soft);
 }
 
 .ws-table td, table td {
     padding: 12px 14px;
     font-size: 13px;
     color: var(--text-secondary);
-    border-bottom: 1px solid var(--border-primary);
+    border-bottom: 1px solid var(--border-soft);
 }
 
 .ws-table tr:hover, table tr:hover {
-    background-color: rgba(0, 0, 0, 0.015);
+    background-color: #f3f7f9;
 }
 
 .card-dark .ws-table th, .card-dark table th {
@@ -384,6 +421,7 @@ a {
     position: relative;
     width: 100%;
     margin-bottom: 16px;
+    min-height: 80px;
 }
 
 .chart-container {
@@ -459,9 +497,9 @@ a {
 
 /* Precision & Performance Badges */
 .precision-badge {
-    background-color: rgba(132, 88, 179, 0.08);
-    border: 1px solid rgba(132, 88, 179, 0.15);
-    color: var(--accent-primary);
+    background-color: var(--accent-soft);
+    border: 1px solid var(--accent-border);
+    color: var(--accent);
     padding: 2px 6px;
     border-radius: var(--radius-sm);
     font-size: 11px;
@@ -625,6 +663,59 @@ a {
 
 .ws-feed-item:last-child {
     border-bottom: none;
+}
+
+/* Burnout Cards */
+.burnout-card, .ws-burnout-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background-color: var(--surface-soft);
+    margin-bottom: 10px;
+    transition: all 0.15s ease;
+}
+
+.burnout-card:hover, .ws-burnout-card:hover {
+    border-color: var(--accent-border);
+}
+
+.burnout-score, .ws-burnout-score {
+    font-family: var(--font-secondary);
+    font-size: 20px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.burnout-score.high, .ws-burnout-score.high {
+    color: var(--danger);
+}
+
+.burnout-score.med, .ws-burnout-score.med {
+    color: var(--warning);
+}
+
+.burnout-score.low, .ws-burnout-score.low {
+    color: var(--success);
+}
+
+.burnout-name, .ws-burnout-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.burnout-confirmed, .ws-burnout-confirmed {
+    color: var(--success);
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.burnout-dismissed, .ws-burnout-dismissed {
+    color: var(--text-dim);
+    font-size: 11px;
 }
 
 .ws-dot {

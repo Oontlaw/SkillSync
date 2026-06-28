@@ -3,24 +3,21 @@ endblock %} {% block content %}
 
 <div
     id="tzDebug"
-    style="padding: 0 0 12px; font-size: 11px; color: var(--text-dim)"
+    style="padding: 0 0 12px; font-size: 11px; color: var(--text-muted)"
 ></div>
 
 {% if health_drift_detected %}
-<div class="drift-banner">
-    <div class="drift-banner-icon">⚠️</div>
-    <div class="drift-banner-content">
-        <div class="drift-banner-title">Model Drift Detected</div>
-        <div class="drift-banner-reason">
+<div class="drift-banner" style="background: var(--warning-soft); border: 1px solid #fed7aa; border-radius: 10px; padding: 16px 20px; display: flex; align-items: flex-start; gap: 16px; margin-bottom: 24px;">
+    <div class="drift-banner-icon" style="font-size: 20px; line-height: 1;">⚠️</div>
+    <div class="drift-banner-content" style="flex: 1;">
+        <div class="drift-banner-title" style="font-family: var(--font-secondary); font-weight: 700; font-size: 14px; color: #b45309; margin-bottom: 4px;">Model Drift Detected</div>
+        <div class="drift-banner-reason" style="font-size: 12px; color: var(--text-secondary);">
             {% for reason in health_drift_reasons %}
             <span>• {{ reason }} </span>
             {% endfor %}
         </div>
-        <div
-            style="font-size: 11px; color: var(--text-dim); margin-top: 4px;"
-        >
-            Auto-retrain will trigger on next heartbeat, or click
-            <strong>Retrain All</strong> below.
+        <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">
+            Auto-retrain will trigger on next heartbeat, or click <strong>Retrain All</strong> below.
         </div>
     </div>
 </div>
@@ -31,9 +28,7 @@ endblock %} {% block content %}
     <div class="section-header">
         <div class="section-eyebrow">Overview</div>
         <h1 class="dashboard-title">Dashboard</h1>
-        <p class="dashboard-subtitle">
-            Workforce intelligence for your Discord communities.
-        </p>
+        <p class="dashboard-subtitle">Workforce intelligence for your Discord communities.</p>
     </div>
 
     <!-- Stats Grid -->
@@ -147,11 +142,6 @@ endblock %} {% block content %}
                                 >
                                     ✗
                                 </button>
-                                {% else %}
-                                <span
-                                    style="color: var(--text-dim); font-size: 11px"
-                                    >—</span
-                                >
                                 {% endif %}
                             </td>
                             <td style="color: var(--text-dim); font-size: 12px">
@@ -190,7 +180,7 @@ endblock %} {% block content %}
                         padding: 12px 14px;
                         border: 1px solid var(--border-primary);
                         border-radius: var(--radius-md);
-                        background-color: var(--bg-primary);
+                        background-color: var(--surface-soft);
                     "
                 >
                     <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
@@ -964,6 +954,13 @@ endblock %} {% block content %}
 {% endblock %} {% block scripts %}
 
 <script>
+    console.log('dashboard.js: block loaded');
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('dashboard.js: DOMContentLoaded fired');
+        var dbgEl = document.getElementById('tzDebug');
+        if (dbgEl) dbgEl.textContent += ' | charts init: starting';
+    });
+
     // --- Keep all existing JS functions ---
 
     function feedback(type, id, verdict, btn) {
@@ -1039,20 +1036,31 @@ endblock %} {% block content %}
             return;
         }
         // Initialize charts here just like original
+        {% if guild_hourly and guild_hourly.keys()|length > 0 %}
         try {
-            {% if guild_hourly and guild_hourly.keys()|length > 0 %}
             const compareCtx = document.getElementById('compareChart');
             if (compareCtx) {
                 const compareLabels = Array.from({length: 24}, (_, i) => i.toString().padStart(2,'0') + ':00');
                 const compareDatasets = [];
+                const guildColors = [
+                    { border: '#155e75', bg: 'rgba(21, 94, 117, 0.08)' },
+                    { border: '#38bdf8', bg: 'rgba(56, 189, 248, 0.08)' },
+                    { border: '#d97706', bg: 'rgba(217, 119, 6, 0.08)' },
+                    { border: '#059669', bg: 'rgba(5, 150, 105, 0.08)' },
+                    { border: '#64748b', bg: 'rgba(100, 116, 139, 0.08)' },
+                    { border: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.08)' },
+                    { border: '#dc2626', bg: 'rgba(220, 38, 38, 0.08)' },
+                    { border: '#3b82f6', bg: 'rgba(59, 130, 246, 0.08)' },
+                ];
                 {% for guild_id, data in guild_hourly.items() %}
                 const shifted_{{guild_id}} = shiftHourly({{data|tojson}});
+                const gc = guildColors[{{ loop.index0 }} % guildColors.length];
                 compareDatasets.push({
                     label: '{{guild_names_map[guild_id] if guild_id in guild_names_map else guild_id[:8]}}',
                     data: compareLabels.map((_,i) => shifted_{{guild_id}}[i] || 0),
                     tension: 0.35,
-                    borderColor: 'rgba(132, 88, 179, ' + (0.4 + 0.6 / ({{ loop.length }}) * {{ loop.index0 }}) + ')',
-                    backgroundColor: 'rgba(132, 88, 179, 0.02)',
+                    borderColor: gc.border,
+                    backgroundColor: gc.bg,
                     fill: false,
                     pointRadius: 1
                 });
@@ -1067,93 +1075,98 @@ endblock %} {% block content %}
                     }
                 });
             }
-            {% endif %}
+        } catch(e) { console.warn('compareChart error:', e); }
+        {% endif %}
 
-            const staffCtx = document.getElementById('staffChart');
-            if (staffCtx) {
-                darkChart(staffCtx, {
-                    type: 'doughnut',
-                    data: {
-                        labels: ['Community', 'Staff'],
-                        datasets: [{ data: [{{ community_messages_total if community_messages_total else 0 }}, {{ staff_messages_total if staff_messages_total else 0 }}], backgroundColor: ['rgba(59,130,246,0.65)', 'rgba(16,185,129,0.65)'], borderColor: 'var(--bg-card)', borderWidth: 2 }]
-                    },
-                    options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 8 } } } }
-                });
-            }
+            try {
+                const staffCtx = document.getElementById('staffChart');
+                if (staffCtx) {
+                    darkChart(staffCtx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: ['Community', 'Staff'],
+                            datasets: [{ data: [{{ community_messages_total if community_messages_total else 0 }}, {{ staff_messages_total if staff_messages_total else 0 }}], backgroundColor: ['rgba(59,130,246,0.65)', 'rgba(16,185,129,0.65)'], borderColor: '#ffffff', borderWidth: 2 }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 8 } } } }
+                    });
+                }
+            } catch(e) { console.warn('staffChart error:', e); }
 
-            const sourcesCtx = document.getElementById('sourcesChart');
-            if (sourcesCtx) {
-                darkChart(sourcesCtx, {
-                    type: 'doughnut',
-                    data: {
-                        labels: ['Discord', 'System', 'Jira', 'Manual', 'Other'],
-                        datasets: [{ data: [{{ source_msg_pct if source_msg_pct else 0 }}, {{ source_voice_pct if source_voice_pct else 0 }}, {{ source_mod_pct if source_mod_pct else 0 }}, {{ source_task_pct if source_task_pct else 0 }}, {{ source_manual_pct if source_manual_pct else 0 }}], backgroundColor: ['rgba(59,130,246,0.65)', 'rgba(16,185,129,0.65)', 'rgba(239,68,68,0.65)', 'rgba(245,158,11,0.65)', 'rgba(132,88,179,0.65)'], borderColor: 'var(--bg-card)', borderWidth: 2 }]
-                    },
-                    options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 6, padding: 4 } } } }
-                });
-            }
+            try {
+                const sourcesCtx = document.getElementById('sourcesChart');
+                if (sourcesCtx) {
+                    darkChart(sourcesCtx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: ['Discord', 'System', 'Jira', 'Manual', 'Other'],
+                            datasets: [{ data: [{{ source_msg_pct if source_msg_pct else 0 }}, {{ source_voice_pct if source_voice_pct else 0 }}, {{ source_mod_pct if source_mod_pct else 0 }}, {{ source_task_pct if source_task_pct else 0 }}, {{ source_manual_pct if source_manual_pct else 0 }}], backgroundColor: ['rgba(59,130,246,0.65)', 'rgba(16,185,129,0.65)', 'rgba(239,68,68,0.65)', 'rgba(245,158,11,0.65)', 'rgba(132,88,179,0.65)'], borderColor: '#ffffff', borderWidth: 2 }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 6, padding: 4 } } } }
+                    });
+                }
+            } catch(e) { console.warn('sourcesChart error:', e); }
 
-            const hourlyCtx = document.getElementById('hourlyChart');
-            if (hourlyCtx) {
-                const shiftedHourly = shiftHourly({{ hourly_activity|tojson }});
-                darkChart(hourlyCtx, {
-                    type: 'bar',
-                    data: {
-                        labels: Array.from({length:24}, (_,i) => i.toString().padStart(2,'0') + ':00'),
-                        datasets: [{ label: 'Messages', data: Array.from({length:24}, (_,i) => shiftedHourly[i] || 0), backgroundColor: 'rgba(59,130,246,0.5)', borderColor: 'rgba(59,130,246,0.7)', borderRadius: 2 }]
-                    },
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } } } }
-                });
-            }
+            try {
+                const hourlyCtx = document.getElementById('hourlyChart');
+                if (hourlyCtx) {
+                    const shiftedHourly = shiftHourly({{ hourly_activity|tojson }});
+                    darkChart(hourlyCtx, {
+                        type: 'bar',
+                        data: {
+                            labels: Array.from({length:24}, (_,i) => i.toString().padStart(2,'0') + ':00'),
+                            datasets: [{ label: 'Messages', data: Array.from({length:24}, (_,i) => shiftedHourly[i] || 0), backgroundColor: 'rgba(59,130,246,0.5)', borderColor: 'rgba(59,130,246,0.7)', borderRadius: 2 }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } } } }
+                    });
+                }
+            } catch(e) { console.warn('hourlyChart error:', e); }
 
-            const volumeCtx = document.getElementById('volumeChart');
-            if (volumeCtx) {
-                darkChart(volumeCtx, {
-                    type: 'line',
-                    data: {
-                        labels: {{ daily_volume_dates|tojson }},
-                        datasets: [{ label: 'Messages', data: {{ daily_volume_counts|tojson }}, tension: 0.35, fill: true, backgroundColor: 'rgba(59,130,246,0.03)', borderColor: 'rgba(59,130,246,0.7)', pointRadius: 2 }]
-                    },
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-                });
-            }
+            try {
+                const volumeCtx = document.getElementById('volumeChart');
+                if (volumeCtx) {
+                    darkChart(volumeCtx, {
+                        type: 'line',
+                        data: {
+                            labels: {{ daily_volume_dates|tojson }},
+                            datasets: [{ label: 'Messages', data: {{ daily_volume_counts|tojson }}, tension: 0.35, fill: true, backgroundColor: 'rgba(59,130,246,0.03)', borderColor: 'rgba(59,130,246,0.7)', pointRadius: 2 }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                    });
+                }
+            } catch(e) { console.warn('volumeChart error:', e); }
 
-            const growthCtx = document.getElementById('growthChart');
-            if (growthCtx) {
-                darkChart(growthCtx, {
-                    type: 'line',
-                    data: {
-                        labels: {{ daily_growth_dates|tojson }},
-                        datasets: [
-                            { label: 'Joins', data: {{ daily_joins|tojson }}, borderColor: 'rgba(16,185,129,0.8)', backgroundColor: 'rgba(16,185,129,0.05)', tension: 0.35, fill: false, pointRadius: 1 },
-                            { label: 'Leaves', data: {{ daily_leaves|tojson }}, borderColor: 'rgba(239,68,68,0.8)', backgroundColor: 'rgba(239,68,68,0.05)', tension: 0.35, fill: false, pointRadius: 1 }
-                        ]
-                    },
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 8 } } } }
-                });
-            }
+            try {
+                const growthCtx = document.getElementById('growthChart');
+                if (growthCtx) {
+                    darkChart(growthCtx, {
+                        type: 'line',
+                        data: {
+                            labels: {{ daily_growth_dates|tojson }},
+                            datasets: [
+                                { label: 'Joins', data: {{ daily_joins|tojson }}, borderColor: 'rgba(16,185,129,0.8)', backgroundColor: 'rgba(16,185,129,0.05)', tension: 0.35, fill: false, pointRadius: 1 },
+                                { label: 'Leaves', data: {{ daily_leaves|tojson }}, borderColor: 'rgba(239,68,68,0.8)', backgroundColor: 'rgba(239,68,68,0.05)', tension: 0.35, fill: false, pointRadius: 1 }
+                            ]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 8 } } } }
+                    });
+                }
+            } catch(e) { console.warn('growthChart error:', e); }
 
-            const fedCtx = document.getElementById('fedChart');
-            if (fedCtx && fedCtx.parentElement.style.display !== 'none') {
-                {% if ml_status and ml_status.get('federated') and ml_status.federated.get('history') %}
-                darkChart(fedCtx, {
-                    type: 'line',
-                    data: {
-                        labels: {{ ml_status.federated.history|map(attribute='round')|list|tojson }},
-                        datasets: [{ label: 'Global Accuracy', data: {{ ml_status.federated.history|map(attribute='mean_global_accuracy')|map('multiply',100)|list|tojson }}, borderColor: 'rgba(59,130,246,0.8)', tension: 0.35, pointRadius: 1 }]
-                    },
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { suggestedMin: 80, suggestedMax: 100, ticks: { callback: value => value + '%' } } } }
-                });
-                {% endif %}
-            }
-        } catch (e) {
-            console.error('Charts not initialized:', e);
-            // Show inline diagnostic
-            const dbg = document.createElement('div');
-            dbg.style.cssText = 'position:fixed;bottom:10px;right:10px;background:#1a1a2e;color:#ff6b6b;padding:12px 16px;border-radius:8px;font-size:12px;max-width:400px;z-index:9999;border:1px solid #ff6b6b;';
-            dbg.innerHTML = '<strong>Chart Error:</strong><br>' + e.message + '<br><small>typeof Chart: ' + typeof Chart + '</small>';
-            document.body.appendChild(dbg);
-        }
+            try {
+                const fedCtx = document.getElementById('fedChart');
+                if (fedCtx && fedCtx.parentElement.style.display !== 'none') {
+                    {% if ml_status and ml_status.get('federated') and ml_status.federated.get('history') %}
+                    darkChart(fedCtx, {
+                        type: 'line',
+                        data: {
+                            labels: {{ ml_status.federated.history|map(attribute='round')|list|tojson }},
+                            datasets: [{ label: 'Global Accuracy', data: {{ ml_status.federated.history|map(attribute='mean_global_accuracy')|map('multiply',100)|list|tojson }}, borderColor: 'rgba(59,130,246,0.8)', tension: 0.35, pointRadius: 1 }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { suggestedMin: 80, suggestedMax: 100, ticks: { callback: value => value + '%' } } } }
+                    });
+                    {% endif %}
+                }
+            } catch(e) { console.warn('fedChart error:', e); }
         // Chart.js availability check
         if (typeof Chart === 'undefined') {
             const warn = document.createElement('div');
