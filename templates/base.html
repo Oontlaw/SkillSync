@@ -4,7 +4,29 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>{% block title %}SkillSync{% endblock %}</title>
+        <script>
+            window.__skillsyncModule = window.module;
+            window.__skillsyncExports = window.exports;
+            window.__skillsyncDefine = window.define;
+            try {
+                window.module = undefined;
+                window.exports = undefined;
+                window.define = undefined;
+            } catch (e) {}
+        </script>
         <script src="{{ url_for('static', filename='chart.umd.min.js') }}"></script>
+        <script>
+            if (!window.Chart) {
+                document.write('<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"><\\/script>');
+            }
+        </script>
+        <script>
+            try {
+                window.module = window.__skillsyncModule;
+                window.exports = window.__skillsyncExports;
+                window.define = window.__skillsyncDefine;
+            } catch (e) {}
+        </script>
         <style>
             @font-face {
                 font-family: "Inter";
@@ -375,7 +397,9 @@
                     });
                 }
 
-                return new Chart(ctx, config);
+                const chart = new Chart(ctx, config);
+                if (document.body) document.body.classList.add("charts-ready");
+                return chart;
             }
 
             function toggleSidebar() {

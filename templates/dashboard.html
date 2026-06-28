@@ -1201,7 +1201,6 @@ endblock %} {% block content %}
 {% endblock %} {% block scripts %}
 
 <script>
-    const CSRF_TOKEN = {{ csrf_token | tojson }};
     console.log('dashboard.js: block loaded');
     document.addEventListener('DOMContentLoaded', function() {
         console.log('dashboard.js: DOMContentLoaded fired');
@@ -1213,10 +1212,13 @@ endblock %} {% block content %}
 
     function feedback(type, id, verdict, btn) {
         const url = type === 'anomaly' ? '/dashboard/ml/anomaly-feedback' : '/dashboard/ml/burnout-feedback';
+        const body = type === 'anomaly'
+            ? { anomaly_id: id, feedback: verdict }
+            : { risk_id: id, feedback: verdict };
         fetch(url, {
             method: 'POST',
             headers: csrfHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ id: id, verdict: verdict })
+            body: JSON.stringify(body)
         }).then(r => {
             if (r.ok) showToast(verdict === 'confirmed' ? 'Verified as ' + type : 'Dismissed ' + type, 'success');
             const cell = btn.parentElement;
@@ -1226,10 +1228,11 @@ endblock %} {% block content %}
 
     function retrainModel(model, btn) {
         const url = model === 'federated' ? '/dashboard/ml/federated-train' : '/dashboard/ml/retrain';
+        const body = model === 'federated' ? { days: 30 } : { trigger: 'manual', model: model };
         fetch(url, {
             method: 'POST',
             headers: csrfHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ model: model })
+            body: JSON.stringify(body)
         }).then(r => {
             if (r.ok) {
                 showToast('Queued ' + model + ' retraining', 'success');
@@ -1261,12 +1264,10 @@ endblock %} {% block content %}
             }).catch(console.warn);
     }
 
-    document.addEventListener('DOMContentLoaded', function() {
+    function initDashboardCharts() {
         // Guard: Chart.js must be loaded
         if (typeof Chart === 'undefined') {
-            document.querySelectorAll('.ws-chart-box, .ws-chart-sm').forEach(el => {
-                el.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#ff6b6b;font-size:12px;">Chart.js failed to load</div>';
-            });
+            document.body.classList.add('charts-failed');
             console.error('Chart.js not loaded');
             return;
         }
@@ -1278,26 +1279,25 @@ endblock %} {% block content %}
                 const compareLabels = Array.from({length: 24}, (_, i) => i.toString().padStart(2,'0') + ':00');
                 const compareDatasets = [];
                 const guildColors = [
-                    { border: '#155e75', bg: 'rgba(21, 94, 117, 0.10)' },
-                    { border: '#0e7490', bg: 'rgba(14, 116, 144, 0.10)' },
-                    { border: '#d97706', bg: 'rgba(217, 119, 6, 0.10)'  },
-                    { border: '#059669', bg: 'rgba(5, 150, 105, 0.10)'  },
-                    { border: '#7c3aed', bg: 'rgba(124, 58, 237, 0.10)' },
-                    { border: '#dc2626', bg: 'rgba(220, 38, 38, 0.10)'  },
-                    { border: '#64748b', bg: 'rgba(100, 116, 139, 0.10)'},
-                    { border: '#0284c7', bg: 'rgba(2, 132, 199, 0.10)'  },
+                    { border: '#6b7280', bg: 'rgba(107, 114, 128, 0.02)' },
+                    { border: '#3b82f6', bg: 'rgba(59, 130, 246, 0.03)' },
+                    { border: '#10b981', bg: 'rgba(16, 185, 129, 0.03)' },
+                    { border: '#f59e0b', bg: 'rgba(245, 158, 11, 0.03)' },
+                    { border: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.03)' },
+                    { border: '#ef4444', bg: 'rgba(239, 68, 68, 0.03)' },
                 ];
                 {% for guild_id, data in guild_hourly.items() %}
                 const shifted_{{ loop.index0 }} = shiftHourly({{data|tojson}});
-                const gc = guildColors[{{ loop.index0 }} % guildColors.length];
+                const gc_{{ loop.index0 }} = guildColors[{{ loop.index0 }} % guildColors.length];
                 compareDatasets.push({
                     label: {{ (guild_names_map[guild_id] if guild_id in guild_names_map else guild_id[:8]) | tojson }},
                     data: compareLabels.map((_,i) => shifted_{{ loop.index0 }}[i] || 0),
                     tension: 0.35,
-                    borderColor: gc.border,
-                    backgroundColor: gc.bg,
+                    borderColor: gc_{{ loop.index0 }}.border,
+                    backgroundColor: gc_{{ loop.index0 }}.bg,
                     fill: false,
-                    pointRadius: 1
+                    pointRadius: 1,
+                    pointHitRadius: 5
                 });
                 {% endfor %}
                 darkChart(compareCtx, {
@@ -1315,29 +1315,35 @@ endblock %} {% block content %}
 
             try {
                 const staffCtx = document.getElementById('staffChart');
-                if (staffCtx) {
+                const staffTotal = {{ (community_messages_total or 0) + (staff_messages_total or 0) }};
+                if (staffCtx && staffTotal > 0) {
                     darkChart(staffCtx, {
                         type: 'doughnut',
                         data: {
                             labels: ['Community', 'Staff'],
-                            datasets: [{ data: [{{ community_messages_total if community_messages_total else 0 }}, {{ staff_messages_total if staff_messages_total else 0 }}], backgroundColor: ['rgba(59,130,246,0.65)', 'rgba(16,185,129,0.65)'], borderColor: 'var(--surface-strong)', borderWidth: 2 }]
+                            datasets: [{ data: [{{ community_messages_total if community_messages_total else 0 }}, {{ staff_messages_total if staff_messages_total else 0 }}], backgroundColor: ['rgba(75,85,99,0.6)', 'rgba(59,130,246,0.8)'], borderColor: 'var(--bg-card)', borderWidth: 2 }]
                         },
                         options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 8 } } } }
                     });
+                } else if (staffCtx) {
+                    staffCtx.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:12px;">No message data yet</div>';
                 }
             } catch(e) { console.warn('staffChart error:', e); }
 
             try {
                 const sourcesCtx = document.getElementById('sourcesChart');
-                if (sourcesCtx) {
+                const sourcesTotal = {{ (source_msg_pct or 0) + (source_voice_pct or 0) + (source_mod_pct or 0) + (source_task_pct or 0) + (source_manual_pct or 0) }};
+                if (sourcesCtx && sourcesTotal > 0) {
                     darkChart(sourcesCtx, {
                         type: 'doughnut',
                         data: {
                             labels: ['Discord', 'System', 'Jira', 'Manual', 'Other'],
-                            datasets: [{ data: [{{ source_msg_pct if source_msg_pct else 0 }}, {{ source_voice_pct if source_voice_pct else 0 }}, {{ source_mod_pct if source_mod_pct else 0 }}, {{ source_task_pct if source_task_pct else 0 }}, {{ source_manual_pct if source_manual_pct else 0 }}], backgroundColor: ['rgba(59,130,246,0.65)', 'rgba(16,185,129,0.65)', 'rgba(239,68,68,0.65)', 'rgba(245,158,11,0.65)', 'rgba(132,88,179,0.65)'], borderColor: 'var(--surface-strong)', borderWidth: 2 }]
+                            datasets: [{ data: [{{ source_msg_pct if source_msg_pct else 0 }}, {{ source_voice_pct if source_voice_pct else 0 }}, {{ source_mod_pct if source_mod_pct else 0 }}, {{ source_task_pct if source_task_pct else 0 }}, {{ source_manual_pct if source_manual_pct else 0 }}], backgroundColor: ['rgba(59,130,246,0.7)', 'rgba(107,114,128,0.55)', 'rgba(245,158,11,0.65)', 'rgba(16,185,129,0.65)', 'rgba(139,92,246,0.6)'], borderColor: 'var(--bg-card)', borderWidth: 2 }]
                         },
                         options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 6, padding: 4 } } } }
                     });
+                } else if (sourcesCtx) {
+                    sourcesCtx.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:12px;">No score events yet</div>';
                 }
             } catch(e) { console.warn('sourcesChart error:', e); }
 
@@ -1345,14 +1351,20 @@ endblock %} {% block content %}
                 const hourlyCtx = document.getElementById('hourlyChart');
                 if (hourlyCtx) {
                     const shiftedHourly = shiftHourly({{ hourly_activity|tojson }});
-                    darkChart(hourlyCtx, {
-                        type: 'bar',
-                        data: {
-                            labels: Array.from({length:24}, (_,i) => i.toString().padStart(2,'0') + ':00'),
-                            datasets: [{ label: 'Messages', data: Array.from({length:24}, (_,i) => shiftedHourly[i] || 0), backgroundColor: 'rgba(59,130,246,0.5)', borderColor: 'rgba(59,130,246,0.7)', borderRadius: 2 }]
-                        },
-                        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } } } }
-                    });
+                    const hourlySeries = Array.from({length:24}, (_,i) => shiftedHourly[i] || 0);
+                    const hourlyTotal = hourlySeries.reduce((a, b) => a + b, 0);
+                    if (hourlyTotal > 0) {
+                        darkChart(hourlyCtx, {
+                            type: 'bar',
+                            data: {
+                                labels: Array.from({length:24}, (_,i) => i.toString().padStart(2,'0') + ':00'),
+                                datasets: [{ label: 'Messages', data: hourlySeries, backgroundColor: 'rgba(59,130,246,0.5)', borderColor: '#3b82f6', borderWidth: 1, borderRadius: 2 }]
+                            },
+                            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } } } }
+                        });
+                    } else {
+                        hourlyCtx.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:12px;">No activity data yet</div>';
+                    }
                 }
             } catch(e) { console.warn('hourlyChart error:', e); }
 
@@ -1406,7 +1418,16 @@ endblock %} {% block content %}
         // Start live refresh
         refreshOnlineCounts();
         refreshTimer = setInterval(refreshOnlineCounts, 30000);
-    });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initDashboardCharts);
+    } else {
+        initDashboardCharts();
+    }
 </script>
 
 {% endblock %}
+
+
+
