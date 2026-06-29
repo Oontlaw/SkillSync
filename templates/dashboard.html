@@ -85,19 +85,7 @@ endblock %} {% block content %}
             All Servers
         </option>
         {% for g in accessible_guilds %}
-        <option
-            value="/?guild_id={{ g.id }}"
-            {%
-            if
-            selected_guild_id=""
-            ="g.id"
-            %}
-            selected{%
-            endif
-            %}
-        >
-            {{ g.name }}
-        </option>
+        <option value="/?guild_id={{ g.id }}"{% if selected_guild_id == g.id %} selected{% endif %}>{{ g.name }}</option>
         {% endfor %}
     </select>
 </div>

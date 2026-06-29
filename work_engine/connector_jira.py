@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 import requests
 
-from database import Organisation, Task, WorkerIdentity, db
+from database import Organisation, Task, Worker, WorkerIdentity, db
 
 JIRA_URL = os.getenv("JIRA_URL", "")
 JIRA_EMAIL = os.getenv("JIRA_EMAIL", "")
@@ -52,7 +52,7 @@ def poll_issues(days_back=7):
         return []
     since = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%d %H:%M")
     jql = f'{JIRA_JQL} AND updated >= "{since}"'
-    url = f"{JIRA_URL.rstrip('/')}/rest/api/3/search"
+    url = f"{JIRA_URL.rstrip('/')}/rest/api/3/search/jql"
     try:
         resp = requests.get(
             url,
@@ -122,6 +122,58 @@ def map_issue_to_task(issue, worker_id):
     }
 
 
+def _fallback_email_for_jira_account(org, account_id):
+    return f"jira-{account_id}@{org.slug}.skillsync.local"
+
+
+def _get_or_create_jira_identity(org, assignee):
+    account_id = assignee.get("accountId", "")
+    if not account_id:
+        return None, False
+
+    identity = WorkerIdentity.query.filter_by(
+        org_id=org.id, jira_account_id=account_id, is_active=True
+    ).first()
+    if identity and identity.worker_id:
+        return identity, False
+
+    email = (assignee.get("emailAddress") or "").strip().lower()
+    display_name = assignee.get("displayName") or email or f"Jira User {account_id[:8]}"
+    worker_email = email or _fallback_email_for_jira_account(org, account_id)
+
+    worker = Worker.query.filter_by(email=worker_email).first()
+    if not worker:
+        worker = Worker(
+            name=display_name,
+            email=worker_email,
+            role="worker",
+        )
+        db.session.add(worker)
+        db.session.flush()
+
+    if identity:
+        identity.worker_id = worker.id
+        identity.display_name = identity.display_name or display_name
+        identity.email = identity.email or email or worker_email
+        identity.member_email = identity.member_email or email or worker_email
+    else:
+        identity = WorkerIdentity(
+            org_id=org.id,
+            worker_id=worker.id,
+            jira_account_id=account_id,
+            display_name=display_name,
+            email=email or worker_email,
+            member_email=email or worker_email,
+            linked_by="jira_import",
+            consent_community_prior=False,
+            consent_federated=False,
+        )
+        db.session.add(identity)
+        db.session.flush()
+
+    return identity, True
+
+
 def poll_and_sync_for_org(org: Organisation) -> dict:
     """
     Poll Jira using org's own credentials stored in DB.
@@ -146,7 +198,7 @@ def poll_and_sync_for_org(org: Organisation) -> dict:
 
     since = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M")
     jql = f'project={org.jira_project} AND updated >= "{since}"'
-    url = f"{org.jira_url.rstrip('/')}/rest/api/3/search"
+    url = f"{org.jira_url.rstrip('/')}/rest/api/3/search/jql"
 
     try:
         auth = (org.jira_email, org.jira_api_token)
@@ -173,24 +225,23 @@ def poll_and_sync_for_org(org: Organisation) -> dict:
     synced = 0
     skipped = 0
     errors = 0
+    created_workers = 0
 
     for issue in data.get("issues", []):
         try:
             fields = issue.get("fields", {})
             assignee = fields.get("assignee", {}) or {}
-            account_id = assignee.get("accountId", "")
 
-            if not account_id:
+            if not assignee.get("accountId", ""):
                 skipped += 1
                 continue
 
-            # Find WorkerIdentity by jira_account_id within this org
-            identity = WorkerIdentity.query.filter_by(
-                org_id=org.id, jira_account_id=account_id, is_active=True
-            ).first()
+            identity, created = _get_or_create_jira_identity(org, assignee)
             if not identity or not identity.worker_id:
                 skipped += 1
                 continue
+            if created:
+                created_workers += 1
 
             task_data = map_issue_to_task(
                 {
@@ -217,4 +268,9 @@ def poll_and_sync_for_org(org: Organisation) -> dict:
             errors += 1
             print(f"[JiraConnector] Error syncing issue {issue.get('key', '?')}: {e}")
 
-    return {"synced": synced, "skipped": skipped, "errors": errors}
+    return {
+        "synced": synced,
+        "skipped": skipped,
+        "errors": errors,
+        "created_workers": created_workers,
+    }

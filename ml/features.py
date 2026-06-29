@@ -206,6 +206,76 @@ def guild_forecast_features(guild_id, days=30, window=7):
     return np.array(X_list), np.array(y_list), ts_list
 
 
+def guild_daily_features(guild_id, days=30):
+    """Build feature matrix for daily total message count forecasting.
+    Features (6 total):
+      dow_sin, dow_cos,
+      yesterday_total, avg_3day, avg_7day,
+      dow_mean
+    Returns (X, y, timestamps) — one row per day."""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    rows = (
+        MessageRecord.query.filter(
+            MessageRecord.guild_id == guild_id,
+            MessageRecord.created_at >= cutoff,
+            MessageRecord.hour_of_day != None,
+        )
+        .with_entities(
+            MessageRecord.hour_of_day,
+            MessageRecord.day_of_week,
+            MessageRecord.created_at,
+        )
+        .all()
+    )
+    if not rows:
+        return None, None, None
+
+    # Aggregate into daily buckets
+    daily = defaultdict(int)
+    daily_dow = {}
+    for hour, dow, created in rows:
+        day_key = created.date()
+        daily[day_key] += 1
+        daily_dow[day_key] = dow
+
+    if not daily:
+        return None, None, None
+
+    sorted_days = sorted(daily.keys())
+    counts = np.array([daily[d] for d in sorted_days])
+
+    # Build dow_mean: average count for each day of week over the period
+    dow_sums = defaultdict(list)
+    for d, count in zip(sorted_days, counts):
+        dow_sums[daily_dow[d]].append(count)
+    dow_means = {dow: float(np.mean(vals)) for dow, vals in dow_sums.items()}
+
+    X_list, y_list, ts_list = [], [], []
+    for i, day_key in enumerate(sorted_days):
+        dow = daily_dow[day_key]
+        dow_sin = np.sin(2 * np.pi * dow / 7)
+        dow_cos = np.cos(2 * np.pi * dow / 7)
+
+        yesterday = float(counts[i - 1]) if i >= 1 else 0.0
+        avg_3 = (
+            float(counts[max(0, i - 3) : i].mean())
+            if i >= 3
+            else (float(counts[:i].mean()) if i > 0 else 0.0)
+        )
+        avg_7 = (
+            float(counts[max(0, i - 7) : i].mean())
+            if i >= 7
+            else (float(counts[:i].mean()) if i > 0 else 0.0)
+        )
+        d_avg = float(dow_means.get(dow, 0.0))
+
+        X_list.append([dow_sin, dow_cos, yesterday, avg_3, avg_7, d_avg])
+        y_list.append(float(counts[i]))
+        ts_list.append(day_key.isoformat())
+
+    return np.array(X_list), np.array(y_list), ts_list
+
+
 def staff_feature_vectors(days=30):
     """Build feature matrix for staff burnout/anomaly detection.
     Features per staff member:
