@@ -52,10 +52,27 @@ def multiply_filter(value, arg):
 
 
 @app.after_request
-def add_no_cache(response):
+def add_security_headers(response):
+    # Cache control
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
+    # Clickjacking protection
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    # MIME sniffing protection
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    # Referrer leakage reduction
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # Basic CSP — allows same-origin scripts/styles + CDN for Chart.js + fonts
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'self';"
+    )
     return response
 
 

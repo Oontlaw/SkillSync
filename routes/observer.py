@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import time
 import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -70,14 +71,43 @@ if not API_KEY:
     )
 
 
+# Simple in-memory rate limiter: max 300 requests per 60-second window per API key
+_rate_limit_window = 60  # seconds
+_rate_limit_max = 300  # requests per window
+_rate_limit_counts = defaultdict(list)  # key -> list of timestamps
+
+
+def _check_rate_limit(key: str) -> bool:
+    """
+    Returns True if request is allowed, False if rate limit exceeded.
+    Cleans up old timestamps on each check.
+    """
+    now = time.time()
+    window_start = now - _rate_limit_window
+    timestamps = _rate_limit_counts[key]
+    # Remove timestamps outside the current window
+    _rate_limit_counts[key] = [t for t in timestamps if t > window_start]
+    if len(_rate_limit_counts[key]) >= _rate_limit_max:
+        return False
+    _rate_limit_counts[key].append(now)
+    return True
+
+
 def require_api_key(f):
-    """Requires Bearer token matching API_KEY env var."""
+    """Requires Bearer token matching API_KEY env var. Enforces rate limit."""
 
     @wraps(f)
     def decorated(*args, **kwargs):
         auth = request.headers.get("Authorization", "")
         if not auth.startswith("Bearer ") or auth.split(" ", 1)[1] != API_KEY:
             return jsonify({"error": "Unauthorized"}), 401
+        if not _check_rate_limit(API_KEY):
+            return jsonify(
+                {
+                    "error": "Rate limit exceeded",
+                    "retry_after": _rate_limit_window,
+                }
+            ), 429
         return f(*args, **kwargs)
 
     return decorated

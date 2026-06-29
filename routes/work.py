@@ -1,3 +1,5 @@
+import time
+from collections import defaultdict
 from datetime import datetime
 from functools import wraps
 
@@ -9,6 +11,20 @@ from work_engine.webhook import parse_webhook_payload
 work_bp = Blueprint("work", __name__)
 
 API_KEY = None
+
+_rate_limit_window = 60
+_rate_limit_max = 200  # slightly tighter for work engine
+_rate_limit_counts = defaultdict(list)
+
+
+def _check_rate_limit(key: str) -> bool:
+    now = time.time()
+    window_start = now - _rate_limit_window
+    _rate_limit_counts[key] = [t for t in _rate_limit_counts[key] if t > window_start]
+    if len(_rate_limit_counts[key]) >= _rate_limit_max:
+        return False
+    _rate_limit_counts[key].append(now)
+    return True
 
 
 def _get_api_key():
@@ -27,6 +43,13 @@ def require_work_key(f):
         key = _get_api_key()
         if not key or not auth.startswith("Bearer ") or auth.split(" ", 1)[1] != key:
             return jsonify({"error": "Unauthorized"}), 401
+        if not _check_rate_limit(key):
+            return jsonify(
+                {
+                    "error": "Rate limit exceeded",
+                    "retry_after": _rate_limit_window,
+                }
+            ), 429
         return f(*args, **kwargs)
 
     return decorated
@@ -297,13 +320,23 @@ def test_jira_connection():
     data = request.get_json(silent=True) or {}
     jira_url = data.get("jira_url") or org.jira_url
     jira_email = data.get("jira_email") or org.jira_email
-    jira_api_token = data.get("jira_api_token") or org.jira_api_token
+    from database import decrypt_token
+
+    jira_api_token = data.get("jira_api_token") or decrypt_token(
+        org.jira_api_token or ""
+    )
     jira_project = data.get("jira_project") or org.jira_project
 
     if not all([jira_url, jira_email, jira_api_token, jira_project]):
         return jsonify(
             {"ok": False, "error": "Fill in all four Jira fields first"}
         ), 400
+
+    from work_engine.connector_jira import _validate_jira_url
+
+    url_ok, url_reason = _validate_jira_url(jira_url)
+    if not url_ok:
+        return jsonify({"ok": False, "error": f"Invalid Jira URL: {url_reason}"}), 400
 
     import requests as req
 

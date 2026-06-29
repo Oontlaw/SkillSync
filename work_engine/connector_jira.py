@@ -1,9 +1,50 @@
+import ipaddress
 import os
+import urllib.parse
 from datetime import datetime, timedelta
 
 import requests
 
 from database import Organisation, Task, Worker, WorkerIdentity, db
+
+
+def _validate_jira_url(url: str) -> tuple[bool, str]:
+    """
+    Validate a Jira URL is safe to request.
+    Returns (ok: bool, reason: str).
+    Blocks: non-https, private IPs, loopback, link-local, metadata endpoints.
+    """
+    if not url:
+        return False, "URL is empty"
+    if not url.startswith("https://"):
+        return False, "URL must start with https://"
+    try:
+        parsed = urllib.parse.urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return False, "URL has no hostname"
+        # Block known metadata endpoints by hostname
+        blocked_hostnames = {
+            "169.254.169.254",  # AWS/GCP/Azure metadata
+            "metadata.google.internal",
+            "instance-data",
+        }
+        if hostname in blocked_hostnames:
+            return False, f"Blocked hostname: {hostname}"
+        # Resolve hostname to IP and check if it's private/loopback/link-local
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                return False, f"Private or reserved IP address not allowed: {ip}"
+        except ValueError:
+            # hostname is a domain name, not an IP — check for obviously local names
+            local_names = {"localhost", "localhos", "127.0.0.1", "::1"}
+            if hostname.lower() in local_names or hostname.endswith(".local"):
+                return False, f"Local hostname not allowed: {hostname}"
+    except Exception as e:
+        return False, f"URL parse error: {e}"
+    return True, "ok"
+
 
 JIRA_URL = os.getenv("JIRA_URL", "")
 JIRA_EMAIL = os.getenv("JIRA_EMAIL", "")
@@ -193,6 +234,15 @@ def poll_and_sync_for_org(org: Organisation) -> dict:
             "message": "Jira not configured for this org",
         }
 
+    ok, reason = _validate_jira_url(org.jira_url)
+    if not ok:
+        return {
+            "synced": 0,
+            "skipped": 0,
+            "errors": 1,
+            "message": f"Invalid Jira URL: {reason}",
+        }
+
     from routes.work import _upsert_task
     from work_engine.scoring import award_work_points
 
@@ -201,7 +251,9 @@ def poll_and_sync_for_org(org: Organisation) -> dict:
     url = f"{org.jira_url.rstrip('/')}/rest/api/3/search/jql"
 
     try:
-        auth = (org.jira_email, org.jira_api_token)
+        from database import decrypt_token
+
+        auth = (org.jira_email, decrypt_token(org.jira_api_token))
         resp = requests.get(
             url,
             auth=auth,

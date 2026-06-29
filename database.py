@@ -1,7 +1,49 @@
+import base64
+import os as _os
 from datetime import datetime
 
+from cryptography.fernet import Fernet, InvalidToken
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import check_password_hash, generate_password_hash
+
+
+def _get_fernet():
+    """
+    Return a Fernet instance using JIRA_ENCRYPTION_KEY from env.
+    If the key is absent or invalid, returns None — token stored/returned as-is
+    (graceful degradation for dev environments without the key set).
+    """
+    key = _os.getenv("JIRA_ENCRYPTION_KEY", "").strip()
+    if not key:
+        return None
+    try:
+        return Fernet(key.encode() if isinstance(key, str) else key)
+    except Exception:
+        return None
+
+
+def encrypt_token(plaintext: str) -> str:
+    """Encrypt a Jira API token. Returns ciphertext or plaintext if no key set."""
+    if not plaintext:
+        return plaintext
+    f = _get_fernet()
+    if not f:
+        return plaintext  # no key configured — store as-is (dev mode)
+    return f.encrypt(plaintext.encode()).decode()
+
+
+def decrypt_token(ciphertext: str) -> str:
+    """Decrypt a Jira API token. Returns plaintext or ciphertext if no key set."""
+    if not ciphertext:
+        return ciphertext
+    f = _get_fernet()
+    if not f:
+        return ciphertext  # no key configured — return as-is (dev mode)
+    try:
+        return f.decrypt(ciphertext.encode()).decode()
+    except InvalidToken:
+        return ciphertext  # already plaintext (migration case) — return as-is
+
 
 db = SQLAlchemy()
 

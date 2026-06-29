@@ -1697,9 +1697,19 @@ def workspace_settings_jira():
     data = request.get_json(force=True)
     org = db.session.get(Organisation, org_id)
     org.jira_url = data.get("jira_url", "").strip() or None
+    if org.jira_url:
+        from work_engine.connector_jira import _validate_jira_url
+
+        url_ok, url_reason = _validate_jira_url(org.jira_url)
+        if not url_ok:
+            return jsonify(
+                {"ok": False, "error": f"Invalid Jira URL: {url_reason}"}
+            ), 400
     org.jira_email = data.get("jira_email", "").strip() or None
     if data.get("jira_api_token", "").strip():
-        org.jira_api_token = data.get("jira_api_token", "").strip()
+        from database import encrypt_token
+
+        org.jira_api_token = encrypt_token(data.get("jira_api_token", "").strip())
     org.jira_project = data.get("jira_project", "").strip() or None
     db.session.commit()
     return jsonify({"ok": True})
