@@ -77,7 +77,7 @@ if __name__ == "__main__":
     print(f"      PID {bot_pid}")
 
     print("[3/3] Starting ngrok watchdog...")
-    wd_pid = launch("ngrok_watchdog.py", "ngrok_watchdog.log", ".watchdog.pid")
+    wd_pid = launch("scripts/ngrok_watchdog.py", "ngrok_watchdog.log", ".watchdog.pid")
     print(f"      PID {wd_pid}")
 
     # Give watchdog time to bring ngrok up

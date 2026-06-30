@@ -128,6 +128,8 @@ SkillSync/
 ├── run_dashboard.py       Entry: start the Flask dev server
 ├── run_bot.py             Entry: start the Discord bot
 ├── start_services.py      Combined launcher (dashboard + bot + ngrok)
+├── scripts/               Helper scripts (migrate, ngrok watchdog)
+├── archive/               Legacy launchers (start/stop batch files)
 │
 ├── routes/                Flask blueprints (API endpoints + pages)
 │   ├── dashboard.py       Main dashboard
