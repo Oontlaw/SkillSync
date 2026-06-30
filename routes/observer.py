@@ -1741,8 +1741,9 @@ def ml_status():
 @observer_bp.route("/observer/ml/forecast/<guild_id>", methods=["GET", "POST"])
 @require_api_key
 def ml_forecast_guild(guild_id):
-    """Get 24h activity forecast for a guild."""
-    preds = ml_forecast.predict_next_24h(guild_id)
+    """Get 24h activity forecast for a guild.
+    Logs prediction history so accuracy can be tracked."""
+    preds = ml_forecast.predict_next_24h(guild_id, log_prediction=True)
     if preds is None:
         return jsonify({"error": "No forecast available for this guild"}), 404
     return jsonify(

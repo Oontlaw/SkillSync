@@ -230,19 +230,24 @@ endblock %} {% block content %}
                     <span style="color: var(--text-dim); font-size: 11px"
                         >Bias:
                         <strong
-                            style="color: {% if forecast_metrics.mean_signed_error > 0 %}var(--orange){% else %}var(--text-primary){% endif %};"
-                            >{{ "+" if forecast_metrics.mean_signed_error > 0
-                            else "" }}{{ forecast_metrics.mean_signed_error
-                            }}</strong
+                            style="color: {% if forecast_metrics.mean_signed_error and forecast_metrics.mean_signed_error > 0 %}var(--orange){% else %}var(--text-primary){% endif %};"
+                            >{% if forecast_metrics.mean_signed_error %}{{ "+"
+                            if forecast_metrics.mean_signed_error > 0 else ""
+                            }}{{ forecast_metrics.mean_signed_error }}{% else
+                            %}—{% endif %}</strong
                         ></span
                     >
                     <span style="color: var(--text-dim); font-size: 11px"
-                        >Accuracy:
+                        >Daily volume accuracy:
                         <strong
                             style="color: {% if forecast_metrics.accuracy_pct > 70 %}var(--green){% elif forecast_metrics.accuracy_pct > 40 %}var(--orange){% else %}var(--red){% endif %};"
                             >{{ forecast_metrics.accuracy_pct }}%</strong
-                        ></span
-                    >
+                        >
+                        <span style="color: var(--text-dim); font-size: 10px"
+                            >({{ forecast_metrics.samples }} resolved day{% if
+                            forecast_metrics.samples != 1 %}s{% endif %})</span
+                        >
+                    </span>
                 </div>
                 {% endif %}
             </div>
@@ -908,12 +913,12 @@ endblock %} {% block content %}
           const el = document.getElementById('forecastChart'); if (!el) return;
           const h = Array.from({length:24},(_,i)=>`${i}:00`);
           const preds = {{ forecast_data | tojson }};
-          const actual = shiftHourly({{ guild_hourly_chart | tojson }});
+          const avg30 = shiftHourly({{ guild_hourly_avg_30d | tojson }});
           darkChart(el, { type: 'bar', data: {
             labels: h,
             datasets: [
               { label: 'Predicted', data: h.map((_,i)=>Math.round(preds[i]||0)), backgroundColor: 'rgba(59,130,246,0.5)', borderColor: '#3b82f6', borderWidth: 1, borderRadius: 2 },
-              { label: 'Actual (avg)', data: h.map((_,i)=>actual[i]||0), backgroundColor: 'rgba(16,185,129,0.3)', borderColor: '#10b981', borderWidth: 1, borderRadius: 2 },
+              { label: '30-day hourly avg', data: h.map((_,i)=>avg30[i]||0), backgroundColor: 'rgba(16,185,129,0.3)', borderColor: '#10b981', borderWidth: 1, borderRadius: 2 },
             ]
           }, options: {
             plugins: { legend: { position: 'bottom', labels: { font: { family: font }, boxWidth: 10, padding: 8 } } },

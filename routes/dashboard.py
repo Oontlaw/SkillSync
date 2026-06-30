@@ -1155,12 +1155,31 @@ def guild_detail(guild_id):
         .all()
     )
 
-    # ML forecast for this guild
-    forecast_preds = ml_forecast.predict_next_24h(guild_id)
+    # ML forecast for this guild (read-only — does not log prediction)
+    forecast_preds = ml_forecast.predict_next_24h(guild_id, log_prediction=False)
     forecast_data = None
     if forecast_preds is not None:
         forecast_data = forecast_preds
-    forecast_metrics = ml_forecast.get_accuracy_metrics(days=7)
+    # Guild-specific all-time daily volume accuracy
+    forecast_metrics = ml_forecast.get_accuracy_metrics(guild_id=guild_id, days=None)
+
+    # 30-day hourly average for forecast comparison chart
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    hourly_rows = (
+        db.session.query(
+            MessageRecord.hour_of_day, func.count(MessageRecord.id).label("cnt")
+        )
+        .filter(
+            MessageRecord.guild_id == guild_id,
+            MessageRecord.created_at >= thirty_days_ago,
+            MessageRecord.hour_of_day != None,
+        )
+        .group_by(MessageRecord.hour_of_day)
+        .all()
+    )
+    guild_hourly_avg_30d = {str(h): 0.0 for h in range(24)}
+    for h, cnt in hourly_rows:
+        guild_hourly_avg_30d[str(h)] = round(cnt / 30, 1)
 
     # Behavioral anomalies for this guild
     guild_anomalies = (
@@ -1213,6 +1232,7 @@ def guild_detail(guild_id):
         bot_count=bot_count,
         forecast_data=forecast_data,
         forecast_metrics=forecast_metrics,
+        guild_hourly_avg_30d=guild_hourly_avg_30d,
         guild_anomalies=guild_anomalies,
         role_changes=role_changes,
     )

@@ -3,12 +3,16 @@ Daily-total forecast model.
 Predicts total daily message volume, then distributes across 24 hours
 using the hourly proportion profile from recent data.
 
-Public interface (unchanged):
+Public interface:
     train(guild_id, days=30)
-    predict_next_24h(guild_id)
+    predict_next_24h(guild_id, days=30, log_prediction=False)
     resolve_outcomes(days_back=7)
-    get_accuracy_metrics(days=7)
+    get_accuracy_metrics(days=7, guild_id=None)
     train_all_guilds(days=30)
+
+    Use log_prediction=True only for scheduled/bot runs that should
+    create PredictionLog history for accuracy tracking.
+    Page views should never log predictions.
 """
 
 import json
@@ -89,10 +93,14 @@ def _hourly_profile_from_30d(guild_id):
     return [1.0 / 24] * 24
 
 
-def predict_next_24h(guild_id, days=30):
+def predict_next_24h(guild_id, days=30, log_prediction=False):
     """Predict total messages for the next 24h, then distribute by hourly profile.
+
     Returns list of 24 ints (predicted counts per hour), or None if insufficient data.
-    Logs 24 PredictionLog rows for chart compatibility."""
+
+    When log_prediction=True (scheduled/bot runs), logs 24 PredictionLog rows.
+    When log_prediction=False (page views), returns predictions without writing to DB.
+    """
     path = model_path("forecast", guild_id)
     if not os.path.exists(path):
         return None
@@ -169,8 +177,8 @@ def predict_next_24h(guild_id, days=30):
             max_idx = max(range(24), key=lambda i: preds[i])
             preds[max_idx] = max(0, preds[max_idx] + diff)
 
-    # Log predictions for chart compatibility and outcome tracking
-    _log_forecast_predictions(guild_id, preds, daily_pred, now)
+    if log_prediction:
+        _log_forecast_predictions(guild_id, preds, daily_pred, now)
 
     return preds
 
@@ -179,10 +187,15 @@ def _log_forecast_predictions(guild_id, preds, daily_pred, prediction_time):
     """Log 24 hourly predictions to PredictionLog.
     Each entry's prediction_value is the distributed hourly count;
     metadata stores the daily_total for daily resolution.
-    A unique prediction_run_id groups all 24 logs from one run."""
+    A unique prediction_run_id groups all 24 logs from one run.
+    target_start/target_end define the exact 24h window being predicted."""
     import uuid
 
-    today_midnight = prediction_time.replace(hour=0, minute=0, second=0, microsecond=0)
+    now = prediction_time
+    today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Target window: next full 24h period starting at midnight tonight
+    target_start = today_midnight
+    target_end = target_start + timedelta(hours=24)
     run_id = str(uuid.uuid4())[:8]
 
     log_entries = []
@@ -190,10 +203,12 @@ def _log_forecast_predictions(guild_id, preds, daily_pred, prediction_time):
         metadata = {
             "guild_id": guild_id,
             "predicted_hour": h,
-            "predicted_dow": prediction_time.weekday(),
+            "predicted_dow": now.weekday(),
             "prediction_date": today_midnight.isoformat(),
             "daily_total": int(daily_pred),
             "prediction_run": run_id,
+            "target_start": target_start.isoformat(),
+            "target_end": target_end.isoformat(),
         }
         entry = PredictionLog(
             model_name="forecast",
@@ -201,7 +216,7 @@ def _log_forecast_predictions(guild_id, preds, daily_pred, prediction_time):
             features_json=json.dumps({"hour": h, "daily_prediction": int(daily_pred)}),
             metadata_json=json.dumps(metadata),
             confidence=None,
-            prediction_time=prediction_time,
+            prediction_time=now,
             hour_error_history=json.dumps({}),
         )
         log_entries.append(entry)
@@ -239,12 +254,19 @@ def resolve_outcomes(days_back=7):
     resolved = 0
     for (gid, run_id), logs in by_run.items():
         meta_sample = json.loads(logs[0].metadata_json) if logs[0].metadata_json else {}
-        pdate = meta_sample.get("prediction_date")
+        # Use target_start/target_end when available, fall back to prediction_date
+        target_start_str = meta_sample.get("target_start") or meta_sample.get(
+            "prediction_date"
+        )
+        target_end_str = meta_sample.get("target_end")
         try:
-            day_start = datetime.fromisoformat(pdate)
+            day_start = datetime.fromisoformat(target_start_str)
+            if target_end_str:
+                day_end = datetime.fromisoformat(target_end_str)
+            else:
+                day_end = day_start + timedelta(hours=24)
         except (ValueError, TypeError):
             continue
-        day_end = day_start + timedelta(hours=24)
         now = datetime.utcnow()
         if day_end > now:
             continue
@@ -301,15 +323,25 @@ def resolve_outcomes(days_back=7):
     return resolved
 
 
-def get_accuracy_metrics(days=7):
-    """Return daily accuracy metrics for forecast predictions over last N days.
-    Groups by (guild_id, prediction_date) and reports per-day accuracy."""
-    cutoff = datetime.utcnow() - timedelta(days=days)
-    logs = PredictionLog.query.filter(
+def get_accuracy_metrics(days=7, guild_id=None):
+    """Return daily accuracy metrics for forecast predictions.
+
+    Groups by (guild_id, prediction_run) and reports per-day accuracy.
+
+    Args:
+        days: Number of trailing days to consider, or None for all-time.
+        guild_id: If set, filter metrics to this specific guild.
+
+    Returns dict with accuracy_pct, samples, mean_absolute_error, etc.
+    """
+    q = PredictionLog.query.filter(
         PredictionLog.model_name == "forecast",
         PredictionLog.actual_value != None,
-        PredictionLog.prediction_time >= cutoff,
-    ).all()
+    )
+    if days is not None:
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        q = q.filter(PredictionLog.prediction_time >= cutoff)
+    logs = q.all()
 
     if not logs:
         return {
@@ -328,6 +360,9 @@ def get_accuracy_metrics(days=7):
         gid = meta.get("guild_id")
         run_id = meta.get("prediction_run")
         if gid and run_id:
+            # Filter to requested guild
+            if guild_id is not None and gid != guild_id:
+                continue
             by_run[(gid, run_id)].append(log)
 
     daily_correct = 0
