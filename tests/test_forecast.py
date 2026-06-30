@@ -83,6 +83,8 @@ def _seed_forecast_log(app, guild_id, days_ago, daily_pred, actual, run_id=None)
             "daily_total": daily_pred,
             "target_start": target_start.isoformat(),
             "target_end": (target_start + timedelta(hours=24)).isoformat(),
+            "resolution_version": 2,
+            "actual_granularity": "hourly",
         }
         entry = PredictionLog(
             model_name="forecast",
@@ -488,3 +490,201 @@ def test_accuracy_label_uses_daily_volume(app, client):
         "Guild page must show resolved day count, got html section: "
         + repr(html[html.find("Daily volume accuracy") :][:200])
     )
+
+
+def test_target_window_is_next_calendar_day(app):
+    """_log_forecast_predictions must set target_start to the next calendar
+    day midnight (today_midnight + 1 day), not the current day's midnight."""
+    with app.app_context():
+        gid = "target-window-test"
+        db.session.add(GuildInfo(guild_id=gid, name="Target Window Test"))
+        _seed_messages(app, gid, days=35)
+        db.session.commit()
+
+        train(gid, days=30)
+        db.session.commit()
+
+        # Log predictions
+        preds = predict_next_24h(gid, log_prediction=True)
+        assert preds is not None
+
+        # Read back the logged predictions
+        logs = (
+            PredictionLog.query.filter(
+                PredictionLog.model_name == "forecast",
+            )
+            .order_by(PredictionLog.id.desc())
+            .limit(24)
+            .all()
+        )
+        assert len(logs) == 24
+
+        for log in logs:
+            meta = json.loads(log.metadata_json) if log.metadata_json else {}
+            target_start = meta.get("target_start")
+            assert target_start is not None, "Missing target_start"
+            ts = datetime.fromisoformat(target_start)
+            now = datetime.utcnow()
+            today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            expected = today_midnight + timedelta(days=1)
+            # Allow 1-second tolerance for clock skew
+            diff = abs((ts - expected).total_seconds())
+            assert diff < 60, (
+                f"target_start {ts} should be ~{expected} (next midnight), diff={diff}s"
+            )
+
+
+def test_legacy_logs_excluded_from_v2_metrics(app):
+    """Logs without resolution_version=2 must be excluded from
+    get_accuracy_metrics and _build_error_profile computations."""
+    import uuid
+
+    with app.app_context():
+        gid = "legacy-test"
+        db.session.add(GuildInfo(guild_id=gid, name="Legacy Test"))
+        db.session.commit()
+
+        # Create a legacy-style resolved set of 24 hourly logs WITHOUT
+        # resolution_version: 2 — each row stores the daily total as actual_value
+        legacy_run = str(uuid.uuid4())[:8]
+        legacy_pred_time = datetime.utcnow() - timedelta(days=2)
+        legacy_target_start = legacy_pred_time.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        for h in range(24):
+            meta = {
+                "guild_id": gid,
+                "predicted_hour": h,
+                "prediction_run": legacy_run,
+                "daily_total": 1000,
+                "target_start": legacy_target_start.isoformat(),
+                "target_end": (legacy_target_start + timedelta(hours=24)).isoformat(),
+                # NOTE: NO resolution_version or actual_granularity
+            }
+            db.session.add(
+                PredictionLog(
+                    model_name="forecast",
+                    prediction_value=42,
+                    features_json=json.dumps({"hour": h, "daily_prediction": 1000}),
+                    metadata_json=json.dumps(meta),
+                    actual_value=500,  # Legacy: daily total stored in every hourly row
+                    prediction_time=legacy_pred_time,
+                )
+            )
+        db.session.commit()
+
+        # Create a v2-style resolved set with proper markers
+        v2_run = str(uuid.uuid4())[:8]
+        v2_pred_time = datetime.utcnow() - timedelta(days=1)
+        v2_target_start = v2_pred_time.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        for h in range(24):
+            meta = {
+                "guild_id": gid,
+                "predicted_hour": h,
+                "prediction_run": v2_run,
+                "daily_total": 1000,
+                "target_start": v2_target_start.isoformat(),
+                "target_end": (v2_target_start + timedelta(hours=24)).isoformat(),
+                "resolution_version": 2,
+                "actual_granularity": "hourly",
+            }
+            # Distribute actuals: ~42 per hour (1000/24)
+            actual_per_hour = max(1, 1000 // 24)
+            db.session.add(
+                PredictionLog(
+                    model_name="forecast",
+                    prediction_value=42,
+                    features_json=json.dumps({"hour": h, "daily_prediction": 1000}),
+                    metadata_json=json.dumps(meta),
+                    actual_value=actual_per_hour,
+                    prediction_time=v2_pred_time,
+                )
+            )
+        db.session.commit()
+
+        # Verify: both legacy and v2 logs exist
+        all_logs = PredictionLog.query.filter(
+            PredictionLog.model_name == "forecast",
+            PredictionLog.actual_value != None,
+        ).all()
+        assert len(all_logs) == 48, "Expected 48 total logs (24 legacy + 24 v2)"
+
+        # Metrics should only use v2 logs (24 hourly = 1 daily run)
+        metrics = get_accuracy_metrics(days=None, guild_id=gid)
+        assert metrics["daily"]["samples"] == 1, (
+            f"Expected 1 daily sample (v2 only), got {metrics['daily']['samples']}"
+        )
+        assert metrics["hourly"]["samples"] == 24, (
+            f"Expected 24 hourly samples (v2 only), got {metrics['hourly']['samples']}"
+        )
+
+
+def test_resolved_log_has_version_marker(app):
+    """After resolve_outcomes, each resolved log must have
+    resolution_version=2 and actual_granularity=hourly."""
+    import uuid
+
+    run_id = str(uuid.uuid4())[:8]
+    with app.app_context():
+        gid = "version-marker-test"
+        db.session.add(GuildInfo(guild_id=gid, name="Version Marker Test"))
+        db.session.commit()
+
+    past_day = datetime.utcnow() - timedelta(days=2)
+    target_start = past_day.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    with app.app_context():
+        for h in range(24):
+            created = target_start + timedelta(hours=h)
+            db.session.add(
+                MessageRecord(
+                    guild_id=gid,
+                    discord_id="test-user",
+                    channel_name="general",
+                    hour_of_day=h,
+                    created_at=created,
+                    is_public_channel=True,
+                )
+            )
+        db.session.commit()
+
+    with app.app_context():
+        for h in range(24):
+            meta = {
+                "guild_id": gid,
+                "predicted_hour": h,
+                "prediction_run": run_id,
+                "daily_total": 48,
+                "target_start": target_start.isoformat(),
+                "target_end": (target_start + timedelta(hours=24)).isoformat(),
+                "resolution_version": 2,
+                "actual_granularity": "hourly",
+            }
+            db.session.add(
+                PredictionLog(
+                    model_name="forecast",
+                    prediction_value=2,
+                    metadata_json=json.dumps(meta),
+                    prediction_time=target_start,
+                )
+            )
+        db.session.commit()
+
+    with app.app_context():
+        resolved = resolve_outcomes()
+        assert resolved > 0
+
+        resolved_logs = PredictionLog.query.filter(
+            PredictionLog.model_name == "forecast",
+            PredictionLog.actual_value != None,
+        ).all()
+        for log in resolved_logs:
+            meta = json.loads(log.metadata_json) if log.metadata_json else {}
+            assert meta.get("resolution_version") == 2, (
+                f"Log {log.id} missing resolution_version=2"
+            )
+            assert meta.get("actual_granularity") == "hourly", (
+                f"Log {log.id} missing actual_granularity=hourly"
+            )

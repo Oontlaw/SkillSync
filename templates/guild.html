@@ -253,18 +253,25 @@ endblock %} {% block content %}
                     </span>
                     <span style="color: var(--text-dim); font-size: 11px"
                         >Hourly accuracy:
+                        {% if forecast_metrics.hourly.samples >= 72 %}
                         <strong
                             style="color: {% if forecast_metrics.hourly.accuracy_pct and forecast_metrics.hourly.accuracy_pct > 70 %}var(--green){% elif forecast_metrics.hourly.accuracy_pct and forecast_metrics.hourly.accuracy_pct > 40 %}var(--orange){% else %}var(--red){% endif %};"
                             >{{ forecast_metrics.hourly.accuracy_pct if
                             forecast_metrics.hourly.accuracy_pct is not none
                             else '—' }}%</strong
                         >
+                        {% else %}
+                        <strong style="color: var(--text-primary)"
+                            >Calibrating</strong
+                        >
+                        {% endif %}
                         <span style="color: var(--text-dim); font-size: 10px"
                             >({{ forecast_metrics.hourly.samples }} resolved
                             hour{% if forecast_metrics.hourly.samples != 1 %}s{%
                             endif %})</span
                         >
                     </span>
+                    {% if forecast_metrics.hourly.samples >= 72 %}
                     <span style="color: var(--text-dim); font-size: 11px"
                         >Hourly MAE:
                         <strong style="color: var(--text-primary)"
@@ -273,6 +280,7 @@ endblock %} {% block content %}
                             none else '—' }}</strong
                         >
                     </span>
+                    {% endif %}
                 </div>
                 {% endif %}
             </div>

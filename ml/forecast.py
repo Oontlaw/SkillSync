@@ -68,6 +68,27 @@ DAILY_TOLERANCE_LABEL = "max(actual*0.15, 25)"
 HOURLY_TOLERANCE_LABEL = "max(actual*0.25, 10)"
 
 
+def _is_v2_log(log):
+    """Check if a PredictionLog has v2 resolution markers.
+    v2 logs have resolution_version=2 and actual_granularity="hourly"
+    in their metadata, meaning each row's actual_value is the correct
+    count for that specific hour (not a legacy daily total)."""
+    if not log or not log.metadata_json:
+        return False
+    try:
+        meta = (
+            json.loads(log.metadata_json)
+            if isinstance(log.metadata_json, str)
+            else log.metadata_json
+        )
+        return (
+            meta.get("resolution_version") == 2
+            and meta.get("actual_granularity") == "hourly"
+        )
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return False
+
+
 def train(guild_id, days=30):
     """Train a daily total message count forecast model for a guild."""
     X, y, _ = guild_daily_features(guild_id, days=days)
@@ -135,11 +156,16 @@ def _log_forecast_predictions(guild_id, preds, daily_pred, prediction_time):
     Each entry's prediction_value is the distributed hourly count;
     metadata stores the daily_total for daily resolution.
     A unique prediction_run_id groups all 24 logs from one run.
-    target_start/target_end define the exact 24h window being predicted."""
+    target_start/target_end define the exact 24h window being predicted.
+
+    Logs created by this function carry resolution_version=2 and
+    actual_granularity="hourly" markers so downstream consumers can
+    distinguish them from legacy logs that stored daily total in
+    every hourly actual_value field."""
     now = prediction_time
     today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    # Target window: next full 24h period starting at midnight tonight
-    target_start = today_midnight
+    # Target window: next calendar day (midnight tonight → midnight tomorrow night)
+    target_start = today_midnight + timedelta(days=1)
     target_end = target_start + timedelta(hours=24)
     run_id = str(uuid.uuid4())[:8]
 
@@ -154,6 +180,8 @@ def _log_forecast_predictions(guild_id, preds, daily_pred, prediction_time):
             "prediction_run": run_id,
             "target_start": target_start.isoformat(),
             "target_end": target_end.isoformat(),
+            "resolution_version": 2,
+            "actual_granularity": "hourly",
         }
         entry = PredictionLog(
             model_name="forecast",
@@ -186,10 +214,19 @@ def _build_error_profile(guild_id, days=30):
     ).all()
 
     # Filter to this guild and group by hour
+    # Only use v2+ logs (resolution_version=2, actual_granularity=hourly)
+    # Legacy logs stored daily total in every hourly actual_value and
+    # would produce incorrect error profiles.
     by_hour = defaultdict(list)
     for log in logs:
         meta = json.loads(log.metadata_json) if log.metadata_json else {}
         if meta.get("guild_id") != guild_id:
+            continue
+        # Skip legacy logs without v2 resolution markers
+        if (
+            meta.get("resolution_version") != 2
+            or meta.get("actual_granularity") != "hourly"
+        ):
             continue
         if log.actual_value is None or log.prediction_value is None:
             continue
@@ -458,6 +495,11 @@ def resolve_outcomes(days_back=7):
                 "daily_correct": bool(daily_correct),
             }
             log.hour_error_history = json.dumps(err_history)
+            # Stamp version marker on every resolved row
+            log_meta = json.loads(log.metadata_json) if log.metadata_json else {}
+            log_meta["resolution_version"] = 2
+            log_meta["actual_granularity"] = "hourly"
+            log.metadata_json = json.dumps(log_meta)
             resolved += 1
 
         # Store daily-level correctness in the first log's metadata
@@ -465,6 +507,8 @@ def resolve_outcomes(days_back=7):
         meta["daily_correct"] = bool(daily_correct)
         meta["daily_tolerance"] = round(daily_tolerance, 2)
         meta["daily_tolerance_type"] = DAILY_TOLERANCE_LABEL
+        meta["resolution_version"] = 2
+        meta["actual_granularity"] = "hourly"
         logs[0].metadata_json = json.dumps(meta)
 
     db.session.commit()
@@ -518,6 +562,11 @@ def get_accuracy_metrics(days=7, guild_id=None):
         cutoff = datetime.utcnow() - timedelta(days=days)
         q = q.filter(PredictionLog.prediction_time >= cutoff)
     logs = q.all()
+
+    # Filter to v2+ logs (resolution_version=2, actual_granularity=hourly)
+    # Legacy logs stored daily total in every hourly actual_value and
+    # would produce incorrect hourly metrics and wrong daily sums.
+    logs = [l for l in logs if _is_v2_log(l)]
 
     if not logs:
         return {
