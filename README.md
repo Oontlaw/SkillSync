@@ -380,4 +380,4 @@ Key test files:
 
 ## License
 
-Academic project — submitted as part of a final-year degree program.
+Academic project 
