@@ -13,6 +13,8 @@ Built as a final-year academic project.
 
 ## How It Works
 
+### Dual-Engine Architecture
+
 ```
 ┌──────────────────────┐     ┌──────────────────────────────┐
 │   Community Engine   │     │        Work Engine           │
@@ -94,6 +96,54 @@ Built as a final-year academic project.
   URL validation and token encryption at rest.
 - **Metadata-first** — Raw Discord message content is never stored. Only derived
   metrics (counts, rates, timestamps) are persisted.
+
+## Workspace Module
+
+The Workspace module provides a **company-style private dashboard** for
+organisations using SkillSync. It is completely separate from the Discord OAuth
+dashboard — organisations register with an email/password and get their own
+isolated workspace environment.
+
+### Key Pages
+
+| Route | Page | Description |
+|---|---|---|
+| `/workspace/register` | Register | Create a new organisation with an admin account |
+| `/workspace/login` | Login | Org login with rate-limited email/password auth |
+| `/workspace/` | Dashboard | Overview: worker counts, task stats, recent points, team health snapshot |
+| `/workspace/workers` | Workers | Browse all workers linked to your organisation |
+| `/workspace/workers/<id>` | Worker Detail | Full profile: bio, points, activity history, anomalies, burnout risk |
+| `/workspace/workers/<id>/summary` | Summary | Auto-generated 30-day performance summary with trend charts |
+| `/workspace/leaderboard` | Leaderboard | Points leaderboard with 7d / 30d / all-time filters |
+| `/workspace/team-health` | Team Health | Traffic-light health indicators per worker (green/yellow/red) |
+| `/workspace/tasks/create` | Create Task | Assign tasks to linked workers with due dates and point values |
+| `/workspace/work/review` | Review Work | Review and confirm/correct auto-judged work engine ScoreLog entries |
+| `/workspace/identities` | Identities | Link Discord users to worker profiles (bridges Community → Work Engine) |
+| `/workspace/overrides` | Overrides | View active anomalies/burnout risks and issue manual score corrections |
+| `/workspace/members` | Members | Manage org members: invite, change roles, remove |
+| `/workspace/settings` | Settings | Org name, Jira integration config, Slack webhook, API key regeneration |
+
+### How the Workspace Fits In
+
+1. An **organisation registers** at `/workspace/register` with a name and slug.
+2. **Members are invited** by the admin — they log in with email/password at
+   `/workspace/login`.
+3. **Workers are linked** to Discord users via the Identities page, bridging
+   community behavior and workplace task data into a single profile.
+4. **Tasks are created** and assigned to workers. Completions award points;
+   missed tasks deduct.
+5. **The work engine** auto-scores Jira issues and syncs them as ScoreLog
+   entries, which admins can review and confirm.
+6. **Anomalies and burnout risks** detected by the ML modules appear on the
+   Overrides page, where admins can issue corrections.
+7. **Every correction** is stored as labeled training data and fed back into
+   the scoring model via the retrain pipeline.
+
+### Auth Model
+
+- Three roles: **admin** (full control), **hr** (can review/correct), **member** (read-only).
+- Login is rate-limited: 5 attempts per 15-minute window per email.
+- Sessions are isolated per organisation — no cross-org data leakage.
 
 ---
 

@@ -101,6 +101,35 @@ SkillSync/
 
 ---
 
+## Workspace Module
+
+SkillSync includes a **private workspace dashboard** for organisations, completely
+separate from the Discord OAuth dashboard.
+
+### Pages
+
+| Route | Purpose |
+|---|---|
+| `/workspace/register` | Create a new organisation |
+| `/workspace/login` | Email/password login with rate limiting |
+| `/workspace/` | Org dashboard with worker/task/health overview |
+| `/workspace/workers` | Worker directory |
+| `/workspace/workers/<id>` | Worker profile, scores, anomalies |
+| `/workspace/workers/<id>/summary` | 30-day auto-generated performance summary |
+| `/workspace/leaderboard` | Points ranking (7d/30d/all) |
+| `/workspace/team-health` | Per-worker traffic-light health indicators |
+| `/workspace/tasks/create` | Create and assign tasks |
+| `/workspace/work/review` | Review auto-judged ScoreLog entries |
+| `/workspace/identities` | Link Discord users ↔ worker profiles |
+| `/workspace/overrides` | View anomalies/burnout + issue corrections |
+| `/workspace/members` | Invite/remove org members, manage roles |
+| `/workspace/settings` | Org settings, Jira config, Slack webhook |
+
+### Auth
+- Three roles: **admin**, **hr** (review+correct), **member** (read-only).
+- Rate-limited login: 5 attempts / 15 min.
+- Sessions isolated per organisation.
+
 ## Data Flow
 
 ```
