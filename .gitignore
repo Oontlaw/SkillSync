@@ -65,6 +65,9 @@ ml/models/
 # Test cache
 .pytest_cache/
 
+# Submission notes (college-specific, not part of source code)
+SUBMISSION_NOTES.md
+
 # One-off scripts and generated files
 AGENTS*.md
 DOCS.md
