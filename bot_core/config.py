@@ -1,20 +1,17 @@
 import os
+
 import discord
 
-load_dotenv = __import__('dotenv').load_dotenv
+load_dotenv = __import__("dotenv").load_dotenv
 load_dotenv()
 
-DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
-if not DISCORD_TOKEN:
-    raise RuntimeError('DISCORD_TOKEN environment variable is required')
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 
-SKILLSYNC_API = os.getenv('SKILLSYNC_API', 'http://localhost:5000/api')
-API_KEY = os.getenv('API_KEY')
-if not API_KEY:
-    raise RuntimeError('API_KEY environment variable is required')
+SKILLSYNC_API = os.getenv("SKILLSYNC_API", "http://localhost:5000/api")
+API_KEY = os.getenv("API_KEY", "")
 
-MESSAGE_RETENTION_DAYS = int(os.getenv('MESSAGE_RETENTION_DAYS', '90'))
-HEARTBEAT_GUILD_ID = os.getenv('HEARTBEAT_GUILD_ID', '')
+MESSAGE_RETENTION_DAYS = int(os.getenv("MESSAGE_RETENTION_DAYS", "90"))
+HEARTBEAT_GUILD_ID = os.getenv("HEARTBEAT_GUILD_ID", "")
 
 BAN_WATCH_HOURS = 48
 PING_WATCH_MINUTES = 20
@@ -29,7 +26,7 @@ MEMBER_PRESENCE_BUFFER_LIMIT = 50
 MENTION_BUFFER_LIMIT = 30
 VOICE_BUFFER_LIMIT = 30
 
-MOD_BOT_NAMES = ['mee6', 'dyno', 'carl-bot', 'wick', 'arcane', 'combot', 'gaius']
+MOD_BOT_NAMES = ["mee6", "dyno", "carl-bot", "wick", "arcane", "combot", "gaius"]
 
 intents = discord.Intents.default()
 intents.message_content = True

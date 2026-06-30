@@ -21,6 +21,8 @@ wheels/
 *.egg
 
 # Virtual environments
+.venv/
+.venv-*/
 venv/
 ENV/
 env/
@@ -32,17 +34,17 @@ env/
 *.swo
 *~
 
-# Database
+# Database files
 *.db
 *.sqlite
 *.sqlite3
+instance/
 
 # Environment variables
 .env
 .env.local
 
 # Flask
-instance/
 .webassets-cache
 
 # OS
@@ -52,20 +54,26 @@ Thumbs.db
 # Logs
 *.log
 
-# ML models (generated artifacts)
+# ML model artifacts (generated at training time)
 ml/models/
 *.joblib
 
+# Runtime PID files
+*.pid
+.running.lock
+
+# Test cache
+.pytest_cache/
+
+# One-off scripts and generated files
 AGENTS*.md
 DOCS.md
 SYNOPSIS.md
-
 project-context.md
 generate_report.py
-
-# One-off scripts and local utilities
 start_tunnel.py
 test_predict.py
+test_resolve.py
 test_scans.py
 health_check.py
 check_db_stats.py
@@ -73,28 +81,9 @@ check_pg.py
 migrate_to_pg.py
 health_check_final.py
 watchdog.ps1
-
-# Local launchers (machine-specific paths)
-start.bat
-stop.bat
-start-dev.bat
-
-# Runtime state
-.running.lock
-.flask.pid
-.bot.pid
-.ngrok.pid
-.watchdog.pid
-
-# IDE
-.opencode/
-
-# One-off debug / diagnostic scripts
 debug_v2.py
 health_report.py
 append_dblog.py
-
-# Local machine utilities and launchers
 check_services.ps1
 quick_restart.ps1
 restart_services.ps1
@@ -104,4 +93,13 @@ simple_restart.ps1
 start_bot.bat
 start_flask.bat
 v2_start.sh
+start-dev.bat
+
+# Editor / agent config
+.opencode/
+.agents/
+
+# Local launchers (machine-specific paths)
+start.bat
+stop.bat
 nul

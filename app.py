@@ -51,6 +51,25 @@ def multiply_filter(value, arg):
         return 0
 
 
+@app.route("/health")
+def health():
+    """Simple health check — returns JSON. Useful for monitoring and smoke tests."""
+    from database import db
+
+    db_ok = False
+    try:
+        db.session.execute(db.text("SELECT 1"))
+        db.session.commit()
+        db_ok = True
+    except Exception:
+        db_ok = False
+    return {
+        "status": "ok",
+        "database": "ok" if db_ok else "unreachable",
+        "version": "academic-prototype",
+    }
+
+
 @app.after_request
 def add_security_headers(response):
     # Cache control
