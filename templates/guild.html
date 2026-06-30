@@ -211,7 +211,7 @@ endblock %} {% block content %}
                 <div class="ws-chart-box">
                     <canvas id="forecastChart"></canvas>
                 </div>
-                {% if forecast_metrics and forecast_metrics.samples > 0 %}
+                {% if forecast_metrics and forecast_metrics.daily.samples > 0 %}
                 <div
                     style="
                         display: flex;
@@ -224,28 +224,53 @@ endblock %} {% block content %}
                     <span style="color: var(--text-dim); font-size: 11px"
                         >MAE:
                         <strong style="color: var(--text-primary)"
-                            >{{ forecast_metrics.mean_absolute_error }}</strong
+                            >{{ forecast_metrics.daily.mean_absolute_error
+                            }}</strong
                         ></span
                     >
                     <span style="color: var(--text-dim); font-size: 11px"
                         >Bias:
                         <strong
-                            style="color: {% if forecast_metrics.mean_signed_error and forecast_metrics.mean_signed_error > 0 %}var(--orange){% else %}var(--text-primary){% endif %};"
-                            >{% if forecast_metrics.mean_signed_error %}{{ "+"
-                            if forecast_metrics.mean_signed_error > 0 else ""
-                            }}{{ forecast_metrics.mean_signed_error }}{% else
+                            style="color: {% if forecast_metrics.daily.mean_signed_error and forecast_metrics.daily.mean_signed_error > 0 %}var(--orange){% else %}var(--text-primary){% endif %};"
+                            >{% if forecast_metrics.daily.mean_signed_error %}{{
+                            "+" if forecast_metrics.daily.mean_signed_error > 0
+                            else "" }}{{
+                            forecast_metrics.daily.mean_signed_error }}{% else
                             %}—{% endif %}</strong
                         ></span
                     >
                     <span style="color: var(--text-dim); font-size: 11px"
                         >Daily volume accuracy:
                         <strong
-                            style="color: {% if forecast_metrics.accuracy_pct > 70 %}var(--green){% elif forecast_metrics.accuracy_pct > 40 %}var(--orange){% else %}var(--red){% endif %};"
-                            >{{ forecast_metrics.accuracy_pct }}%</strong
+                            style="color: {% if forecast_metrics.daily.accuracy_pct > 70 %}var(--green){% elif forecast_metrics.daily.accuracy_pct > 40 %}var(--orange){% else %}var(--red){% endif %};"
+                            >{{ forecast_metrics.daily.accuracy_pct }}%</strong
                         >
                         <span style="color: var(--text-dim); font-size: 10px"
-                            >({{ forecast_metrics.samples }} resolved day{% if
-                            forecast_metrics.samples != 1 %}s{% endif %})</span
+                            >({{ forecast_metrics.daily.samples }} resolved
+                            day{% if forecast_metrics.daily.samples != 1 %}s{%
+                            endif %})</span
+                        >
+                    </span>
+                    <span style="color: var(--text-dim); font-size: 11px"
+                        >Hourly accuracy:
+                        <strong
+                            style="color: {% if forecast_metrics.hourly.accuracy_pct and forecast_metrics.hourly.accuracy_pct > 70 %}var(--green){% elif forecast_metrics.hourly.accuracy_pct and forecast_metrics.hourly.accuracy_pct > 40 %}var(--orange){% else %}var(--red){% endif %};"
+                            >{{ forecast_metrics.hourly.accuracy_pct if
+                            forecast_metrics.hourly.accuracy_pct is not none
+                            else '—' }}%</strong
+                        >
+                        <span style="color: var(--text-dim); font-size: 10px"
+                            >({{ forecast_metrics.hourly.samples }} resolved
+                            hour{% if forecast_metrics.hourly.samples != 1 %}s{%
+                            endif %})</span
+                        >
+                    </span>
+                    <span style="color: var(--text-dim); font-size: 11px"
+                        >Hourly MAE:
+                        <strong style="color: var(--text-primary)"
+                            >{{ forecast_metrics.hourly.mean_absolute_error if
+                            forecast_metrics.hourly.mean_absolute_error is not
+                            none else '—' }}</strong
                         >
                     </span>
                 </div>
@@ -912,7 +937,7 @@ endblock %} {% block content %}
         (function() {
           const el = document.getElementById('forecastChart'); if (!el) return;
           const h = Array.from({length:24},(_,i)=>`${i}:00`);
-          const preds = {{ forecast_data | tojson }};
+          const preds = shiftHourly({{ forecast_data | tojson }});
           const avg30 = shiftHourly({{ guild_hourly_avg_30d | tojson }});
           darkChart(el, { type: 'bar', data: {
             labels: h,

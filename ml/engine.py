@@ -295,7 +295,7 @@ def get_model_health():
     try:
         forecast_metrics = get_all_accuracy_metrics(days=7)
         forecast_data = forecast_metrics.get("forecast", {})
-        accuracy_pct = forecast_data.get("accuracy_pct")
+        accuracy_pct = forecast_data.get("daily", {}).get("accuracy_pct")
         if accuracy_pct is not None:
             health["forecast_accuracy"] = accuracy_pct
             if accuracy_pct < 50:
