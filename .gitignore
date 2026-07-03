@@ -68,6 +68,10 @@ ml/models/
 # Submission notes (college-specific, not part of source code)
 SUBMISSION_NOTES.md
 
+# Agent context files — never committed, agents read these
+brain.md
+docs/future_prospects.md
+
 # One-off scripts and generated files
 AGENTS*.md
 DOCS.md

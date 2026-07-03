@@ -1,231 +1,301 @@
-# SkillSync Architecture
+# SkillSync — Architecture
 
 ## Overview
 
-SkillSync is a **workforce intelligence platform** organised around three layers:
+SkillSync is a **dual-engine AI-powered workforce intelligence platform**. Two engines
+feed into a shared ML pipeline, and their combined output is consumed by a private
+company dashboard called the **Workspace**.
 
-1. **Workspace Layer** — Private company dashboards where organisations manage
-   workers, assign tasks, review ML-generated insights, and correct scores.
-2. **Data Layer** — Two engines feed data upward:
-   - **Community Engine** (Discord bot) — captures public behavioral signals.
-   - **Work Engine** (Jira connector) — syncs enterprise task data.
-3. **ML Layer** — Trained on community behavioral patterns and applied within
-   the workspace to detect anomalies, predict burnout, forecast activity, and
-   correct scores.
+The core idea: bridge **community behavioral signals** (from platforms like Discord)
+with **enterprise task data** (from systems like Jira) to build a unified, continuously
+learning reputation score per individual — without storing raw message content or
+exposing company data externally.
 
 ---
 
-## High-Level Structure
+## System Architecture
 
 ```
-SkillSync/
-│
-├── app.py                  Flask app factory + blueprint registration
-├── bot.py                  Discord bot instance (Community Engine)
-├── bot_commands.py         Discord slash/prefix commands
-├── config.py               Flask config (reads from .env)
-├── database.py             SQLAlchemy models
-├── scoring.py              Core scoring logic
-├── requirements.txt
-│
-├── run_dashboard.py        Top-level entry: start the Flask dev server
-├── run_bot.py              Top-level entry: start the Discord bot
-├── start_services.py       Combined launcher (dashboard + bot + ngrok)
-├── scripts/                Helper scripts (migrate, ngrok watchdog)
-├── archive/                Legacy launchers
-│
-├── routes/                 Flask blueprints
-│   ├── workspace.py        Primary interface — workspace pages
-│   ├── work.py             Work engine API
-│   ├── dashboard.py        Main dashboard
-│   ├── observer.py         Bot-facing endpoints + ML control
-│   ├── api.py              Public API
-│   ├── auth.py             Discord OAuth2
-│   ├── community.py        Community API
-│   └── security.py         CSRF protection helpers
-│
-├── work_engine/            Jira / external task integration
-│   ├── connector_jira.py   Jira API client (SSRF-safe)
-│   ├── scoring.py          Task scoring for work engine
-│   └── webhook.py          Webhook receiver
-│
-├── bot_core/               Discord bot internals (Community Engine)
-│   ├── api_client.py       HTTP client to send data to Flask observer
-│   ├── config.py           Bot config (intents, token loader)
-│   ├── events_messages.py  on_message handler
-│   ├── events_moderation.py  on_member_ban/unban/update/remove
-│   ├── events_presence.py  on_presence_update / on_member_join / voice
-│   ├── events_ready.py     on_ready + on_guild_join
-│   ├── heartbeat.py        Periodic health-check loop
-│   ├── logging.py          Bot-side logging
-│   ├── parsers.py          Discord message parsing
-│   ├── privacy.py          Metadata-first filtering rules
-│   ├── scanner.py          Per-guild message scan
-│   ├── state.py            In-memory caches
-│   └── tasks.py            Scheduled background tasks
-│
-├── ml/                     ML modules (trained from community data)
-│   ├── anomaly.py          Isolation Forest anomaly detection
-│   ├── burnout.py          Burnout risk detection (weighted signals)
-│   ├── corrector.py        Score corrector (Ridge regression)
-│   ├── engine.py           Orchestrator: train_all, status, accuracy
-│   ├── features.py         Feature engineering from community data
-│   ├── federated.py        Federated learning (round-based aggregation)
-│   ├── forecast.py         Activity forecast (Random Forest + hourly profile)
-│   ├── growth.py           Guild/user growth model
-│   ├── work_anomaly.py     Work-engine anomaly detection
-│   └── work_features.py    Work-engine feature extraction
-│
-├── services/               Utility services
-│   └── slack.py            Slack webhook notifications
-│
-├── templates/              Jinja2 HTML templates
-├── static/                 CSS, fonts, Chart.js
-├── migrations/             Alembic database migrations
-├── tests/                  Pytest test suite
-└── docs/                   Project documentation
+┌─────────────────────────────────────────────────────────────────────┐
+│                         INPUT LAYER                                 │
+│                                                                     │
+│  ┌─────────────────────────┐      ┌──────────────────────────────┐  │
+│  │    COMMUNITY ENGINE     │      │         WORK ENGINE          │  │
+│  │    (Discord Bot)        │      │   (Jira / Task Systems)      │  │
+│  │                         │      │                              │  │
+│  │  bot_core/ event loop   │      │  connector_jira.py polls     │  │
+│  │  30s flush → observer   │      │  webhook.py receives events  │  │
+│  └───────────┬─────────────┘      └──────────────┬───────────────┘  │
+└──────────────┼───────────────────────────────────┼──────────────────┘
+               │                                   │
+               ▼                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      EMBEDDING LAYER                                │
+│                                                                     │
+│  Raw events → Numerical feature vectors                             │
+│                                                                     │
+│  • MessageRecord → 28-dim vector (hourly profile + message stats)   │
+│  • Task + ScoreLog → 10-dim vector (completion, priority, streak)   │
+│  • Baselines: 90d historical + 7d current drift                     │
+│                                                                     │
+│  All stored in PostgreSQL / SQLite. No raw content preserved.       │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      ML PIPELINE (7 models)                         │
+│                                                                     │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌────────┐  │
+│  │   Anomaly    │  │   Burnout    │  │  Forecast    │  │Corrector│  │
+│  │ IsolationForest│ Weighted(5sig)│  │ RandomForest │  │ Ridge+ │  │
+│  │  32-dim feat │  │ 90d baseline │  │ 30d train    │  │Logistic│  │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └───┬────┘  │
+│         │                 │                 │               │       │
+│  ┌──────┴─────────────────┴─────────────────┴───────────────┴────┐  │
+│  │              Federated Learning (FedAvg)                       │  │
+│  │         Cross-guild pattern aggregation, privacy-preserving    │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  ┌──────────────┐  ┌──────────────────┐                            │
+│  │   Growth     │  │  Work Anomaly    │                            │
+│  │ RandomForest │  │ IsolationForest  │                            │
+│  │ 90d train    │  │ per-org, 10-dim  │                            │
+│  └──────────────┘  └──────────────────┘                            │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      OUTPUT LAYER                                   │
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │                        WORKSPACE                             │   │
+│  │               (Private Company Dashboard)                    │   │
+│  │                                                              │   │
+│  │  routes/workspace.py — 14 pages                              │   │
+│  │  Auth: email/password, 3 roles (admin/hr/member)             │   │
+│  │  CSRF-protected, rate-limited login (5/15min)                │   │
+│  │                                                              │   │
+│  │  Pages: Dashboard, Workers, Tasks, Leaderboard,              │   │
+│  │  Team Health, Overrides, Identities, Members, Settings       │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                             │                                      │
+│                             ▼                                      │
+│              Admin Correction → ML Retrain (closed-loop)           │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Workspace Module
+## The Two Engines
 
-The workspace is the **primary interface** of SkillSync. Each organisation gets
-a private, auth-protected environment completely separate from the Discord
-OAuth dashboard.
+### 1. Community Engine (Discord Bot)
 
-### Pages
+**Purpose:** Collect behavioral signals from Discord communities.
 
-| Route | Purpose |
-|---|---|
-| `/workspace/register` | Create a new organisation |
-| `/workspace/login` | Email/password login with rate limiting |
-| `/workspace/` | Org dashboard with worker/task/health overview |
-| `/workspace/workers` | Worker directory |
-| `/workspace/workers/<id>` | Worker profile, scores, anomalies |
-| `/workspace/workers/<id>/summary` | 30-day auto-generated performance summary |
-| `/workspace/leaderboard` | Points ranking (7d/30d/all) |
-| `/workspace/team-health` | Per-worker traffic-light health indicators |
-| `/workspace/tasks/create` | Create and assign tasks |
-| `/workspace/work/review` | Review auto-judged ScoreLog entries |
-| `/workspace/identities` | Link Discord users ↔ worker profiles |
-| `/workspace/overrides` | View anomalies/burnout + issue corrections |
-| `/workspace/members` | Invite/remove org members, manage roles |
-| `/workspace/settings` | Org settings, Jira config, Slack webhook |
+The bot runs as a single process using `discord.py 2.7`. It listens to guild events
+and buffers them in-memory for 30 seconds before flushing to the Flask observer API.
 
-### Auth
+| Event | Handler | Buffered | Stored As |
+|---|---|---|---|
+| Message sent | `events_messages.py` | Yes (30s) | `MessageRecord` (count, length, channel, hour) |
+| Message edit/delete | `events_messages.py` | Yes | Metadata update |
+| Member ban/unban | `events_moderation.py` | Yes | `PendingBan` |
+| Member timeout | `events_moderation.py` | Yes | `PendingTimeout` |
+| Role change | `events_moderation.py` | Yes | `RoleChangeLog` |
+| Presence update | `events_presence.py` | Yes | `GuildMember` (is_online) |
+| Member join/leave | `events_presence.py` | Yes | `MemberJoinLeave` |
+| Voice state | `events_presence.py` | Yes | `VoiceActivity` |
 
-- Three roles: **admin** (full control), **hr** (review+correct), **member** (read-only).
-- Rate-limited login: 5 attempts / 15 min per email.
-- Sessions isolated per organisation.
+**Background tasks** (all in `tasks.py`):
 
----
-
-## The Community Engine (Data Source)
-
-The Discord bot is a **supporting component** that feeds behavioral data into
-the ML pipeline. It does not have its own dashboard or standalone value — its
-sole purpose is to generate the signals that the workspace uses.
-
-- **Metadata-first**: Only counts, rates, and timestamps are stored. Raw
-  message content is never persisted.
-- **Event types**: Messages, moderation actions, member joins/leaves, presence
-  updates, voice state changes.
-- **Privacy**: Messages from private channels and bots are filtered out.
-
----
-
-## The Work Engine (Jira Integration)
-
-The Work Engine connects to Jira to automate task tracking within the workspace:
-
-- Polls configured Jira projects per organisation.
-- Maps Jira issues to linked workers.
-- Creates ScoreLog entries for admin review.
-- SSRF-safe URL validation on all Jira endpoints.
-- API tokens encrypted at rest with Fernet.
-
----
-
-## ML Pipeline
-
-All ML modules are trained on community behavioral data and their outputs are
-consumed by the workspace:
-
-| Module | Model | Consumed By |
+| Task | Interval | What it does |
 |---|---|---|
-| Anomaly Detection | Isolation Forest | Workspace Overrides page |
-| Burnout Risk | Weighted signal scoring | Workspace Team Health page |
-| Activity Forecast | Random Forest | Guild dashboard (read-only) |
-| Score Corrector | Ridge regression | Workspace scoring engine |
-| Federated Learning | Round-based aggregation | Global model training |
+| Flush buffers | 30s | Send buffered events to observer API |
+| Reverse actions | 1h | Check/expire pending timeouts and bans |
+| Run ML forecast | 1h | `predict_next_24h(guild_id, log_prediction=True)` |
+| Poll Jira | 1h | `poll_and_sync_for_org()` per configured org |
+| Cleanup stale data | 6h | Prune old records |
+| Rescan guilds | 6h | Update guild info, roles, channels |
+| Check overdue tasks | 6h | Auto-miss penalty for expired tasks |
+| Health digest | 168h (1w) | Send weekly Slack summary |
+
+### 2. Work Engine (Jira Integration)
+
+**Purpose:** Synchronize enterprise task data into the workspace.
+
+The Work Engine connects to Jira via REST API. It polls configured projects per
+organisation, maps Jira issues to linked workers (via `WorkerIdentity`), and creates
+`Task` + `ScoreLog` entries automatically.
+
+**Security:**
+- All Jira URLs validated by `_validate_jira_url()` before any HTTP request
+- Blocks private IPs, loopback, link-local, AWS/GCP metadata endpoints
+- API tokens encrypted at rest using Fernet symmetric encryption
+- Graceful fallback if `JIRA_ENCRYPTION_KEY` is not set (dev mode)
 
 ---
 
-## Data Flow
+## The ML Pipeline
+
+### Model Summary
+
+| Module | Algorithm | Input Features | Output | Retrain Trigger |
+|---|---|---|---|---|
+| `anomaly.py` | Isolation Forest | 32-dim (message profile + hourly) | Per-user anomaly score + severity | `train_all()` or manual |
+| `burnout.py` | Weighted signals | 5 signals (volume, gaps, latency, streak, engagement) | Burnout score 0-100 | `train_all()` |
+| `forecast.py` | Random Forest + hourly profile | 30d hourly history + day-of-week | 24h prediction + daily total | Hourly via bot task |
+| `corrector.py` | Ridge + LogisticRegression | Admin correction history | Predicted score adjustment | `consume_retrain_request()` |
+| `federated.py` | LogisticRegression (FedAvg) | Per-guild off-hours features | Cross-guild classification | Round-based aggregation |
+| `growth.py` | Random Forest | 90d join/leave rates | 7d forecast | `train_all()` |
+| `work_anomaly.py` | Isolation Forest | 10-dim work features | Per-worker anomaly | `train_all()` |
+
+### The Self-Correction Loop (Forecast)
+
+The forecast model is the most actively self-correcting component:
 
 ```
-Community Engine (Discord Bot)
-       │
-       ▼  (HTTP POST via API client)
-Observer API Endpoints
-       │
-       ▼
-Database (PostgreSQL / SQLite)
-       │
-       ├──► ML Training (anomaly, burnout, forecast, corrector)
-       │         │
-       │         ▼
-       ├──► Workspace Routes (dashboard, workers, overrides)
-       │         │
-       │         ▼
-       └──► Jinja2 Templates (workspace pages)
-                 │
-                 ▼
-            Admin Dashboard
-                 │
-                 ▼
-            Admin Corrections ──► ML Retrain (closed-loop)
+1. predict_next_24h(guild_id, log_prediction=True)
+   → logs 24 PredictionLog rows (v2: resolution_version=2, actual_granularity=hourly)
+   → applies error-profile correction (capped ±30% per hour to prevent overfit)
+
+2. After 25h: resolve_outcomes() is called
+   → queries MessageRecord for actual hourly counts in that window
+   → stores actual_value per hour (NOT daily total in hourly rows)
+   → marks was_correct per hour and per day
+   → stamps resolution_version=2 and stores metadata (daily totals, signed errors)
+
+3. On next retrain: _build_error_profile(guild_id)
+   → computes per-hour bias and MAE from v2 resolved logs only
+   → legacy v1 logs (stored daily totals in hourly rows) are excluded
+
+4. Next prediction: applies bias correction from step 3
+   → if consistently over-predicting hour 14 → reduce prediction for that hour
+   → if consistently under-predicting hour 20 → increase prediction
+   → correction is conservative (capped) to prevent one bad day from overfitting
 ```
+
+### Accuracy Metrics
+
+| Metric | Calculation | Tolerance |
+|---|---|---|
+| Daily volume accuracy | `abs(predicted_daily - actual_daily) <= max(actual * 0.15, 25)` | Adaptive |
+| Hourly accuracy | `abs(predicted_hour - actual_hour) <= max(actual_hour * 0.25, 10)` | Per-hour adaptive |
+| MAE (daily) | Mean absolute error across all resolved runs | — |
+| MAE (hourly) | Mean absolute error across all resolved hours | — |
+
+All metrics filter to v2 logs only (`resolution_version=2, actual_granularity=hourly`).
+Legacy v1 logs are excluded from hourly accuracy (they stored daily totals in hourly rows).
+
+---
+
+## The Workspace (Output Layer)
+
+The workspace is the **primary interface** of SkillSync. It is a private company dashboard
+completely separate from Discord OAuth — organisations register independently.
+
+### Key Design
+
+- **14 pages** under `/workspace/` route prefix (`routes/workspace.py`)
+- **Auth**: email/password registration, bcrypt password hashing, rate-limited login
+- **Roles**: admin (full control), hr (review + correct), member (read-only)
+- **Security**: CSRF tokens on all mutation endpoints, session isolation per org
+
+### Data Flow Inside Workspace
+
+```
+Org registers → Admin invites members → Workers linked via Identities
+                                              │
+                    ┌─────────────────────────┼─────────────────────────┐
+                    │                         │                         │
+                    ▼                         ▼                         ▼
+            Community signals           Jira tasks              Admin corrections
+            (via identity link)         (auto-created)          (manual overrides)
+                    │                         │                         │
+                    └─────────────────────────┼─────────────────────────┘
+                                              │
+                                              ▼
+                                      Scoring Engine
+                                    (points + ML corrector)
+                                              │
+                                              ▼
+                                    Dashboard / Overrides
+                                              │
+                                              ▼
+                                    Admin reviews + corrects
+                                              │
+                                              ▼
+                                    ML retrains (closed loop)
+```
+
+---
+
+## Database Schema
+
+SkillSync uses 28 SQLAlchemy models. Key models:
+
+| Model | Stores | Estimated Rows (production) |
+|---|---|---|
+| `MessageRecord` | Per-message metadata (no content) | 52,400+ |
+| `Worker` | Worker profiles, scores | 1,000+ |
+| `Organisation` | Company/workspace accounts | 1-5 |
+| `OrgMember` | Workspace user accounts | 5-20 |
+| `WorkerIdentity` | Discord ↔ Jira identity links | 1,000+ |
+| `Task` | Assigned work items | 100+ |
+| `ScoreLog` | Score change history | 5,000+ |
+| `AdminCorrection` | Manual override history | 15+ |
+| `PredictionLog` | ML prediction + outcome history | 2,800+ v2 rows |
+| `BehavioralAnomaly` | Flagged anomalies | 200+ |
+| `BurnoutRisk` | Burnout predictions | 50+ |
+| `GuildInfo` | Discord server metadata | 4 |
+| `GuildMember` | Per-member guild state | 14,000+ |
+| `UserBehaviorBaseline` | Per-user historical profiles | 135+ |
+
+---
+
+## Security Architecture
+
+| Layer | Protection |
+|---|---|
+| **Network** | SSRF validation on all outbound requests (Jira) |
+| **Storage** | Fernet-encrypted Jira API tokens at rest |
+| **API** | Bearer token auth on observer + work engine endpoints |
+| **API rate limits** | 300 req/60s (observer), 200 req/60s (work engine) |
+| **Web** | CSP headers, X-Frame-Options, X-Content-Type-Options, Referrer-Policy |
+| **Auth** | bcrypt password hashing, rate-limited login (5/15min), session isolation |
+| **CSRF** | Token-based CSRF protection on all mutation endpoints |
+| **Request size** | 8MB maximum payload (MAX_CONTENT_LENGTH) |
+
+---
+
+## Deployment
+
+SkillSync is designed for local server deployment. All data stays on-premises.
+
+### Current Deployment
+
+- **Flask dashboard**: Running on port 5000
+- **Discord bot**: Connected to 4 Discord servers (largest: ~13,000 members)
+- **Database**: SQLite (dev), PostgreSQL-ready for production
+- **ngrok tunnel**: Optional — used for bot → Flask communication during dev
+
+### Entry Points
+
+| Command | What it starts |
+|---|---|
+| `python run_dashboard.py` | Flask dev server on :5000 |
+| `python run_bot.py` | Discord bot (requires DISCORD_TOKEN in .env) |
+| `python start_services.py` | Flask + bot + ngrok (detached Windows processes) |
+| `start.bat` | Batch launcher for all 3 services |
 
 ---
 
 ## Key Design Decisions
 
-1. **Workspace-first architecture** — The workspace is the primary interface.
-   The Discord bot is a data source, not a standalone product.
-2. **Metadata-first tracking** — Raw message content never stored.
-3. **Admin-in-the-loop** — Every ML decision is reviewable and overridable.
-   Corrections feed back into model retraining.
-4. **Federated learning** — Company data stays on-premises.
-5. **Security** — SSRF-safe Jira URLs, Fernet token encryption, rate-limited
-   login, CSP headers.
-6. **Academic prototype** — Designed as a final-year project. ML scoring should
-   not be used for real personnel decisions.
-
----
-
-## Running Locally
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env
-# Edit .env with your settings
-
-python run_dashboard.py    # Start Flask
-# or
-python run_bot.py          # Start Discord bot
-```
-
----
-
-## Developer Notes
-
-- **SQLite lock issues** — all DB ops for a test must be inside a single
-  `with app.app_context():` block.
-- **Two blueprints share `/api` prefix** — `api_bp` and `community_bp`.
-  Works currently but is fragile.
-- **Bot imports are safe** — importing bot modules does not start the bot.
-  Token is only used when `bot.start()` is called.
+1. **Workspace-first architecture** — The workspace is the primary interface. The Discord bot is a data source, not a standalone product.
+2. **Dual-engine, unified ML** — Both Community and Work engines feed the same ML pipeline. No separate training per source.
+3. **Metadata-first tracking** — Raw message content never stored. Only counts, rates, timestamps.
+4. **Admin-in-the-loop** — Every ML decision is reviewable and overridable. Corrections become training data.
+5. **Closed-loop learning** — Admin corrections → retrain → better predictions → fewer corrections needed.
+6. **Privacy by design** — Federated learning shares only patterns, not raw data. SSRF validation on all outbound calls.
+7. **Honest metrics** — v2-only accuracy reporting with clear sample counts. No mixing of granularities.
+8. **Academic prototype** — Designed as a final-year project. ML outputs should not be used for real personnel decisions.

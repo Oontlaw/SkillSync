@@ -402,30 +402,35 @@ async def jira_per_org_poll_loop():
     """Poll Jira for every org that has credentials configured.
     Auto-creates/updates tasks and awards points per org credentials.
     Runs every hour."""
-    from database import Organisation
-    from work_engine.connector_jira import poll_and_sync_for_org
+    from app import app
 
-    orgs = Organisation.query.filter(
-        Organisation.jira_url.isnot(None),
-        Organisation.jira_email.isnot(None),
-        Organisation.jira_api_token.isnot(None),
-        Organisation.jira_project.isnot(None),
-        Organisation.is_active.is_(True),
-    ).all()
+    with app.app_context():
+        from database import Organisation
+        from work_engine.connector_jira import poll_and_sync_for_org
 
-    if not orgs:
-        return
+        orgs = Organisation.query.filter(
+            Organisation.jira_url.isnot(None),
+            Organisation.jira_email.isnot(None),
+            Organisation.jira_api_token.isnot(None),
+            Organisation.jira_project.isnot(None),
+            Organisation.is_active.is_(True),
+        ).all()
 
-    print(f"[WorkEngine] Per-org Jira poll: {len(orgs)} org(s) configured")
-    for org in orgs:
-        try:
-            result = poll_and_sync_for_org(org)
-            if result.get("synced", 0) > 0:
-                print(f"[WorkEngine] Org {org.slug}: synced {result['synced']} tasks")
-            if result.get("errors", 0) > 0:
-                print(f"[WorkEngine] Org {org.slug}: {result['errors']} errors")
-        except Exception as e:
-            print(f"[WorkEngine] Org {org.slug}: poll error: {e}")
+        if not orgs:
+            return
+
+        print(f"[WorkEngine] Per-org Jira poll: {len(orgs)} org(s) configured")
+        for org in orgs:
+            try:
+                result = poll_and_sync_for_org(org)
+                if result.get("synced", 0) > 0:
+                    print(
+                        f"[WorkEngine] Org {org.slug}: synced {result['synced']} tasks"
+                    )
+                if result.get("errors", 0) > 0:
+                    print(f"[WorkEngine] Org {org.slug}: {result['errors']} errors")
+            except Exception as e:
+                print(f"[WorkEngine] Org {org.slug}: poll error: {e}")
 
 
 @tasks.loop(hours=6)
@@ -449,93 +454,98 @@ async def rescan_guilds_loop():
 async def check_overdue_tasks():
     """Check for tasks past their due date and notify Slack.
     Only notifies on exact day boundaries (1, 3, 7 days overdue) to avoid spam."""
-    try:
-        from services.slack import notify_task_overdue
+    from app import app
 
-        now = datetime.utcnow()
-        overdue = Task.query.filter(
-            Task.status == "pending",
-            Task.due_at != None,
-            Task.due_at < now,
-        ).all()
+    with app.app_context():
+        try:
+            from services.slack import notify_task_overdue
 
-        for task in overdue:
-            days_overdue = (now - task.due_at).days
-            # Only notify on exact day boundaries to avoid spam
-            if days_overdue not in (1, 3, 7):
-                continue
-            worker = Worker.query.get(task.worker_id)
-            if not worker:
-                continue
-            notify_task_overdue(
-                worker_name=worker.name,
-                task_title=task.title,
-                days_overdue=days_overdue,
-                worker_id=task.worker_id,
-            )
-    except Exception as e:
-        print(f"[check_overdue_tasks] error: {e}")
+            now = datetime.utcnow()
+            overdue = Task.query.filter(
+                Task.status == "pending",
+                Task.due_at != None,
+                Task.due_at < now,
+            ).all()
+
+            for task in overdue:
+                days_overdue = (now - task.due_at).days
+                if days_overdue not in (1, 3, 7):
+                    continue
+                worker = Worker.query.get(task.worker_id)
+                if not worker:
+                    continue
+                notify_task_overdue(
+                    worker_name=worker.name,
+                    task_title=task.title,
+                    days_overdue=days_overdue,
+                    worker_id=task.worker_id,
+                )
+        except Exception as e:
+            print(f"[check_overdue_tasks] error: {e}")
 
 
 @tasks.loop(hours=168)
 async def weekly_health_digest():
     """Send weekly team health summary to Slack for all orgs.
     Runs every 168 hours (1 week)."""
-    try:
-        from database import (
-            BehavioralAnomaly,
-            BurnoutRisk,
-            Organisation,
-            ScoreLog,
-            WorkerIdentity,
-        )
-        from database import Task as TaskModel
-        from database import Worker as WorkerModel
-        from services.slack import notify_team_health_summary
+    from app import app
 
-        cutoff_30 = datetime.utcnow() - timedelta(days=30)
-        cutoff_7 = datetime.utcnow() - timedelta(days=7)
-
-        orgs = Organisation.query.filter_by(is_active=True).all()
-        for org in orgs:
-            identities = WorkerIdentity.query.filter_by(
-                org_id=org.id, is_active=True
-            ).all()
-            green = yellow = red = 0
-
-            for ident in identities:
-                if not ident.worker_id:
-                    continue
-                logs = ScoreLog.query.filter(
-                    ScoreLog.worker_id == ident.worker_id,
-                    ScoreLog.created_at >= cutoff_30,
-                ).all()
-                score_30d = sum(s.change for s in logs)
-                score_7d = sum(s.change for s in logs if s.created_at >= cutoff_7)
-                missed = TaskModel.query.filter_by(
-                    worker_id=ident.worker_id, status="missed"
-                ).count()
-                burnout_score = 0
-                if ident.consent_community_prior and ident.discord_id:
-                    br = (
-                        BurnoutRisk.query.filter_by(discord_id=ident.discord_id)
-                        .order_by(BurnoutRisk.detected_at.desc())
-                        .first()
-                    )
-                    burnout_score = br.score if br else 0
-
-                if missed > 2 or score_30d < -20 or burnout_score > 60:
-                    red += 1
-                elif missed > 0 or score_30d < 0 or burnout_score > 30:
-                    yellow += 1
-                else:
-                    green += 1
-
-            notify_team_health_summary(
-                org_name=org.name,
-                green=green,
-                yellow=yellow,
-                red=red,
+    with app.app_context():
+        try:
+            from database import (
+                BehavioralAnomaly,
+                BurnoutRisk,
+                Organisation,
+                ScoreLog,
+                WorkerIdentity,
             )
-    except Exception as e:
-        print(f"[weekly_health_digest] error: {e}")
+            from database import Task as TaskModel
+            from database import Worker as WorkerModel
+            from services.slack import notify_team_health_summary
+
+            cutoff_30 = datetime.utcnow() - timedelta(days=30)
+            cutoff_7 = datetime.utcnow() - timedelta(days=7)
+
+            orgs = Organisation.query.filter_by(is_active=True).all()
+            for org in orgs:
+                identities = WorkerIdentity.query.filter_by(
+                    org_id=org.id, is_active=True
+                ).all()
+                green = yellow = red = 0
+
+                for ident in identities:
+                    if not ident.worker_id:
+                        continue
+                    logs = ScoreLog.query.filter(
+                        ScoreLog.worker_id == ident.worker_id,
+                        ScoreLog.created_at >= cutoff_30,
+                    ).all()
+                    score_30d = sum(s.change for s in logs)
+                    score_7d = sum(s.change for s in logs if s.created_at >= cutoff_7)
+                    missed = TaskModel.query.filter_by(
+                        worker_id=ident.worker_id, status="missed"
+                    ).count()
+                    burnout_score = 0
+                    if ident.consent_community_prior and ident.discord_id:
+                        br = (
+                            BurnoutRisk.query.filter_by(discord_id=ident.discord_id)
+                            .order_by(BurnoutRisk.detected_at.desc())
+                            .first()
+                        )
+                        burnout_score = br.score if br else 0
+
+                    if missed > 2 or score_30d < -20 or burnout_score > 60:
+                        red += 1
+                    elif missed > 0 or score_30d < 0 or burnout_score > 30:
+                        yellow += 1
+                    else:
+                        green += 1
+
+                notify_team_health_summary(
+                    org_name=org.name,
+                    green=green,
+                    yellow=yellow,
+                    red=red,
+                )
+        except Exception as e:
+            print(f"[weekly_health_digest] error: {e}")

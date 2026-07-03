@@ -201,13 +201,13 @@ endblock %} {% block content %}
                         {% for a in anomalies %}
                         <tr id="anomaly-row-{{ a.id }}">
                             <td
+                                title="{{ a.discord_id or 'N/A' }}"
                                 style="
                                     font-weight: 600;
                                     color: var(--text-primary);
                                 "
                             >
-                                {{ a.discord_id[:12] if a.discord_id else 'N/A'
-                                }}
+                                {{ a.display_name or a.name or (a.discord_id[:12] if a.discord_id else 'N/A') }}
                             </td>
                             <td>
                                 <span
@@ -1286,7 +1286,13 @@ endblock %} {% block content %}
             headers: csrfHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(body)
         }).then(r => {
-            if (r.ok) showToast(verdict === 'confirmed' ? 'Verified as ' + type : 'Dismissed ' + type, 'success');
+            if (!r.ok) throw new Error('feedback failed');
+            showToast(verdict === 'confirmed' ? 'Verified as ' + type : 'Dismissed ' + type, 'success');
+            if (type === 'burnout' && verdict === 'dismissed') {
+                const card = document.getElementById('burnout-card-' + id);
+                if (card) card.remove();
+                return;
+            }
             const cell = btn.parentElement;
             cell.innerHTML = `<span style="color: ${verdict === 'confirmed' ? 'var(--green)' : 'var(--text-dim)'}; font-size: 12px; font-weight: 500;">${verdict === 'confirmed' ? '✓ Confirmed' : '✗ Dismissed'}</span>`;
         }).catch(e => showToast('Failed to submit feedback', 'error'));

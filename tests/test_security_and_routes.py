@@ -52,6 +52,24 @@ def test_zero_access_never_falls_back_to_global_data(app, client):
     assert b'Hidden Worker' not in response.data
 
 
+def test_dashboard_anomalies_show_member_names(app, client):
+    with app.app_context():
+        worker = add_guild_worker('1', '100', 'Guild Alice')
+        db.session.add(BehavioralAnomaly(
+            discord_id=worker.discord_id,
+            guild_id='1',
+            anomaly_type='volume_spike',
+            severity=90,
+        ))
+        db.session.commit()
+
+    login_discord(client, ['1'])
+    response = client.get('/')
+
+    assert response.status_code == 200
+    assert b'Guild Alice' in response.data
+
+
 def test_cross_guild_worker_detail_is_rejected(app, client):
     with app.app_context():
         add_guild_worker('1', '100')

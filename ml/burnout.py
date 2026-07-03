@@ -29,6 +29,50 @@ SIGNAL_WEIGHTS = {
 }
 
 BURNOUT_FLAG_THRESHOLD = 0.40  # score >= 0.40 = flagged
+BURNOUT_DISMISS_COOLDOWN_DAYS = 7
+BURNOUT_CONFIRM_RETAIN_DAYS = 7
+BURNOUT_REACTIVATION_DELTA = 15
+
+
+def _parse_signals(raw_signals):
+    if not raw_signals:
+        return []
+    try:
+        parsed = json.loads(raw_signals)
+        if isinstance(parsed, list):
+            return [str(s) for s in parsed]
+    except Exception:
+        pass
+    return [s.strip().strip('"[] ') for s in raw_signals.split(",") if s.strip()]
+
+
+def _effective_signal_weights(days=90):
+    """Adjust signal weights using recent confirmed/dismissed burnout feedback."""
+    from database import BurnoutRisk
+
+    weights = SIGNAL_WEIGHTS.copy()
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    reviewed = BurnoutRisk.query.filter(
+        BurnoutRisk.feedback.in_(("confirmed", "dismissed")),
+        BurnoutRisk.feedback_at != None,
+        BurnoutRisk.feedback_at >= cutoff,
+    ).all()
+
+    signal_feedback = {signal: {"confirmed": 0, "dismissed": 0} for signal in weights}
+    for risk in reviewed:
+        for signal in _parse_signals(risk.signals):
+            if signal in signal_feedback:
+                signal_feedback[signal][risk.feedback] += 1
+
+    for signal, counts in signal_feedback.items():
+        total = counts["confirmed"] + counts["dismissed"]
+        if total < 3:
+            continue
+        confidence = (counts["confirmed"] - counts["dismissed"]) / total
+        weights[signal] = max(0.02, weights[signal] * (1 + confidence * 0.35))
+
+    total_weight = sum(weights.values()) or 1.0
+    return {signal: weight / total_weight for signal, weight in weights.items()}
 
 
 def _correction_rate(worker_id, days=30):
@@ -61,12 +105,19 @@ def _compute_signal_scores(discord_id, worker_id, days=30):
     triggered = []
 
     # 1. anomaly_freq — how many ML anomalies in last 30d
-    anomaly_count = BehavioralAnomaly.query.filter(
+    anomalies = BehavioralAnomaly.query.filter(
         BehavioralAnomaly.discord_id == discord_id,
         BehavioralAnomaly.detected_at >= cutoff,
         BehavioralAnomaly.anomaly_type == "ml_anomaly",
-    ).count()
-    signals["anomaly_freq"] = min(1.0, anomaly_count / 5.0)
+        db.or_(
+            BehavioralAnomaly.feedback == None,
+            BehavioralAnomaly.feedback != "dismissed",
+        ),
+    ).all()
+    anomaly_weighted_count = sum(
+        1.0 if anomaly.feedback == "confirmed" else 0.5 for anomaly in anomalies
+    )
+    signals["anomaly_freq"] = min(1.0, anomaly_weighted_count / 5.0)
     if signals["anomaly_freq"] >= 0.4:
         triggered.append("frequent_anomalies")
 
@@ -160,10 +211,11 @@ def _compute_signal_scores(discord_id, worker_id, days=30):
     return signals, triggered
 
 
-def _compute_burnout_score(signal_scores):
+def _compute_burnout_score(signal_scores, weights=None):
     """Weighted sum of signal scores -> burnout score 0.0-1.0."""
+    weights = weights or _effective_signal_weights()
     total = 0.0
-    for signal, weight in SIGNAL_WEIGHTS.items():
+    for signal, weight in weights.items():
         total += float(signal_scores.get(signal, 0.0)) * weight
     return round(total, 4)
 
@@ -204,6 +256,7 @@ def train(contamination=0.1, days=30):
         "note": "IsolationForest replaced — no training needed for weighted scoring",
         "threshold": BURNOUT_FLAG_THRESHOLD,
         "signals": list(SIGNAL_WEIGHTS.keys()),
+        "effective_weights": _effective_signal_weights(),
     }
 
 
@@ -217,17 +270,35 @@ def score_worker(discord_id, days=30, guild_id=None):
         return None
 
     signal_scores, triggered = _compute_signal_scores(discord_id, worker.id, days)
-    burnout_score_float = _compute_burnout_score(signal_scores)
+    effective_weights = _effective_signal_weights()
+    burnout_score_float = _compute_burnout_score(signal_scores, effective_weights)
     burnout_score_int = int(burnout_score_float * 100)
     is_flagged = burnout_score_float >= BURNOUT_FLAG_THRESHOLD
+    suppressed = False
+    existing = BurnoutRisk.query.filter_by(discord_id=discord_id).first()
+    if is_flagged and existing and existing.feedback == "dismissed":
+        cooldown_until = (
+            existing.feedback_at + timedelta(days=BURNOUT_DISMISS_COOLDOWN_DAYS)
+            if existing.feedback_at
+            else None
+        )
+        cooldown_active = cooldown_until and datetime.utcnow() < cooldown_until
+        score_reactivated = burnout_score_int >= (
+            float(existing.score or 0) + BURNOUT_REACTIVATION_DELTA
+        )
+        if cooldown_active and not score_reactivated:
+            is_flagged = False
+            suppressed = True
 
     result = {
         "burnout_score": burnout_score_int,
         "burnout_score_float": burnout_score_float,
         "is_flagged": is_flagged,
+        "suppressed": suppressed,
         "raw_anomaly_score": burnout_score_float,
         "signals": triggered,
         "signal_scores": signal_scores,
+        "effective_weights": effective_weights,
         "threshold": BURNOUT_FLAG_THRESHOLD,
         "method": "weighted_signal_scoring",
     }
@@ -242,12 +313,27 @@ def score_worker(discord_id, days=30, guild_id=None):
     )
 
     if is_flagged:
-        existing = BurnoutRisk.query.filter_by(discord_id=discord_id).first()
         signals_str = json.dumps(triggered)
         if existing:
+            if (
+                existing.feedback == "confirmed"
+                and existing.feedback_at
+                and existing.feedback_at
+                < datetime.utcnow() - timedelta(days=BURNOUT_CONFIRM_RETAIN_DAYS)
+            ):
+                existing.feedback = None
+                existing.feedback_at = None
             existing.score = float(burnout_score_int)
+            existing.name = worker.name
             existing.signals = signals_str
+            existing.anomaly_freq = float(signal_scores.get("anomaly_freq", 0.0))
+            existing.volume_volatility = float(signal_scores.get("volume_drop", 0.0))
+            existing.reversal_rate = float(signal_scores.get("reversal_rate", 0.0))
+            existing.voice_creep = float(signal_scores.get("voice_creep", 0.0))
             existing.detected_at = datetime.utcnow()
+            if existing.feedback == "dismissed":
+                existing.feedback = None
+                existing.feedback_at = None
         else:
             db.session.add(
                 BurnoutRisk(
@@ -256,6 +342,10 @@ def score_worker(discord_id, days=30, guild_id=None):
                     guild_id=guild_id,
                     name=worker.name,
                     score=float(burnout_score_int),
+                    anomaly_freq=float(signal_scores.get("anomaly_freq", 0.0)),
+                    volume_volatility=float(signal_scores.get("volume_drop", 0.0)),
+                    reversal_rate=float(signal_scores.get("reversal_rate", 0.0)),
+                    voice_creep=float(signal_scores.get("voice_creep", 0.0)),
                     signals=signals_str,
                     detected_at=datetime.utcnow(),
                 )
@@ -277,6 +367,16 @@ def score_worker(discord_id, days=30, guild_id=None):
                 )
         except Exception:
             pass
+    elif existing:
+        existing.score = float(burnout_score_int)
+        existing.name = worker.name
+        existing.signals = json.dumps(triggered)
+        existing.anomaly_freq = float(signal_scores.get("anomaly_freq", 0.0))
+        existing.volume_volatility = float(signal_scores.get("volume_drop", 0.0))
+        existing.reversal_rate = float(signal_scores.get("reversal_rate", 0.0))
+        existing.voice_creep = float(signal_scores.get("voice_creep", 0.0))
+        existing.detected_at = datetime.utcnow()
+        db.session.commit()
 
     # Update cross-model signal in UserBehaviorBaseline
     try:

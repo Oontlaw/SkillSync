@@ -78,6 +78,54 @@ def refresh_accessible_guilds():
         session.modified = True
 
 
+def attach_anomaly_display_names(anomalies, guild_filter_ids=None):
+    """Attach a human-readable display name to dashboard anomaly rows."""
+    discord_ids = {a.discord_id for a in anomalies if a.discord_id}
+    if not discord_ids:
+        return anomalies
+
+    guild_filter_ids = list(guild_filter_ids or [])
+    members_query = GuildMember.query.filter(GuildMember.member_id.in_(discord_ids))
+    if guild_filter_ids:
+        members_query = members_query.filter(GuildMember.guild_id.in_(guild_filter_ids))
+
+    member_names_by_key = {}
+    member_names_by_id = {}
+    for member in members_query.all():
+        display_name = member.display_name or member.name
+        if not display_name:
+            continue
+        member_names_by_key[(member.member_id, member.guild_id)] = display_name
+        member_names_by_id.setdefault(member.member_id, display_name)
+
+    worker_names = {
+        worker.discord_id: worker.name
+        for worker in Worker.query.filter(Worker.discord_id.in_(discord_ids)).all()
+        if worker.discord_id and worker.name
+    }
+
+    message_names = {}
+    messages_query = MessageRecord.query.filter(MessageRecord.discord_id.in_(discord_ids))
+    if guild_filter_ids:
+        messages_query = messages_query.filter(MessageRecord.guild_id.in_(guild_filter_ids))
+    recent_messages = messages_query.order_by(MessageRecord.created_at.desc()).limit(200)
+    for message in recent_messages:
+        if message.name:
+            message_names.setdefault(message.discord_id, message.name)
+
+    for anomaly in anomalies:
+        fallback = anomaly.discord_id[:12] if anomaly.discord_id else "N/A"
+        anomaly.display_name = (
+            anomaly.name
+            or member_names_by_key.get((anomaly.discord_id, anomaly.guild_id))
+            or member_names_by_id.get(anomaly.discord_id)
+            or worker_names.get(anomaly.discord_id)
+            or message_names.get(anomaly.discord_id)
+            or fallback
+        )
+    return anomalies
+
+
 @dashboard_bp.route("/")
 def index(template_name="dashboard.html"):
     user = session.get("user")
@@ -413,9 +461,31 @@ def index(template_name="dashboard.html"):
     recent_anomalies = (
         recent_anomalies.order_by(BehavioralAnomaly.severity.desc()).limit(10).all()
     )
+    attach_anomaly_display_names(recent_anomalies, guild_filter_ids)
 
-    # Burnout risks (#2)
-    burnout_risks = BurnoutRisk.query.order_by(BurnoutRisk.score.desc()).limit(5).all()
+    # Burnout risks (#2). Feedback remains available for learning/precision, but
+    # confirmed risks only stay active for a short review window and dismissed
+    # risks remain hidden unless a later scan reactivates them.
+    burnout_threshold = ml_burnout.BURNOUT_FLAG_THRESHOLD * 100
+    burnout_confirmed_cutoff = datetime.utcnow() - timedelta(
+        days=ml_burnout.BURNOUT_CONFIRM_RETAIN_DAYS
+    )
+    burnout_risks = (
+        BurnoutRisk.query.filter(
+            BurnoutRisk.score >= burnout_threshold,
+            db.or_(
+                db.and_(
+                    BurnoutRisk.feedback == "confirmed",
+                    BurnoutRisk.feedback_at != None,
+                    BurnoutRisk.feedback_at >= burnout_confirmed_cutoff,
+                ),
+                BurnoutRisk.feedback == None,
+            )
+        )
+        .order_by(BurnoutRisk.score.desc())
+        .limit(5)
+        .all()
+    )
 
     # Join/Leave stats for growth analysis
     cutoff = datetime.utcnow() - timedelta(days=7)
@@ -1271,6 +1341,14 @@ def dashboard_ml_anomaly_feedback():
     anomaly.feedback_at = datetime.utcnow()
     db.session.commit()
 
+    try:
+        from ml import anomaly as ml_anomaly
+
+        ml_anomaly.resolve_anomaly_outcomes(days_back=30)
+        ml_burnout.score_worker(anomaly.discord_id)
+    except Exception:
+        pass
+
     return jsonify({"status": "ok", "feedback": feedback, "anomaly_id": anomaly.id})
 
 
@@ -1302,6 +1380,11 @@ def dashboard_ml_burnout_feedback():
     risk.feedback = feedback
     risk.feedback_at = datetime.utcnow()
     db.session.commit()
+
+    try:
+        ml_burnout.resolve_burnout_outcomes(days_back=30)
+    except Exception:
+        pass
 
     return jsonify({"status": "ok", "feedback": feedback, "risk_id": risk.id})
 

@@ -1871,6 +1871,10 @@ def ml_burnout_feedback():
     risk.feedback = feedback
     risk.feedback_at = datetime.utcnow()
     db.session.commit()
+    try:
+        ml_burnout.resolve_burnout_outcomes(days_back=30)
+    except Exception:
+        pass
     return jsonify({"status": "ok", "feedback": feedback, "risk_id": risk.id})
 
 

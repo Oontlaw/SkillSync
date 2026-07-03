@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 SkillSync Discord Bot — bot entry point.
 
