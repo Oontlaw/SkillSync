@@ -1420,7 +1420,7 @@ def workspace_overrides():
 
         status = ml_engine.get_model_status()
         acc = status.get("accuracy_metrics", {}).get("forecast", {})
-        ml_accuracy = acc.get("accuracy_pct")
+        ml_accuracy = acc.get("daily", {}).get("accuracy_pct")
         total_corrections_used = AdminCorrection.query.count()
     except Exception:
         total_corrections_used = AdminCorrection.query.count()

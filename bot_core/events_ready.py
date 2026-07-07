@@ -26,6 +26,7 @@ from bot_core.tasks import (
     check_ping_joins,
     check_reversed_actions,
     flush_all_buffers,
+    forecast_logging_loop,
     jira_per_org_poll_loop,
     jira_poll_loop,
     message_cleanup_loop,
@@ -73,6 +74,8 @@ async def handle_ready(bot):
         jira_per_org_poll_loop.start()
     if not rescan_guilds_loop.is_running():
         rescan_guilds_loop.start()
+    if not forecast_logging_loop.is_running():
+        forecast_logging_loop.start()
     if not check_overdue_tasks.is_running():
         check_overdue_tasks.start()
     if not weekly_health_digest.is_running():

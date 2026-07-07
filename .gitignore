@@ -72,6 +72,9 @@ SUBMISSION_NOTES.md
 brain.md
 docs/future_prospects.md
 
+# Changelog — not version-controlled, records major architecture changes
+CHANGELOG.md
+
 # One-off scripts and generated files
 AGENTS*.md
 DOCS.md
@@ -104,9 +107,13 @@ start-dev.bat
 
 # Editor / agent config
 .opencode/
+opencode.json
 .agents/
 
 # Local launchers (machine-specific paths)
 start.bat
 stop.bat
 nul
+
+# Bot watchdog — auto-restart on crash (machine-local)
+bot_watchdog.py

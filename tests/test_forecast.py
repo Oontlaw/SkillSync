@@ -53,17 +53,22 @@ def _seed_messages(app, guild_id, days=35, msgs_per_day=100):
     db.session.commit()
 
 
-def _seed_forecast_log(app, guild_id, days_ago, daily_pred, actual, run_id=None):
+def _seed_forecast_log(
+    app, guild_id, days_ago, daily_pred, actual, run_id=None, lead_bucket_hours=24
+):
     """Seed a resolved forecast PredictionLog for a guild on a past day.
 
     Distributes both predictions and actuals across 24 hours so each
     hourly PredictionLog row gets its matching hour's counts.
+    target_day and lead_bucket_hours are stored in metadata for
+    case-based deduplication.
     """
     import uuid
 
     run_id = run_id or str(uuid.uuid4())[:8]
     pred_time = datetime.utcnow() - timedelta(days=days_ago)
     target_start = pred_time.replace(hour=0, minute=0, second=0, microsecond=0)
+    target_day = target_start.strftime("%Y-%m-%d")
 
     # Distribute predictions across hours
     pred_hourly = [max(1, daily_pred // 24)] * 24
@@ -83,6 +88,8 @@ def _seed_forecast_log(app, guild_id, days_ago, daily_pred, actual, run_id=None)
             "daily_total": daily_pred,
             "target_start": target_start.isoformat(),
             "target_end": (target_start + timedelta(hours=24)).isoformat(),
+            "target_day": target_day,
+            "lead_bucket_hours": lead_bucket_hours,
             "resolution_version": 2,
             "actual_granularity": "hourly",
         }
@@ -371,7 +378,7 @@ def test_observer_forecast_endpoint_logs(app, client):
         db.session.commit()
 
     resp = client.post(
-        f"/api/observer/ml/forecast/{gid}",
+        f"/api/observer/ml/forecast/{gid}?log=true",
         headers={"Authorization": "Bearer test-api-key"},
     )
     assert resp.status_code == 200, f"Observer forecast returned {resp.status_code}"
@@ -587,6 +594,8 @@ def test_legacy_logs_excluded_from_v2_metrics(app):
                 "daily_total": 1000,
                 "target_start": v2_target_start.isoformat(),
                 "target_end": (v2_target_start + timedelta(hours=24)).isoformat(),
+                "target_day": v2_target_start.strftime("%Y-%m-%d"),
+                "lead_bucket_hours": 24,
                 "resolution_version": 2,
                 "actual_granularity": "hourly",
             }
@@ -688,3 +697,337 @@ def test_resolved_log_has_version_marker(app):
             assert meta.get("actual_granularity") == "hourly", (
                 f"Log {log.id} missing actual_granularity=hourly"
             )
+
+
+def test_forecast_deduplication(app):
+    """Forecast logging must deduplicate by (guild_id, target_day, lead_bucket).
+    Calling predict_next_24h with log_prediction=True twice for the same
+    lead bucket must create only one set of 24 rows."""
+    import uuid
+
+    with app.app_context():
+        gid = "dedup-test"
+        db.session.add(GuildInfo(guild_id=gid, name="Dedup Test"))
+        _seed_messages(app, gid, days=35)
+        db.session.commit()
+
+        train(gid, days=30)
+
+        # First call — should log
+        count_before = PredictionLog.query.count()
+        preds1 = predict_next_24h(gid, log_prediction=True, lead_bucket_hours=24)
+        assert preds1 is not None
+        count_mid = PredictionLog.query.count()
+        assert count_mid == count_before + 24, (
+            f"First call should create 24 rows, got {count_mid - count_before}"
+        )
+
+        # Second call with same lead bucket — should NOT log (dedup)
+        preds2 = predict_next_24h(gid, log_prediction=True, lead_bucket_hours=24)
+        assert preds2 is not None
+        count_after = PredictionLog.query.count()
+        assert count_after == count_mid, (
+            f"Duplicate forecast created {count_after - count_mid} extra rows"
+        )
+
+        # Different lead bucket — should log
+        preds3 = predict_next_24h(gid, log_prediction=True, lead_bucket_hours=12)
+        assert preds3 is not None
+        count_final = PredictionLog.query.count()
+        assert count_final == count_after + 24, (
+            f"Different lead bucket should create 24 rows, got {count_final - count_after}"
+        )
+
+
+def test_daily_bias_correction(app):
+    """Daily bias correction should adjust future predictions based on
+    resolved error history."""
+    with app.app_context():
+        gid = "bias-correction-test"
+        db.session.add(GuildInfo(guild_id=gid, name="Bias Correction Test"))
+        _seed_messages(app, gid, days=35)
+        db.session.commit()
+
+        train(gid, days=30)
+
+        # Seed resolved logs that show consistent overprediction
+        for i in range(3):
+            _seed_forecast_log(
+                app,
+                gid,
+                days_ago=2 + i,
+                daily_pred=1000,
+                actual=500,
+                run_id=f"bias-run-{i}",
+            )
+        db.session.commit()
+
+        from ml.forecast import _build_daily_error_profile
+
+        profile = _build_daily_error_profile(gid, days=30)
+        assert profile, "Expected daily error profile"
+        assert profile["samples"] >= 2, (
+            f"Expected >= 2 samples, got {profile['samples']}"
+        )
+        assert profile["signed_error"] > 0, (
+            f"Expected positive signed_error (overprediction), got {profile['signed_error']}"
+        )
+        assert profile["error_ratio"] > 0, (
+            f"Expected positive error_ratio, got {profile['error_ratio']}"
+        )
+
+        preds = predict_next_24h(gid, log_prediction=False)
+        assert preds is not None
+        assert sum(preds) > 0, "Prediction should be non-zero"
+
+
+def test_inactive_guild_guard(app):
+    """Inactive guilds (no messages for 72h) should return near-zero forecast."""
+    with app.app_context():
+        gid = "inactive-test"
+        db.session.add(GuildInfo(guild_id=gid, name="Inactive Test"))
+        db.session.commit()
+
+        old_time = datetime.utcnow() - timedelta(days=80)
+        for _ in range(10):
+            db.session.add(
+                MessageRecord(
+                    guild_id=gid,
+                    discord_id="old-user",
+                    channel_name="general",
+                    hour_of_day=12,
+                    created_at=old_time,
+                    is_public_channel=True,
+                )
+            )
+        db.session.commit()
+
+        from ml.forecast import _check_inactivity
+
+        is_inactive, recent_count, factor = _check_inactivity(gid)
+        assert is_inactive, (
+            f"Guild should be inactive (0 msgs in 72h), got count={recent_count}"
+        )
+        assert factor == 0.0, f"Inactivity factor should be 0.0, got {factor}"
+
+        preds = predict_next_24h(gid, log_prediction=False)
+        assert preds is not None, "Inactive guild should still return a forecast"
+        assert sum(preds) == 24, (
+            f"Inactive guild should predict 24 total, got {sum(preds)}"
+        )
+        assert all(p == 1 for p in preds), "Each hour should predict 1 message"
+
+
+def test_lead_bucket_metrics(app):
+    """get_accuracy_metrics should report daily accuracy broken down
+    by lead bucket, accessible via daily.by_lead_bucket."""
+    import uuid
+
+    with app.app_context():
+        gid = "lead-bucket-test"
+        db.session.add(GuildInfo(guild_id=gid, name="Lead Bucket Test"))
+        db.session.commit()
+
+        for lead_bucket, daily_pred, actual, days_ago in [
+            (24, 500, 480, 1),
+            (18, 500, 480, 2),
+            (12, 500, 200, 3),
+            (6, 500, 480, 4),
+        ]:
+            run_id = str(uuid.uuid4())[:8]
+            pred_time = datetime.utcnow() - timedelta(days=days_ago)
+            target_start = pred_time.replace(hour=0, minute=0, second=0, microsecond=0)
+            pred_hourly = [max(1, daily_pred // 24)] * 24
+            for i in range(daily_pred % 24):
+                pred_hourly[i] += 1
+            actual_hourly = [max(1, actual // 24)] * 24
+            for i in range(actual % 24):
+                actual_hourly[i] += 1
+
+            for h in range(24):
+                meta = {
+                    "guild_id": gid,
+                    "predicted_hour": h,
+                    "prediction_run": run_id,
+                    "daily_total": daily_pred,
+                    "target_start": target_start.isoformat(),
+                    "target_end": (target_start + timedelta(hours=24)).isoformat(),
+                    "lead_bucket_hours": lead_bucket,
+                    "target_day": target_start.strftime("%Y-%m-%d"),
+                    "resolution_version": 2,
+                    "actual_granularity": "hourly",
+                }
+                db.session.add(
+                    PredictionLog(
+                        model_name="forecast",
+                        prediction_value=pred_hourly[h],
+                        features_json=json.dumps(
+                            {"hour": h, "daily_prediction": daily_pred}
+                        ),
+                        metadata_json=json.dumps(meta),
+                        actual_value=actual_hourly[h],
+                        prediction_time=pred_time,
+                    )
+                )
+        db.session.commit()
+
+        metrics = get_accuracy_metrics(days=None, guild_id=gid)
+        assert "daily" in metrics
+        assert "by_lead_bucket" in metrics["daily"], (
+            "Expected by_lead_bucket in daily metrics"
+        )
+        by_lead = metrics["daily"]["by_lead_bucket"]
+        assert len(by_lead) >= 2, f"Expected at least 2 lead buckets, got {by_lead}"
+
+        for bucket_key in ["24", "18", "12", "6"]:
+            if bucket_key in by_lead:
+                bucket = by_lead[bucket_key]
+                assert "accuracy_pct" in bucket
+                assert "samples" in bucket
+                assert "mean_absolute_error" in bucket
+                assert bucket["samples"] == 1, (
+                    f"Expected 1 sample for lead bucket {bucket_key}, got {bucket['samples']}"
+                )
+
+        assert metrics["daily"]["samples"] >= 4, (
+            f"Expected 4+ total daily samples, got {metrics['daily']['samples']}"
+        )
+
+
+def test_tasks_module_import(app):
+    """bot_core.tasks module should import without crashing.
+    Previously crashed because @tasks.loop was applied to a synchronous
+    _compute_lead_bucket function."""
+    import bot_core.tasks as bt
+
+    assert bt is not None
+    assert hasattr(bt, "_compute_lead_bucket")
+    assert hasattr(bt, "forecast_logging_loop")
+    assert hasattr(bt, "check_reversed_actions")
+
+
+def test_compute_lead_bucket_is_callable(app):
+    """_compute_lead_bucket should be a plain function (not a task loop)
+    and return a valid lead bucket when called directly."""
+    from bot_core.tasks import _compute_lead_bucket
+
+    now = datetime.utcnow()
+    result = _compute_lead_bucket(now)
+    assert result in [24, 18, 12, 6], f"Expected lead bucket 24/18/12/6, got {result}"
+
+
+def test_forecast_dedup_exceeds_limit(app):
+    """Dedup should work even when more than 100 forecast rows exist.
+    The old _forecast_exists used .limit(100) which could miss matches."""
+    import uuid
+
+    with app.app_context():
+        gid = "dedup-limit-test"
+        db.session.add(GuildInfo(guild_id=gid, name="Dedup Limit Test"))
+        _seed_messages(app, gid, days=35)
+        db.session.commit()
+        train(gid, days=30)
+
+        # Create 150+ rows of "noise" for other guilds to exceed old .limit(100)
+        for i in range(7):  # 7 * 24 = 168 rows
+            noise_gid = f"noise-guild-{i}"
+            noise_run = str(uuid.uuid4())[:8]
+            noise_time = datetime.utcnow() - timedelta(hours=1)
+            noise_target_day = (noise_time + timedelta(days=1)).strftime("%Y-%m-%d")
+            for h in range(24):
+                db.session.add(
+                    PredictionLog(
+                        model_name="forecast",
+                        prediction_value=10,
+                        features_json=json.dumps({"hour": h}),
+                        metadata_json=json.dumps(
+                            {
+                                "guild_id": noise_gid,
+                                "prediction_run": noise_run,
+                                "target_day": noise_target_day,
+                                "lead_bucket_hours": 24,
+                                "resolution_version": 2,
+                                "actual_granularity": "hourly",
+                            }
+                        ),
+                        prediction_time=noise_time,
+                    )
+                )
+        db.session.commit()
+
+        # Total rows should exceed 100
+        total_before = PredictionLog.query.count()
+        assert total_before > 100, (
+            f"Need 100+ noise rows for this test, got {total_before}"
+        )
+
+        # First real forecast call - should log 24 rows
+        count_before = total_before
+        preds1 = predict_next_24h(gid, log_prediction=True, lead_bucket_hours=24)
+        assert preds1 is not None
+        count_mid = PredictionLog.query.count()
+        assert count_mid == count_before + 24, (
+            f"First call should create 24 rows, got {count_mid - count_before}"
+        )
+
+        # Second call with same lead bucket - should NOT log (dedup)
+        preds2 = predict_next_24h(gid, log_prediction=True, lead_bucket_hours=24)
+        assert preds2 is not None
+        count_after = PredictionLog.query.count()
+        assert count_after == count_mid, (
+            f"Duplicate should be skipped even with 150+ noise rows, "
+            f"got {count_after - count_mid} extra rows"
+        )
+
+
+def test_daily_accuracy_counts_cases_not_runs(app):
+    """Daily accuracy should count one sample per (guild, target_day, lead_bucket)
+    case, even if multiple prediction_run values exist for the same case
+    (e.g. from old duplicate bugs)."""
+    import uuid
+
+    with app.app_context():
+        gid = "acc-case-test"
+        db.session.add(GuildInfo(guild_id=gid, name="Acc Case Test"))
+        db.session.commit()
+
+        target_day = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
+        pred_time = datetime.utcnow() - timedelta(days=1)
+
+        # Create two prediction_runs for the SAME case (same guild, target_day, lead_bucket)
+        for run_idx in range(2):
+            run_id = str(uuid.uuid4())[:8]
+            for h in range(24):
+                meta = {
+                    "guild_id": gid,
+                    "prediction_run": run_id,
+                    "daily_total": 500,
+                    "target_start": pred_time.replace(
+                        hour=0, minute=0, second=0, microsecond=0
+                    ).isoformat(),
+                    "target_end": (
+                        pred_time.replace(hour=0, minute=0, second=0, microsecond=0)
+                        + timedelta(hours=24)
+                    ).isoformat(),
+                    "target_day": target_day,
+                    "lead_bucket_hours": 24,
+                    "resolution_version": 2,
+                    "actual_granularity": "hourly",
+                }
+                db.session.add(
+                    PredictionLog(
+                        model_name="forecast",
+                        prediction_value=20,
+                        features_json=json.dumps({"hour": h, "daily_prediction": 500}),
+                        metadata_json=json.dumps(meta),
+                        actual_value=20,
+                        prediction_time=pred_time,
+                    )
+                )
+        db.session.commit()
+
+        metrics = get_accuracy_metrics(days=None, guild_id=gid)
+        assert metrics["daily"]["samples"] == 1, (
+            f"Expected 1 daily sample (deduped by case), "
+            f"got {metrics['daily']['samples']}"
+        )

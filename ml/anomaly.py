@@ -209,7 +209,7 @@ def scan_all(min_msgs=10, days=30, guild_id=None):
     X, ids = all_user_vectors_with_corrections(
         days=days, min_msgs=min_msgs, guild_id=guild_id
     )
-    path = _model_path(guild_id)
+    path = model_path("anomaly", guild_id)
     if not os.path.exists(path):
         path = ANOMALY_MODEL_PATH
     if X.shape[0] < 5 or not os.path.exists(path):

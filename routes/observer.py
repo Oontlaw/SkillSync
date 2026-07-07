@@ -399,6 +399,9 @@ def log_activity():
     channel = data.get("channel")
     guild = data.get("guild")
 
+    if not discord_id or not staff_name:
+        return jsonify({"error": "discord_id and staff_name are required"}), 400
+
     if discord_id not in staff_activity:
         staff_activity[discord_id] = {
             "name": staff_name,
@@ -492,7 +495,7 @@ def log_automod_trigger():
 def get_staff_activity():
     """Returns current in-session staff activity summary."""
     summary = {
-        discord_id: {
+        str(discord_id): {
             "name": v["name"],
             "message_count": v["message_count"],
             "channels_active": list(v["channels"]),
@@ -500,6 +503,7 @@ def get_staff_activity():
             "last_seen": v.get("last_seen") or "",
         }
         for discord_id, v in staff_activity.items()
+        if discord_id is not None
     }
     return jsonify(summary)
 
@@ -1742,8 +1746,19 @@ def ml_status():
 @require_api_key
 def ml_forecast_guild(guild_id):
     """Get 24h activity forecast for a guild.
-    Logs prediction history so accuracy can be tracked."""
-    preds = ml_forecast.predict_next_24h(guild_id, log_prediction=True)
+
+    By default (page views), does NOT log prediction history.
+    Pass ?log=true to log (scheduled/bot runs create accuracy samples).
+    Pass ?lead_bucket=18 to set the lead bucket (default 24).
+    """
+    log_prediction = request.args.get("log", "false").lower() == "true"
+    lead_bucket = request.args.get("lead_bucket", 24, type=int)
+    # Clamp lead bucket to valid range
+    lead_bucket = max(1, min(24, lead_bucket))
+
+    preds = ml_forecast.predict_next_24h(
+        guild_id, log_prediction=log_prediction, lead_bucket_hours=lead_bucket
+    )
     if preds is None:
         return jsonify({"error": "No forecast available for this guild"}), 404
     return jsonify(
@@ -1751,6 +1766,8 @@ def ml_forecast_guild(guild_id):
             "guild_id": guild_id,
             "forecast": preds.tolist() if hasattr(preds, "tolist") else list(preds),
             "hours": list(range(24)),
+            "lead_bucket_hours": lead_bucket,
+            "logged": log_prediction,
         }
     )
 

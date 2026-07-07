@@ -283,11 +283,18 @@ def get_model_status():
 
 
 def get_model_health():
-    """Check for model drift — returns dict with drift_detected and drift_reasons."""
+    """Check for model drift — returns dict with drift_detected and drift_reasons.
+
+    Uses deduplicated daily accuracy (by prediction run) for fair drift detection.
+    Separates daily volume accuracy from hourly shape accuracy.
+    """
     health = {
         "drift_detected": False,
         "drift_reasons": [],
         "forecast_accuracy": None,
+        "forecast_daily_accuracy": None,
+        "forecast_hourly_accuracy": None,
+        "forecast_accuracy_by_lead_bucket": {},
         "anomaly_precision": None,
         "burnout_precision": None,
     }
@@ -295,13 +302,30 @@ def get_model_health():
     try:
         forecast_metrics = get_all_accuracy_metrics(days=7)
         forecast_data = forecast_metrics.get("forecast", {})
-        accuracy_pct = forecast_data.get("daily", {}).get("accuracy_pct")
-        if accuracy_pct is not None:
-            health["forecast_accuracy"] = accuracy_pct
-            if accuracy_pct < 50:
+        daily = forecast_data.get("daily", {})
+        hourly = forecast_data.get("hourly", {})
+
+        # Daily volume accuracy (deduped by run)
+        daily_acc = daily.get("accuracy_pct")
+        health["forecast_daily_accuracy"] = daily_acc
+        health["forecast_daily_samples"] = daily.get("samples", 0)
+
+        # Hourly shape accuracy
+        hourly_acc = hourly.get("accuracy_pct")
+        health["forecast_hourly_accuracy"] = hourly_acc
+
+        # Overall forecast accuracy (daily, for backward compat)
+        health["forecast_accuracy"] = daily_acc
+
+        # Per-lead-bucket accuracy
+        health["forecast_accuracy_by_lead_bucket"] = daily.get("by_lead_bucket", {})
+
+        # Drift detection uses deduped daily accuracy only
+        if daily_acc is not None and daily.get("samples", 0) >= 2:
+            if daily_acc < 50:
                 health["drift_detected"] = True
                 health["drift_reasons"].append(
-                    f"Forecast accuracy {accuracy_pct}% < 50%"
+                    f"Forecast daily accuracy {daily_acc}% ({daily.get('samples', 0)} runs) < 50%"
                 )
     except Exception as e:
         health["forecast_accuracy_error"] = str(e)

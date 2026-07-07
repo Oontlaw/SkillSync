@@ -26,8 +26,6 @@ from bot_core.state import (  # re-exported for other modules
     flush_online_count,
     flush_presence_buffer,
     flush_voice_buffer,
-    inc_forecast_counter,
-    reset_forecast_counter,
 )
 from database import Task, Worker, db
 from scoring import award_points
@@ -178,32 +176,6 @@ async def check_reversed_actions():
         await api_post("/observer/ml/anomalies/scan", {"trigger": "hourly"})
     print(f"[Observer] ML burnout scan...")
     await api_post("/observer/ml/burnout-scan", {"trigger": "hourly"})
-
-    # ML forecast: run prediction every hour (direct hourly scheduling)
-    print(f"[Observer] Running ML forecast predictions...")
-    try:
-        resp = await asyncio.to_thread(
-            requests.get,
-            f"{SKILLSYNC_API}/observer/guilds",
-            headers={"Authorization": f"Bearer {API_KEY}"},
-            timeout=5,
-        )
-        if resp.ok:
-            data = resp.json()
-            guilds = data if isinstance(data, list) else data.get("value", [])
-            for g in guilds:
-                gid = g["guild_id"] if isinstance(g, dict) else g
-                try:
-                    await asyncio.to_thread(
-                        requests.get,
-                        f"{SKILLSYNC_API}/observer/ml/forecast/{gid}",
-                        headers={"Authorization": f"Bearer {API_KEY}"},
-                        timeout=10,
-                    )
-                except Exception:
-                    pass
-    except Exception as e:
-        print(f"[Observer] Forecast prediction error: {e}")
 
     # ML forecast: resolve pending outcomes every heartbeat (cheap query)
     print(f"[Observer] Resolving forecast outcomes...")
@@ -431,6 +403,62 @@ async def jira_per_org_poll_loop():
                     print(f"[WorkEngine] Org {org.slug}: {result['errors']} errors")
             except Exception as e:
                 print(f"[WorkEngine] Org {org.slug}: poll error: {e}")
+
+
+def _compute_lead_bucket(prediction_time):
+    """Compute the lead bucket hours for the next target day.
+
+    Target day is the next calendar day (midnight to midnight).
+    Lead bucket = hours from prediction_time to target_end (next midnight).
+    Rounds to one of: 24, 18, 12, 6.
+    """
+    midnight = prediction_time.replace(hour=0, minute=0, second=0, microsecond=0)
+    target_start = midnight + timedelta(days=1)
+    target_end = target_start + timedelta(hours=24)
+    hours_until_end = (target_end - prediction_time).total_seconds() / 3600.0
+    # Round to nearest standard bucket
+    buckets = [24, 18, 12, 6]
+    closest = min(buckets, key=lambda b: abs(hours_until_end - b))
+    return closest
+
+
+@tasks.loop(hours=6)
+async def forecast_logging_loop():
+    """Every 6 hours: log forecast predictions with appropriate lead buckets.
+
+    Lead buckets: 24h, 18h, 12h, 6h before target day end.
+    The dedup check in forecast.py ensures each (guild, target_day, lead_bucket)
+    combination is only logged once.
+    """
+    print("[Forecast] Running scheduled forecast predictions (6h cycle)...")
+    try:
+        resp = await asyncio.to_thread(
+            requests.get,
+            f"{SKILLSYNC_API}/observer/guilds",
+            headers={"Authorization": f"Bearer {API_KEY}"},
+            timeout=5,
+        )
+        if resp.ok:
+            data = resp.json()
+            guilds = data if isinstance(data, list) else data.get("value", [])
+            now = datetime.utcnow()
+            lead_bucket = _compute_lead_bucket(now)
+            print(f"[Forecast] Lead bucket: {lead_bucket}h for {len(guilds)} guild(s)")
+            for g in guilds:
+                gid = g["guild_id"] if isinstance(g, dict) else g
+                try:
+                    # Use the forecast endpoint with log_prediction via the API
+                    await asyncio.to_thread(
+                        requests.get,
+                        f"{SKILLSYNC_API}/observer/ml/forecast/{gid}?log=true&lead_bucket={lead_bucket}",
+                        headers={"Authorization": f"Bearer {API_KEY}"},
+                        timeout=10,
+                    )
+                except Exception:
+                    pass
+        print("[Forecast] Scheduled forecast logging complete.")
+    except Exception as e:
+        print(f"[Forecast] Forecast prediction error: {e}")
 
 
 @tasks.loop(hours=6)

@@ -16,7 +16,8 @@ import urllib.error
 import urllib.request
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-PYTHON = os.path.join(BASE, ".venv", "Scripts", "python.exe")
+VENV_PYTHON = os.path.join(BASE, ".venv", "Scripts", "python.exe")
+PYTHON = VENV_PYTHON if os.path.exists(VENV_PYTHON) else sys.executable
 NGROK = os.path.join(BASE, ".venv", "Scripts", "ngrok.exe")
 
 DETACHED = 0x00000008
@@ -44,12 +45,70 @@ def _kill_old(pid_file: str):
             pass
 
 
+def _kill_processes_by_name_and_cmd(name: str, cmd_filters: list[str]):
+    """Kill processes matching *name* whose command line contains any of
+    *cmd_filters* AND includes the project BASE path.
+
+    Uses PowerShell / Get-CimInstance on Windows (more reliable than WMIC,
+    which can fail with "PROCESS - Alias not found").
+    Kills only SkillSync-owned processes by requiring the project BASE path in
+    the command line, so it never touches unrelated python/ngrok processes.
+    """
+    for filt in cmd_filters:
+        try:
+            if filt:
+                ps_script = (
+                    f"Get-CimInstance Win32_Process -Filter \"name='{name}'\" | "
+                    f"Where-Object {{ ($_.CommandLine -like '*{BASE}*') -and "
+                    f"($_.CommandLine -like '*{filt}*') }} | "
+                    f"ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"
+                )
+            else:
+                # Empty filter = match all with project path
+                ps_script = (
+                    f"Get-CimInstance Win32_Process -Filter \"name='{name}'\" | "
+                    f"Where-Object {{ $_.CommandLine -like '*{BASE}*' }} | "
+                    f"ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"
+                )
+            subprocess.call(
+                ["powershell", "-Command", ps_script],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=15,
+            )
+        except Exception:
+            pass
+
+
+def _kill_all_skill_sync_processes():
+    """Aggressively kill all existing SkillSync processes before starting new ones.
+
+    Strategy:
+      1. Kill processes tracked by stale PID files (first pass).
+      2. Enumerate all ``python.exe`` processes and kill those whose command
+         line contains the project path AND one of the SkillSync script names.
+      3. Enumerate all ``ngrok.exe`` processes that are SkillSync-owned
+         (project path in command line).
+    """
+    # First pass — PID files
+    for pid_file in (".flask.pid", ".bot.pid", ".ngrok.pid"):
+        _kill_old(pid_file)
+
+    # Second pass — scan running python.exe processes (SkillSync-owned only)
+    _kill_processes_by_name_and_cmd(
+        "python.exe",
+        ["run_dashboard.py", "run_bot.py", "app.py", "bot.py", "bot_watchdog.py"],
+    )
+
+    # Third pass — kill only SkillSync-owned ngrok.exe instances
+    _kill_processes_by_name_and_cmd("ngrok.exe", ["http 5000"])
+
+
 def launch(script: str, log_name: str, pid_file: str) -> int:
-    """Launch a Python script as a detached process. Returns PID."""
-    _kill_old(pid_file)
+    """Launch a Python script as a detached process with unbuffered output. Returns PID."""
     log_path = os.path.join(BASE, log_name)
     proc = subprocess.Popen(
-        [PYTHON, os.path.join(BASE, script)],
+        [PYTHON, "-u", os.path.join(BASE, script)],
         stdout=open(log_path, "w"),
         stderr=subprocess.STDOUT,
         cwd=BASE,
@@ -63,7 +122,6 @@ def launch(script: str, log_name: str, pid_file: str) -> int:
 
 def launch_ngrok() -> int:
     """Launch ngrok as a detached process. Returns PID."""
-    _kill_old(".ngrok.pid")
     log_path = os.path.join(BASE, "ngrok.log")
     proc = subprocess.Popen(
         [NGROK, "http", "--log=stdout", "--log-level=warn", "5000"],
@@ -126,22 +184,29 @@ if __name__ == "__main__":
     print("=" * 50)
     print()
 
+    # ── 0. Aggressive cleanup of any lingering processes ──
+    print("[0/3] Cleaning up lingering SkillSync processes...")
+    _kill_all_skill_sync_processes()
+    time.sleep(1)  # brief settling time for killed processes
+    print_status("Process cleanup", True)
+    print()
+
     # ── 1. Flask Dashboard ──
     print("[1/3] Starting Flask dashboard (run_dashboard.py)...")
     flask_pid = launch("run_dashboard.py", "flask.log", ".flask.pid")
     print(f"      PID {flask_pid}")
     print("      Waiting for Flask on :5000...")
-    if wait_http("http://127.0.0.1:5000/health", timeout=20):
+    if wait_http("http://127.0.0.1:5000/health", timeout=45):
         print_status("Flask dashboard", True)
     else:
         print_status("Flask dashboard", False)
         print("      Check flask.log for details.")
         sys.exit(1)
 
-    # ── 2. Discord Bot ──
+    # ── 2. Discord Bot (with watchdog) ──
     print()
-    print("[2/3] Starting Discord bot (run_bot.py)...")
-    bot_pid = launch("run_bot.py", "bot.log", ".bot.pid")
+    print("[2/3] Starting Discord bot via watchdog (bot_watchdog.py)...")
+    bot_pid = launch("bot_watchdog.py", "bot.log", ".bot.pid")
     print(f"      PID {bot_pid}")
     print_status("Discord bot", True)
 

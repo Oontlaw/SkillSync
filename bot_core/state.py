@@ -167,7 +167,7 @@ async def flush_presence_buffer():
         return
     batch = presence_buffer[:]
     try:
-        result = await api_post("/observer/activity", {"batch": True, "updates": batch})
+        result = await api_post("/observer/presence", {"updates": batch})
         if result is not None:
             presence_buffer = []
             log(f"FLUSHED {len(batch)} presence updates")
@@ -223,7 +223,7 @@ async def flush_join_buffer():
         return
     batch = join_buffer[:]
     try:
-        result = await api_post("/observer/activity", {"batch": True, "joins": batch})
+        result = await api_post("/observer/join-leave", {"events": batch})
         if result is not None:
             join_buffer = []
             log(f"FLUSHED {len(batch)} joins")
