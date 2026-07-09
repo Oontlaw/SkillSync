@@ -227,7 +227,11 @@ async def check_reversed_actions():
 
 @tasks.loop(hours=6)
 async def message_cleanup_loop():
-    """Delete messages older than MESSAGE_RETENTION_DAYS via API."""
+    """Retrain ML on all data, then delete old messages."""
+    try:
+        await api_post("/observer/ml/retrain", {"trigger": "pre_cleanup"})
+    except Exception as e:
+        print(f"[Cleanup] Retrain error (non-fatal): {e}")
     try:
         resp = await api_post(
             "/observer/cleanup", {"retention_days": MESSAGE_RETENTION_DAYS}

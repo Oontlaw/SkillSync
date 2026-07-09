@@ -10,7 +10,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 SKILLSYNC_API = os.getenv("SKILLSYNC_API", "http://localhost:5000/api")
 API_KEY = os.getenv("API_KEY", "")
 
-MESSAGE_RETENTION_DAYS = int(os.getenv("MESSAGE_RETENTION_DAYS", "90"))
+MESSAGE_RETENTION_DAYS = int(os.getenv("MESSAGE_RETENTION_DAYS", "180"))
 HEARTBEAT_GUILD_ID = os.getenv("HEARTBEAT_GUILD_ID", "")
 
 BAN_WATCH_HOURS = 48
