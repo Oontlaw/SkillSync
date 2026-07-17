@@ -116,4 +116,23 @@ stop.bat
 nul
 
 # Bot watchdog — auto-restart on crash (machine-local)
-bot_watchdog.py
+# bot_watchdog.py
+
+# Junk / temp files
+curl_head.err
+ngrok.zip
+pg_test_result.txt
+postgresql-*.exe
+start_output.lo
+test_pg.py
+test_pg2.py
+winget_postgres_search.txt
+ngrok.log
+
+# Database dumps — contain production data
+skillsync_dump.sql
+*.sql.gz
+*.dump
+
+# Platform-specific setup guides
+LINUX_SETUP.md

@@ -113,9 +113,13 @@ async def handle_ready(bot):
         except Exception as e:
             print(f"[SkillSync] Could not set presence: {e}")
 
-    # Scan all existing guilds on startup
+    # Scan all existing guilds on startup (per-guild error handling so one failure doesn't kill the bot)
     for guild in bot.guilds:
-        await scan_guild(guild)
+        try:
+            await scan_guild(guild)
+        except Exception as e:
+            log(f'Startup scan failed for {guild.name} ({guild.id}): {e}')
+            print(f'[SkillSync] ERROR: Startup scan failed for {guild.name}: {e}')
 
     # Load AutoMod alert channels after scan
     build_automod_alert_channels()
@@ -193,7 +197,11 @@ async def handle_guild_join(bot, guild):
     log(f"JOINED new guild: {guild.name} (ID: {guild.id})")
     print(f"[SkillSync] Joined new guild: {guild.name}")
     prefix_cache[str(guild.id)] = ["!ss "]
-    await scan_guild(guild)
+    try:
+        await scan_guild(guild)
+    except Exception as e:
+        log(f'Guild join scan failed for {guild.name} ({guild.id}): {e}')
+        print(f'[SkillSync] ERROR: Guild join scan failed for {guild.name}: {e}')
 
     # Post welcome embed
     client_id = os.getenv("DISCORD_CLIENT_ID", "1513743115364597790")
