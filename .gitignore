@@ -61,6 +61,7 @@ ml/models/
 # Runtime PID files
 *.pid
 .running.lock
+.bot_heartbeat
 
 # Test cache
 .pytest_cache/

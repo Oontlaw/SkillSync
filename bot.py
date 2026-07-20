@@ -79,6 +79,23 @@ async def on_voice_state_update(member, before, after):
     await handle_voice_state_update(member, before, after)
 
 
+@bot.event
+async def on_error(event, *args, **kwargs):
+    import traceback
+    print(f'[SkillSync] Unhandled error in {event}:')
+    traceback.print_exc()
+
+
+@bot.event
+async def on_disconnect():
+    print('[SkillSync] ⚠ DISCONNECTED from Discord gateway')
+
+
+@bot.event
+async def on_resumed():
+    print('[SkillSync] ✅ Resumed Discord connection')
+
+
 # ── Main ──
 
 if __name__ == '__main__':

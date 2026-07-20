@@ -7,11 +7,21 @@ from bot_core.state import prefix_cache, set_automod_alert_channels, track_onlin
 from bot_core.logging import log
 
 
-def build_automod_alert_channels():
-    """Fetch AutoMod rules from API and populate automod_alert_channels."""
+async def build_automod_alert_channels():
+    """Fetch AutoMod rules from API and populate automod_alert_channels.
+    
+    Async — uses asyncio.to_thread to avoid blocking the event loop.
+    Sync HTTP calls on the event loop thread can hang on Windows DNS
+    resolution (getaddrinfo), causing zombie states.
+    """
+    import asyncio
     try:
-        resp = requests.get(f'{SKILLSYNC_API}/observer/automod-rules',
-                           headers={'Authorization': f'Bearer {API_KEY}'}, timeout=5)
+        resp = await asyncio.to_thread(
+            requests.get,
+            f'{SKILLSYNC_API}/observer/automod-rules',
+            headers={'Authorization': f'Bearer {API_KEY}'},
+            timeout=5,
+        )
         if resp.ok:
             rules = resp.json()
             channels = {}
@@ -43,7 +53,7 @@ async def scan_guild(guild):
 
         mod_role_ids = set()
         roles_data = []
-        for role in sorted(guild.roles, key=lambda r: r.position, reverse=True):
+        for role in sorted(guild.roles, key=lambda r: r.position or 0, reverse=True):
             if role.is_default():
                 continue
             rd = {
@@ -180,7 +190,7 @@ async def scan_guild(guild):
         await api_post('/observer/guild-scan', payload)
         log(f'SCAN COMPLETE: {guild.name} — {len(roles_data)} roles, {guild.member_count} members, {len(staff_member_ids)} staff, {len(automod_data)} automod rules')
         print(f'[SkillSync] Scan complete: {guild.name} — {len(staff_member_ids)} staff out of {guild.member_count} members')
-        build_automod_alert_channels()
+        await build_automod_alert_channels()
 
     except Exception as e:
         log(f'SCAN FAILED for {guild.name} ({guild.id}): {e}')

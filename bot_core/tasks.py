@@ -1,4 +1,5 @@
 import asyncio
+import os
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -43,6 +44,14 @@ def set_bot(bot):
 @tasks.loop(seconds=30)
 async def flush_all_buffers():
     """Flush all buffered data every 30 seconds."""
+    # Write heartbeat file for watchdog
+    try:
+        import time as _time
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.bot_heartbeat'), 'w') as f:
+            f.write(str(_time.time()))
+    except Exception:
+        pass
+
     await flush_message_buffer()
     await flush_presence_buffer()
     await flush_member_presence_buffer()
@@ -280,7 +289,7 @@ async def jira_poll_loop():
     if not is_configured():
         return
     print(f"[WorkEngine] Polling Jira...")
-    issues = poll_issues(days_back=7)
+    issues = await asyncio.to_thread(poll_issues, days_back=7)
     if not issues:
         return
     synced = 0
@@ -377,36 +386,42 @@ async def jira_poll_loop():
 async def jira_per_org_poll_loop():
     """Poll Jira for every org that has credentials configured.
     Auto-creates/updates tasks and awards points per org credentials.
-    Runs every hour."""
-    from app import app
+    Runs every hour.
+    
+    Entire body runs in asyncio.to_thread to avoid blocking the event loop
+    during Jira HTTP requests (DNS resolution on Windows can hang indefinitely).
+    """
+    def _poll_all_orgs():
+        from app import app
+        with app.app_context():
+            from database import Organisation
+            from work_engine.connector_jira import poll_and_sync_for_org
 
-    with app.app_context():
-        from database import Organisation
-        from work_engine.connector_jira import poll_and_sync_for_org
+            orgs = Organisation.query.filter(
+                Organisation.jira_url.isnot(None),
+                Organisation.jira_email.isnot(None),
+                Organisation.jira_api_token.isnot(None),
+                Organisation.jira_project.isnot(None),
+                Organisation.is_active.is_(True),
+            ).all()
 
-        orgs = Organisation.query.filter(
-            Organisation.jira_url.isnot(None),
-            Organisation.jira_email.isnot(None),
-            Organisation.jira_api_token.isnot(None),
-            Organisation.jira_project.isnot(None),
-            Organisation.is_active.is_(True),
-        ).all()
+            if not orgs:
+                return
 
-        if not orgs:
-            return
+            print(f"[WorkEngine] Per-org Jira poll: {len(orgs)} org(s) configured")
+            for org in orgs:
+                try:
+                    result = poll_and_sync_for_org(org)
+                    if result.get("synced", 0) > 0:
+                        print(
+                            f"[WorkEngine] Org {org.slug}: synced {result['synced']} tasks"
+                        )
+                    if result.get("errors", 0) > 0:
+                        print(f"[WorkEngine] Org {org.slug}: {result['errors']} errors")
+                except Exception as e:
+                    print(f"[WorkEngine] Org {org.slug}: poll error: {e}")
 
-        print(f"[WorkEngine] Per-org Jira poll: {len(orgs)} org(s) configured")
-        for org in orgs:
-            try:
-                result = poll_and_sync_for_org(org)
-                if result.get("synced", 0) > 0:
-                    print(
-                        f"[WorkEngine] Org {org.slug}: synced {result['synced']} tasks"
-                    )
-                if result.get("errors", 0) > 0:
-                    print(f"[WorkEngine] Org {org.slug}: {result['errors']} errors")
-            except Exception as e:
-                print(f"[WorkEngine] Org {org.slug}: poll error: {e}")
+    await asyncio.to_thread(_poll_all_orgs)
 
 
 def _compute_lead_bucket(prediction_time):

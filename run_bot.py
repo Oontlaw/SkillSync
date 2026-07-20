@@ -26,7 +26,15 @@ async def main():
     bot.prefix_cache = prefix_cache
     bot.scan_guild = shared_scan_guild
     await bot.add_cog(bot_commands.Moderation(bot))
-    await bot.start(DISCORD_TOKEN)
+    while True:
+        try:
+            await bot.start(DISCORD_TOKEN)
+        except KeyboardInterrupt:
+            await bot.close()
+            return
+        except Exception as e:
+            print(f'[SkillSync] Bot disconnected: {e}. Reconnecting in 10s...')
+            await asyncio.sleep(10)
 
 
 if __name__ == "__main__":
@@ -34,7 +42,5 @@ if __name__ == "__main__":
     asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(main())
-    except KeyboardInterrupt:
-        loop.run_until_complete(bot.close())
     finally:
         loop.close()

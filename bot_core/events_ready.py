@@ -121,8 +121,8 @@ async def handle_ready(bot):
             log(f'Startup scan failed for {guild.name} ({guild.id}): {e}')
             print(f'[SkillSync] ERROR: Startup scan failed for {guild.name}: {e}')
 
-    # Load AutoMod alert channels after scan
-    build_automod_alert_channels()
+    # Load AutoMod alert channels after scan (async to avoid event loop block)
+    await build_automod_alert_channels()
 
     # Reload pending state from API for restart resilience
     try:
