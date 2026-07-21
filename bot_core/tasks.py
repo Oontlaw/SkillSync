@@ -28,7 +28,7 @@ from bot_core.state import (  # re-exported for other modules
     flush_presence_buffer,
     flush_voice_buffer,
 )
-from database import Task, Worker, db
+from database import Task, Worker, WorkerIdentity, db
 from scoring import award_points
 from work_engine.connector_jira import is_configured, map_issue_to_task, poll_issues
 
@@ -285,101 +285,104 @@ async def check_ping_joins():
 
 @tasks.loop(hours=1)
 async def jira_poll_loop():
-    """Poll Jira for updated issues and sync to internal tasks."""
-    if not is_configured():
-        return
-    print(f"[WorkEngine] Polling Jira...")
-    issues = await asyncio.to_thread(poll_issues, days_back=7)
-    if not issues:
-        return
-    synced = 0
-    for issue in issues:
-        assignee_email = issue.get("assignee_email", "")
-        assignee_account = issue.get("assignee_account_id", "")
-        if not assignee_email and not assignee_account:
-            continue
+    """Poll Jira for updated issues and sync to internal tasks.
 
-        # Try to resolve through WorkerIdentity.jira_account_id -> WorkerIdentity.worker_id -> Worker
-        worker = None
-        if assignee_account:
-            identity = WorkerIdentity.query.filter_by(
-                jira_account_id=assignee_account
-            ).first()
-            if identity and identity.worker_id:
-                worker = Worker.query.get(identity.worker_id)
+    Entire body runs in asyncio.to_thread to avoid blocking the event loop
+    with synchronous DB queries and HTTP requests.
+    """
+    def _do_jira_poll():
+        if not is_configured():
+            return
+        print(f"[WorkEngine] Polling Jira...")
+        issues = poll_issues(days_back=7)
+        if not issues:
+            return
+        synced = 0
+        for issue in issues:
+            assignee_email = issue.get("assignee_email", "")
+            assignee_account = issue.get("assignee_account_id", "")
+            if not assignee_email and not assignee_account:
+                continue
 
-        # If not found, try email fallback through WorkerIdentity.email -> Worker.email
-        if not worker and assignee_email:
-            identity = WorkerIdentity.query.filter_by(email=assignee_email).first()
-            if identity and identity.worker_id:
-                worker = Worker.query.get(identity.worker_id)
+            worker = None
+            if assignee_account:
+                identity = WorkerIdentity.query.filter_by(
+                    jira_account_id=assignee_account
+                ).first()
+                if identity and identity.worker_id:
+                    worker = Worker.query.get(identity.worker_id)
 
-        # If still not found, try Worker.email directly (legacy fallback)
-        if not worker and assignee_email:
-            worker = Worker.query.filter_by(email=assignee_email).first()
+            if not worker and assignee_email:
+                identity = WorkerIdentity.query.filter_by(email=assignee_email).first()
+                if identity and identity.worker_id:
+                    worker = Worker.query.get(identity.worker_id)
 
-        # If still not found, try Worker.discord_id (legacy fallback)
-        if not worker and assignee_account:
-            worker = Worker.query.filter_by(discord_id=assignee_account).first()
+            if not worker and assignee_email:
+                worker = Worker.query.filter_by(email=assignee_email).first()
 
-        if not worker:
-            print(
-                f"[WorkEngine] Could not resolve Jira assignee: email={assignee_email}, account={assignee_account}"
-            )
-            continue
+            if not worker and assignee_account:
+                worker = Worker.query.filter_by(discord_id=assignee_account).first()
 
-        task_data = map_issue_to_task(issue, worker.id)
-        existing = Task.query.filter_by(external_id=issue["key"], source="jira").first()
-        if existing:
-            old_status = existing.status
-            existing.title = task_data["title"]
-            existing.description = task_data.get("description", "")
-            existing.priority = task_data.get("priority", "medium")
-            existing.status = task_data.get("status", "pending")
-            if task_data.get("due_at"):
-                existing.due_at = (
-                    datetime.fromisoformat(task_data["due_at"])
-                    if isinstance(task_data["due_at"], str)
-                    else task_data["due_at"]
+            if not worker:
+                print(
+                    f"[WorkEngine] Could not resolve Jira assignee: email={assignee_email}, account={assignee_account}"
                 )
-            if old_status != existing.status and existing.status in (
-                "completed",
-                "missed",
-            ):
-                if existing.status == "completed":
-                    due = existing.due_at
-                    now = datetime.utcnow()
-                    key = (
-                        "task_completed_on_time"
-                        if not due or now <= due
-                        else "task_completed_late"
+                continue
+
+            task_data = map_issue_to_task(issue, worker.id)
+            existing = Task.query.filter_by(external_id=issue["key"], source="jira").first()
+            if existing:
+                old_status = existing.status
+                existing.title = task_data["title"]
+                existing.description = task_data.get("description", "")
+                existing.priority = task_data.get("priority", "medium")
+                existing.status = task_data.get("status", "pending")
+                if task_data.get("due_at"):
+                    existing.due_at = (
+                        datetime.fromisoformat(task_data["due_at"])
+                        if isinstance(task_data["due_at"], str)
+                        else task_data["due_at"]
                     )
-                else:
-                    key = "task_missed"
-                note = f"Task {key.replace('task_', '').replace('_', ' ')}: {existing.title}"
-                result = award_points(worker.id, key, source="jira", note=note)
-                existing.points_awarded = result.get("change", 0)
-        else:
-            task = Task(
-                worker_id=worker.id,
-                title=task_data["title"],
-                description=task_data.get("description", ""),
-                status=task_data.get("status", "pending"),
-                source="jira",
-                external_id=issue["key"],
-                external_url=task_data.get("external_url", ""),
-                priority=task_data.get("priority", "medium"),
-            )
-            if task_data.get("due_at"):
-                task.due_at = (
-                    datetime.fromisoformat(task_data["due_at"])
-                    if isinstance(task_data["due_at"], str)
-                    else task_data["due_at"]
+                if old_status != existing.status and existing.status in (
+                    "completed",
+                    "missed",
+                ):
+                    if existing.status == "completed":
+                        due = existing.due_at
+                        now = datetime.utcnow()
+                        key = (
+                            "task_completed_on_time"
+                            if not due or now <= due
+                            else "task_completed_late"
+                        )
+                    else:
+                        key = "task_missed"
+                    note = f"Task {key.replace('task_', '').replace('_', ' ')}: {existing.title}"
+                    result = award_points(worker.id, key, source="jira", note=note)
+                    existing.points_awarded = result.get("change", 0)
+            else:
+                task = Task(
+                    worker_id=worker.id,
+                    title=task_data["title"],
+                    description=task_data.get("description", ""),
+                    status=task_data.get("status", "pending"),
+                    source="jira",
+                    external_id=issue["key"],
+                    external_url=task_data.get("external_url", ""),
+                    priority=task_data.get("priority", "medium"),
                 )
-            db.session.add(task)
-        synced += 1
-    db.session.commit()
-    print(f"[WorkEngine] Synced {synced} issues from Jira")
+                if task_data.get("due_at"):
+                    task.due_at = (
+                        datetime.fromisoformat(task_data["due_at"])
+                        if isinstance(task_data["due_at"], str)
+                        else task_data["due_at"]
+                    )
+                db.session.add(task)
+            synced += 1
+        db.session.commit()
+        print(f"[WorkEngine] Synced {synced} issues from Jira")
+
+    await asyncio.to_thread(_do_jira_poll)
 
 
 @tasks.loop(hours=1)
@@ -500,11 +503,14 @@ async def rescan_guilds_loop():
 @tasks.loop(hours=6)
 async def check_overdue_tasks():
     """Check for tasks past their due date and notify Slack.
-    Only notifies on exact day boundaries (1, 3, 7 days overdue) to avoid spam."""
-    from app import app
-
-    with app.app_context():
-        try:
+    Only notifies on exact day boundaries (1, 3, 7 days overdue) to avoid spam.
+    
+    Entire body runs in asyncio.to_thread to avoid blocking the event loop
+    with synchronous DB queries and Slack HTTP calls.
+    """
+    def _check_overdue():
+        from app import app
+        with app.app_context():
             from services.slack import notify_task_overdue
 
             now = datetime.utcnow()
@@ -527,18 +533,21 @@ async def check_overdue_tasks():
                     days_overdue=days_overdue,
                     worker_id=task.worker_id,
                 )
-        except Exception as e:
-            print(f"[check_overdue_tasks] error: {e}")
+
+    await asyncio.to_thread(_check_overdue)
 
 
 @tasks.loop(hours=168)
 async def weekly_health_digest():
     """Send weekly team health summary to Slack for all orgs.
-    Runs every 168 hours (1 week)."""
-    from app import app
-
-    with app.app_context():
-        try:
+    Runs every 168 hours (1 week).
+    
+    Entire body runs in asyncio.to_thread to avoid blocking the event loop
+    with hundreds of synchronous DB queries.
+    """
+    def _weekly_digest():
+        from app import app
+        with app.app_context():
             from database import (
                 BehavioralAnomaly,
                 BurnoutRisk,
@@ -594,5 +603,5 @@ async def weekly_health_digest():
                     yellow=yellow,
                     red=red,
                 )
-        except Exception as e:
-            print(f"[weekly_health_digest] error: {e}")
+
+    await asyncio.to_thread(_weekly_digest)
