@@ -114,5 +114,15 @@ with app.app_context():
         db.create_all()
         print("[OK] Database tables created.")
 
+    # ponytail: WAL mode allows concurrent reads during writes.
+    # DELETE journal mode serialized every request behind write locks (~2s each).
+    try:
+        db.session.execute(db.text("PRAGMA journal_mode=WAL"))
+        db.session.execute(db.text("PRAGMA busy_timeout=5000"))
+        db.session.commit()
+        print("[OK] SQLite WAL mode enabled.")
+    except Exception as e:
+        print(f"[WARN] Could not set WAL mode: {e}")
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=os.getenv("FLASK_ENV") == "development")

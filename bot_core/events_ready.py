@@ -3,8 +3,8 @@ import os
 from datetime import datetime, timezone
 
 import discord
-import requests
 
+from bot_core.api_client import api_get
 from bot_core.config import (
     API_KEY,
     MESSAGE_RETENTION_DAYS,
@@ -83,14 +83,13 @@ async def handle_ready(bot):
 
     # Fetch prefixes + content trust from API
     try:
-        resp = await asyncio.to_thread(
-            requests.get,
+        resp = await api_get(
             f"{SKILLSYNC_API}/observer/guilds",
             headers={"Authorization": f"Bearer {API_KEY}"},
             timeout=5,
         )
-        if resp.ok:
-            for g in resp.json():
+        if resp:
+            for g in resp:
                 prefix_cache[g["guild_id"]] = g.get("prefixes", ["!ss "])
                 content_trust[g["guild_id"]] = g.get("store_content", False)
     except Exception as e:
@@ -126,14 +125,12 @@ async def handle_ready(bot):
 
     # Reload pending state from API for restart resilience
     try:
-        resp = await asyncio.to_thread(
-            requests.get,
+        state_data = await api_get(
             f"{SKILLSYNC_API}/observer/pending-state",
             headers={"Authorization": f"Bearer {API_KEY}"},
             timeout=5,
         )
-        if resp.ok:
-            state_data = resp.json()
+        if state_data:
 
             def ensure_utc(dt):
                 if dt is None:

@@ -7,7 +7,9 @@ load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 
-SKILLSYNC_API = os.getenv("SKILLSYNC_API", "http://localhost:5000/api")
+# ponytail: use 127.0.0.1 instead of localhost — Windows DNS tries IPv6 first,
+# adding ~2s latency to every request (IPv6 timeout → IPv4 fallback).
+SKILLSYNC_API = os.getenv("SKILLSYNC_API", "http://127.0.0.1:5000/api")
 API_KEY = os.getenv("API_KEY", "")
 
 MESSAGE_RETENTION_DAYS = int(os.getenv("MESSAGE_RETENTION_DAYS", "180"))

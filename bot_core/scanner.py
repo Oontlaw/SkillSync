@@ -1,8 +1,7 @@
 import json
 import discord
-import requests
 from bot_core.config import SKILLSYNC_API, API_KEY
-from bot_core.api_client import api_post
+from bot_core.api_client import api_get, api_post
 from bot_core.state import prefix_cache, set_automod_alert_channels, track_online, track_offline, online_members
 from bot_core.logging import log
 
@@ -10,20 +9,16 @@ from bot_core.logging import log
 async def build_automod_alert_channels():
     """Fetch AutoMod rules from API and populate automod_alert_channels.
     
-    Async — uses asyncio.to_thread to avoid blocking the event loop.
-    Sync HTTP calls on the event loop thread can hang on Windows DNS
-    resolution (getaddrinfo), causing zombie states.
+    Async — uses api_get via dedicated HTTP executor to avoid blocking
+    the event loop with sync HTTP calls.
     """
-    import asyncio
     try:
-        resp = await asyncio.to_thread(
-            requests.get,
+        rules = await api_get(
             f'{SKILLSYNC_API}/observer/automod-rules',
             headers={'Authorization': f'Bearer {API_KEY}'},
             timeout=5,
         )
-        if resp.ok:
-            rules = resp.json()
+        if rules:
             channels = {}
             for rule in rules:
                 if rule.get('alert_channel_id'):

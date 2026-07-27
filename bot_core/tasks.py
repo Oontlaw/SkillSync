@@ -1,12 +1,13 @@
 import asyncio
 import os
+import threading
+import time as _time
 from datetime import datetime, timedelta, timezone
 
-import requests
 from discord.ext import tasks
 
 from bot_core import state as bot_state
-from bot_core.api_client import api_post
+from bot_core.api_client import api_get, api_post
 from bot_core.config import (
     API_KEY,
     BAN_WATCH_HOURS,
@@ -35,32 +36,118 @@ from work_engine.connector_jira import is_configured, map_issue_to_task, poll_is
 _bot = None
 _last_heartbeat = -9999999999  # fire immediately on first check
 
+# ponytail: _http_hit counter tracks how many api_post/api_get calls are in-flight.
+# Helps diagnose thread pool saturation in FLUSH SLOW output.
+_http_hit = 0
+_http_hit_lock = threading.Lock()
+
+
+def _inc_http():
+    global _http_hit
+    with _http_hit_lock:
+        _http_hit += 1
+
+
+def _dec_http():
+    global _http_hit
+    with _http_hit_lock:
+        _http_hit -= 1
+
 
 def set_bot(bot):
     global _bot
     _bot = bot
 
 
+# ── Heartbeat daemon thread ──
+# ponytail: writes .bot_heartbeat every 10s from a thread that's
+# completely independent of the asyncio event loop.  If the event loop
+# freezes, the heartbeat file stops updating and the watchdog can still
+# detect it.  Also monitors event-loop health: if heartbeat wasn't
+# refreshed for 120s it logs a warning; at 180s it prints a traceback.
+_heartbeat_thread = None
+_loop_healthy_ts = _time.monotonic()
+# ponytail: grace period — don't warn about frozen loop until 120s after
+# the thread starts, because flush_all_buffers (which calls
+# _mark_loop_healthy) hasn't run yet at import time.
+_heartbeat_start_ts = _time.monotonic()
+
+
+def _mark_loop_healthy():
+    global _loop_healthy_ts
+    _loop_healthy_ts = _time.monotonic()
+
+
+def _heartbeat_daemon(heartbeat_path, interval=10):
+    """Runs in a daemon thread, writes heartbeat file on a fixed interval."""
+    while True:
+        try:
+            with open(heartbeat_path, 'w') as f:
+                f.write(str(_time.time()))
+        except Exception:
+            pass
+
+        # Check event loop health (skip during grace period)
+        elapsed_since_start = _time.monotonic() - _heartbeat_start_ts
+        if elapsed_since_start > 120:
+            age = _time.monotonic() - _loop_healthy_ts
+            if age > 180:
+                log(f"HEARTBEAT THREAD: event loop frozen for {int(age)}s — watchdog will kill")
+            elif age > 120:
+                log(f"HEARTBEAT THREAD: event loop unresponsive for {int(age)}s")
+
+        _time.sleep(interval)
+
+
+def _ensure_heartbeat_thread():
+    global _heartbeat_thread
+    if _heartbeat_thread is not None:
+        return
+    hb_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.bot_heartbeat')
+    _heartbeat_thread = threading.Thread(target=_heartbeat_daemon, args=(hb_path,), daemon=True, name="heartbeat")
+    _heartbeat_thread.start()
+    log("Heartbeat daemon thread started (10s interval)")
+
+
+# Start heartbeat thread on import
+_ensure_heartbeat_thread()
+
+
 @tasks.loop(seconds=30)
 async def flush_all_buffers():
     """Flush all buffered data every 30 seconds."""
-    # Write heartbeat file for watchdog
-    try:
-        import time as _time
-        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.bot_heartbeat'), 'w') as f:
-            f.write(str(_time.time()))
-    except Exception:
-        pass
+    _mark_loop_healthy()
+    _t0 = _time.monotonic()
 
+    # ponytail: heartbeat file is now written by daemon thread — skip here
+    # to avoid blocking the event loop on file I/O.
+
+    _hb = _time.monotonic()
     await flush_message_buffer()
+    _m1 = _time.monotonic()
     await flush_presence_buffer()
+    _m2 = _time.monotonic()
     await flush_member_presence_buffer()
+    _m3 = _time.monotonic()
     await flush_mention_buffer()
+    _m4 = _time.monotonic()
     await flush_voice_buffer()
+    _m5 = _time.monotonic()
     await flush_join_buffer()
+    _m6 = _time.monotonic()
     await flush_join_leave_buffer()
+    _m7 = _time.monotonic()
     await flush_online_count()
+    _m8 = _time.monotonic()
     await _maybe_heartbeat()
+    _end = _time.monotonic()
+
+    total = _end - _t0
+    hits = _http_hit
+    if total > 5:
+        log(f"FLUSH SLOW {total:.1f}s http_in_flight={hits} | msg={_m1-_hb:.2f} pres={_m2-_m1:.2f} member={_m3-_m2:.2f} mention={_m4-_m3:.2f} voice={_m5-_m4:.2f} join={_m6-_m5:.2f} joinleave={_m7-_m6:.2f} online={_m8-_m7:.2f} heartbeat={_end-_m8:.2f}")
+    else:
+        log(f"FLUSHED online counts http_in_flight={hits}")
 
 
 async def _maybe_heartbeat():
@@ -85,14 +172,15 @@ async def _maybe_heartbeat():
         msg_count = "?"
         member_count = "?"
         try:
-            resp = await asyncio.to_thread(
-                requests.get,
-                f"{SKILLSYNC_API}/observer/staff-activity",
-                headers={"Authorization": f"Bearer {API_KEY}"},
-                timeout=5,
+            data = await asyncio.wait_for(
+                api_get(
+                    f"{SKILLSYNC_API}/observer/staff-activity",
+                    headers={"Authorization": f"Bearer {API_KEY}"},
+                    timeout=5,
+                ),
+                timeout=10,
             )
-            if resp.ok:
-                data = resp.json()
+            if data:
                 msg_count = str(data.get("total_messages", "?"))
                 member_count = str(data.get("total_members", "?"))
         except Exception:
@@ -115,6 +203,9 @@ async def check_reversed_actions():
     """
     Every hour: confirm bans that have stood 48+ hours,
     scan anomalies, and trigger weekly ML retrain.
+
+    ponytail: every api_post is wrapped in wait_for(15s) so a slow Flask
+    endpoint can't block this task indefinitely and starve the event loop.
     """
     now = datetime.now(timezone.utc)
     to_confirm = [
@@ -137,92 +228,134 @@ async def check_reversed_actions():
             f"[Observer] Ban confirmed valid: {data['user_name']} by {data['banner_name']}"
         )
         try:
-            result = await api_post(
-                "/observer/confirm",
-                {
-                    "discord_id": data["banner_id"],
-                    "staff_name": data["banner_name"],
-                    "action_type": "ban_confirmed",
-                    "target": data["user_name"],
-                    "target_id": user_id_str,
-                    "guild": data["guild_name"],
-                    "guild_id": guild_id_str,
-                    "note": "Ban stood for 48+ hours — confirmed as valid moderation action",
-                    "timestamp": now.isoformat(),
-                },
+            result = await asyncio.wait_for(
+                api_post(
+                    "/observer/confirm",
+                    {
+                        "discord_id": data["banner_id"],
+                        "staff_name": data["banner_name"],
+                        "action_type": "ban_confirmed",
+                        "target": data["user_name"],
+                        "target_id": user_id_str,
+                        "guild": data["guild_name"],
+                        "guild_id": guild_id_str,
+                        "note": "Ban stood for 48+ hours — confirmed as valid moderation action",
+                        "timestamp": now.isoformat(),
+                    },
+                ),
+                timeout=15,
             )
             if result and not result.get("error"):
                 bot_state.pending_bans.pop(key, None)
+        except asyncio.TimeoutError:
+            print(f"[Observer] Ban confirm timed out for {data['user_name']}")
         except Exception as e:
             print(f"[Observer] Ban confirm API error for {data['user_name']}: {e}")
 
-    # Scan anomalies and burnout risks — per-guild for ML, global for rule-based
+    # ponytail: each heavy endpoint gets a 15s timeout so one slow Flask
+    # response can't cascade into event-loop starvation.
     print(f"[Observer] Scanning behavioral anomalies...")
-    await api_post("/observer/anomalies/scan", {"trigger": "hourly"})
+    try:
+        await asyncio.wait_for(api_post("/observer/anomalies/scan", {"trigger": "hourly"}), timeout=15)
+    except asyncio.TimeoutError:
+        print("[Observer] Anomaly scan timed out")
     print(f"[Observer] Scanning burnout risks...")
-    await api_post("/observer/burnout-scan", {"trigger": "hourly"})
+    try:
+        await asyncio.wait_for(api_post("/observer/burnout-scan", {"trigger": "hourly"}), timeout=15)
+    except asyncio.TimeoutError:
+        print("[Observer] Burnout scan timed out")
     print(f"[Observer] ML anomaly scan (per-guild)...")
     try:
-        resp = await asyncio.to_thread(
-            requests.get,
-            f"{SKILLSYNC_API}/observer/guilds",
-            headers={"Authorization": f"Bearer {API_KEY}"},
-            timeout=5,
+        resp = await asyncio.wait_for(
+            api_get(
+                f"{SKILLSYNC_API}/observer/guilds",
+                headers={"Authorization": f"Bearer {API_KEY}"},
+                timeout=5,
+            ),
+            timeout=10,
         )
-        if resp.ok:
-            data = resp.json()
-            guilds = data if isinstance(data, list) else data.get("value", [])
+        if resp:
+            guilds = resp if isinstance(resp, list) else resp.get("value", [])
             for g in guilds:
                 gid = g["guild_id"]
                 try:
-                    await api_post("/observer/ml/anomalies/scan", {"guild_id": gid})
+                    await asyncio.wait_for(api_post("/observer/ml/anomalies/scan", {"guild_id": gid}), timeout=15)
+                except asyncio.TimeoutError:
+                    print(f"[Observer] Anomaly scan timed out for guild {gid}")
                 except Exception as e:
                     print(f"[Observer] Anomaly scan error for guild {gid}: {e}")
         else:
-            await api_post("/observer/ml/anomalies/scan", {"trigger": "hourly"})
+            try:
+                await asyncio.wait_for(api_post("/observer/ml/anomalies/scan", {"trigger": "hourly"}), timeout=15)
+            except asyncio.TimeoutError:
+                pass
+    except asyncio.TimeoutError:
+        print("[Observer] Guild list fetch timed out")
     except Exception as e:
         print(f"[Observer] Failed to fetch guild list for per-guild scan: {e}")
-        await api_post("/observer/ml/anomalies/scan", {"trigger": "hourly"})
+        try:
+            await asyncio.wait_for(api_post("/observer/ml/anomalies/scan", {"trigger": "hourly"}), timeout=15)
+        except asyncio.TimeoutError:
+            pass
     print(f"[Observer] ML burnout scan...")
-    await api_post("/observer/ml/burnout-scan", {"trigger": "hourly"})
+    try:
+        await asyncio.wait_for(api_post("/observer/ml/burnout-scan", {"trigger": "hourly"}), timeout=15)
+    except asyncio.TimeoutError:
+        print("[Observer] ML burnout scan timed out")
 
     # ML forecast: resolve pending outcomes every heartbeat (cheap query)
     print(f"[Observer] Resolving forecast outcomes...")
-    await api_post("/observer/ml/resolve", {"days_back": 7})
+    try:
+        await asyncio.wait_for(api_post("/observer/ml/resolve", {"days_back": 7}), timeout=15)
+    except asyncio.TimeoutError:
+        print("[Observer] Forecast resolve timed out")
 
     # Correction-triggered retrain check
     try:
-        resp = await asyncio.to_thread(
-            requests.get,
-            f"{SKILLSYNC_API}/observer/ml/pending-retrain",
-            headers={"Authorization": f"Bearer {API_KEY}"},
-            timeout=5,
+        resp = await asyncio.wait_for(
+            api_get(
+                f"{SKILLSYNC_API}/observer/ml/pending-retrain",
+                headers={"Authorization": f"Bearer {API_KEY}"},
+                timeout=5,
+            ),
+            timeout=10,
         )
-        if resp.ok and resp.json().get("pending"):
+        if resp and resp.get("pending"):
             print(f"[Observer] Correction-triggered retrain pending...")
-            await api_post("/observer/ml/retrain", {"trigger": "correction_feedback"})
+            try:
+                await asyncio.wait_for(api_post("/observer/ml/retrain", {"trigger": "correction_feedback"}), timeout=30)
+            except asyncio.TimeoutError:
+                print("[Observer] Correction retrain timed out")
+    except asyncio.TimeoutError:
+        print("[Observer] Retrain check timed out")
     except Exception as e:
         print(f"[Observer] Retrain check error: {e}")
 
     # Auto-retrain when anomaly precision drops below threshold
     try:
-        resp = await asyncio.to_thread(
-            requests.get,
-            f"{SKILLSYNC_API}/observer/ml/anomalies/precision-recall",
-            headers={"Authorization": f"Bearer {API_KEY}"},
-            timeout=5,
+        resp = await asyncio.wait_for(
+            api_get(
+                f"{SKILLSYNC_API}/observer/ml/anomalies/precision-recall",
+                headers={"Authorization": f"Bearer {API_KEY}"},
+                timeout=5,
+            ),
+            timeout=10,
         )
-        if resp.ok:
-            data = resp.json()
+        if resp:
             if (
-                data.get("total_with_feedback", 0) >= 3
-                and data.get("precision") is not None
-                and data["precision"] < 0.5
+                resp.get("total_with_feedback", 0) >= 3
+                and resp.get("precision") is not None
+                and resp["precision"] < 0.5
             ):
                 print(
-                    f"[Observer] Anomaly precision {data['precision_pct']}% below 50%, triggering retrain..."
+                    f"[Observer] Anomaly precision {resp.get('precision_pct')}% below 50%, triggering retrain..."
                 )
-                await api_post("/observer/ml/retrain", {"trigger": "low_precision"})
+                try:
+                    await asyncio.wait_for(api_post("/observer/ml/retrain", {"trigger": "low_precision"}), timeout=30)
+                except asyncio.TimeoutError:
+                    print("[Observer] Low-precision retrain timed out")
+    except asyncio.TimeoutError:
+        print("[Observer] Precision check timed out")
     except Exception as e:
         print(f"[Observer] Precision check error: {e}")
 
@@ -231,7 +364,10 @@ async def check_reversed_actions():
     if val >= 168:
         bot_state.set_ml_retrain_counter(0)
         print(f"[Observer] Weekly ML retrain triggered...")
-        await api_post("/observer/ml/retrain", {"trigger": "weekly"})
+        try:
+            await asyncio.wait_for(api_post("/observer/ml/retrain", {"trigger": "weekly"}), timeout=30)
+        except asyncio.TimeoutError:
+            print("[Observer] Weekly retrain timed out")
 
 
 @tasks.loop(hours=6)
@@ -382,7 +518,13 @@ async def jira_poll_loop():
         db.session.commit()
         print(f"[WorkEngine] Synced {synced} issues from Jira")
 
-    await asyncio.to_thread(_do_jira_poll)
+    # ponytail: do NOT wrap in asyncio.wait_for — it cancels the future but
+    # the thread keeps running, permanently consuming a pool slot.  The Jira
+    # connector has its own HTTP timeout (15s) so the thread will finish.
+    try:
+        await asyncio.to_thread(_do_jira_poll)
+    except Exception as e:
+        print(f"[WorkEngine] Jira poll error: {e}")
 
 
 @tasks.loop(hours=1)
@@ -390,9 +532,6 @@ async def jira_per_org_poll_loop():
     """Poll Jira for every org that has credentials configured.
     Auto-creates/updates tasks and awards points per org credentials.
     Runs every hour.
-    
-    Entire body runs in asyncio.to_thread to avoid blocking the event loop
-    during Jira HTTP requests (DNS resolution on Windows can hang indefinitely).
     """
     def _poll_all_orgs():
         from app import app
@@ -424,7 +563,11 @@ async def jira_per_org_poll_loop():
                 except Exception as e:
                     print(f"[WorkEngine] Org {org.slug}: poll error: {e}")
 
-    await asyncio.to_thread(_poll_all_orgs)
+    # ponytail: do NOT wrap in asyncio.wait_for — same thread-leak fix as above
+    try:
+        await asyncio.to_thread(_poll_all_orgs)
+    except Exception as e:
+        print(f"[WorkEngine] Per-org Jira poll error: {e}")
 
 
 def _compute_lead_bucket(prediction_time):
@@ -454,31 +597,35 @@ async def forecast_logging_loop():
     """
     print("[Forecast] Running scheduled forecast predictions (6h cycle)...")
     try:
-        resp = await asyncio.to_thread(
-            requests.get,
-            f"{SKILLSYNC_API}/observer/guilds",
-            headers={"Authorization": f"Bearer {API_KEY}"},
-            timeout=5,
+        resp = await asyncio.wait_for(
+            api_get(
+                f"{SKILLSYNC_API}/observer/guilds",
+                headers={"Authorization": f"Bearer {API_KEY}"},
+                timeout=5,
+            ),
+            timeout=10,
         )
-        if resp.ok:
-            data = resp.json()
-            guilds = data if isinstance(data, list) else data.get("value", [])
+        if resp:
+            guilds = resp if isinstance(resp, list) else resp.get("value", [])
             now = datetime.utcnow()
             lead_bucket = _compute_lead_bucket(now)
             print(f"[Forecast] Lead bucket: {lead_bucket}h for {len(guilds)} guild(s)")
             for g in guilds:
                 gid = g["guild_id"] if isinstance(g, dict) else g
                 try:
-                    # Use the forecast endpoint with log_prediction via the API
-                    await asyncio.to_thread(
-                        requests.get,
-                        f"{SKILLSYNC_API}/observer/ml/forecast/{gid}?log=true&lead_bucket={lead_bucket}",
-                        headers={"Authorization": f"Bearer {API_KEY}"},
-                        timeout=10,
+                    await asyncio.wait_for(
+                        api_get(
+                            f"{SKILLSYNC_API}/observer/ml/forecast/{gid}?log=true&lead_bucket={lead_bucket}",
+                            headers={"Authorization": f"Bearer {API_KEY}"},
+                            timeout=10,
+                        ),
+                        timeout=15,
                     )
-                except Exception:
+                except (asyncio.TimeoutError, Exception):
                     pass
         print("[Forecast] Scheduled forecast logging complete.")
+    except asyncio.TimeoutError:
+        print("[Forecast] Guild list fetch timed out")
     except Exception as e:
         print(f"[Forecast] Forecast prediction error: {e}")
 
