@@ -29,8 +29,15 @@ bot = commands.Bot(command_prefix=get_prefix, intents=intents)
 
 # ── Event registrations (thin wrappers) ──
 
+_ready_ran = False
+
 @bot.event
 async def on_ready():
+    global _ready_ran
+    if _ready_ran:
+        print('[SkillSync] on_ready fired again (reconnect) — skipping full init')
+        return
+    _ready_ran = True
     await handle_ready(bot)
 
 

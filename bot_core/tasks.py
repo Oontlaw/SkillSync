@@ -35,6 +35,7 @@ from work_engine.connector_jira import is_configured, map_issue_to_task, poll_is
 
 _bot = None
 _last_heartbeat = -9999999999  # fire immediately on first check
+_reversed_actions_first_run = True
 
 # ponytail: _http_hit counter tracks how many api_post/api_get calls are in-flight.
 # Helps diagnose thread pool saturation in FLUSH SLOW output.
@@ -79,24 +80,76 @@ def _mark_loop_healthy():
 
 
 def _heartbeat_daemon(heartbeat_path, interval=10):
-    """Runs in a daemon thread, writes heartbeat file on a fixed interval."""
+    """Runs in a daemon thread, writes heartbeat file on a fixed interval.
+
+    ponytail: only writes .bot_heartbeat when the event loop is healthy.
+    When frozen, the file goes stale → watchdog detects and kills the process.
+    Without this, the daemon thread keeps both log mtime and heartbeat file
+    fresh, and the watchdog's min(log_age, hb_age) never triggers.
+    """
+    _logged_thread_dump = False
     while True:
+        # Check event loop health (skip during grace period)
+        elapsed_since_start = _time.monotonic() - _heartbeat_start_ts
+        if elapsed_since_start > 120:
+            age = _time.monotonic() - _loop_healthy_ts
+            if age > 180:
+                if not _logged_thread_dump:
+                    _logged_thread_dump = True
+                    _dump_thread_state()
+                log(f"HEARTBEAT THREAD: event loop frozen for {int(age)}s — watchdog will kill")
+                # ponytail: don't write heartbeat file — let watchdog see it stale
+                _time.sleep(interval)
+                continue
+            elif age > 120:
+                log(f"HEARTBEAT THREAD: event loop unresponsive for {int(age)}s")
+            else:
+                _logged_thread_dump = False
+
         try:
             with open(heartbeat_path, 'w') as f:
                 f.write(str(_time.time()))
         except Exception:
             pass
 
-        # Check event loop health (skip during grace period)
-        elapsed_since_start = _time.monotonic() - _heartbeat_start_ts
-        if elapsed_since_start > 120:
-            age = _time.monotonic() - _loop_healthy_ts
-            if age > 180:
-                log(f"HEARTBEAT THREAD: event loop frozen for {int(age)}s — watchdog will kill")
-            elif age > 120:
-                log(f"HEARTBEAT THREAD: event loop unresponsive for {int(age)}s")
-
         _time.sleep(interval)
+
+
+def _dump_thread_state():
+    """Dump thread and executor state when event loop appears frozen."""
+    import threading
+    import sys
+    try:
+        import traceback
+        threads = threading.enumerate()
+        log(f"THREAD DUMP: {len(threads)} threads alive:")
+        for t in threads:
+            if t is threading.main_thread() or t.name.startswith("heartbeat"):
+                continue
+            # ponytail: capture ALL non-main threads — ThreadPoolExecutor
+            # threads are non-daemon, so we can't filter on t.daemon
+            log(f"  Thread: {t.name} (daemon={t.daemon}, alive={t.is_alive()})")
+            if t.is_alive():
+                for frame_id, frame in sys._current_frames().items():
+                    if frame_id == t.ident:
+                        lines = ''.join(traceback.format_stack(frame))
+                        # Log last 10 lines of the stack to avoid flooding
+                        stack_lines = lines.strip().split('\n')
+                        log(f"    Stack ({len(stack_lines)} frames):")
+                        for line in stack_lines[-10:]:
+                            log(f"      {line}")
+                        break
+        # Check default executor state
+        try:
+            loop = asyncio.get_event_loop()
+            executor = loop._default_executor
+            if executor:
+                log(f"  Default executor: {executor._max_workers} max workers, "
+                    f"tasks queued: {executor._work_queue.qsize() if hasattr(executor, '_work_queue') else '?'}")
+        except Exception:
+            pass
+    except Exception as e:
+        log(f"  Thread dump failed: {e}")
 
 
 def _ensure_heartbeat_thread():
@@ -116,38 +169,46 @@ _ensure_heartbeat_thread()
 @tasks.loop(seconds=30)
 async def flush_all_buffers():
     """Flush all buffered data every 30 seconds."""
-    _mark_loop_healthy()
-    _t0 = _time.monotonic()
+    try:
+        _mark_loop_healthy()
+        _t0 = _time.monotonic()
 
-    # ponytail: heartbeat file is now written by daemon thread — skip here
-    # to avoid blocking the event loop on file I/O.
+        # ponytail: heartbeat file is now written by daemon thread — skip here
+        # to avoid blocking the event loop on file I/O.
 
-    _hb = _time.monotonic()
-    await flush_message_buffer()
-    _m1 = _time.monotonic()
-    await flush_presence_buffer()
-    _m2 = _time.monotonic()
-    await flush_member_presence_buffer()
-    _m3 = _time.monotonic()
-    await flush_mention_buffer()
-    _m4 = _time.monotonic()
-    await flush_voice_buffer()
-    _m5 = _time.monotonic()
-    await flush_join_buffer()
-    _m6 = _time.monotonic()
-    await flush_join_leave_buffer()
-    _m7 = _time.monotonic()
-    await flush_online_count()
-    _m8 = _time.monotonic()
-    await _maybe_heartbeat()
-    _end = _time.monotonic()
+        _hb = _time.monotonic()
+        await flush_message_buffer()
+        _m1 = _time.monotonic()
+        await flush_presence_buffer()
+        _m2 = _time.monotonic()
+        await flush_member_presence_buffer()
+        _m3 = _time.monotonic()
+        await flush_mention_buffer()
+        _m4 = _time.monotonic()
+        await flush_voice_buffer()
+        _m5 = _time.monotonic()
+        await flush_join_buffer()
+        _m6 = _time.monotonic()
+        await flush_join_leave_buffer()
+        _m7 = _time.monotonic()
+        await flush_online_count()
+        _m8 = _time.monotonic()
+        await _maybe_heartbeat()
+        _end = _time.monotonic()
 
-    total = _end - _t0
-    hits = _http_hit
-    if total > 5:
-        log(f"FLUSH SLOW {total:.1f}s http_in_flight={hits} | msg={_m1-_hb:.2f} pres={_m2-_m1:.2f} member={_m3-_m2:.2f} mention={_m4-_m3:.2f} voice={_m5-_m4:.2f} join={_m6-_m5:.2f} joinleave={_m7-_m6:.2f} online={_m8-_m7:.2f} heartbeat={_end-_m8:.2f}")
-    else:
-        log(f"FLUSHED online counts http_in_flight={hits}")
+        total = _end - _t0
+        hits = _http_hit
+        if total > 5:
+            log(f"FLUSH SLOW {total:.1f}s http_in_flight={hits} | msg={_m1-_hb:.2f} pres={_m2-_m1:.2f} member={_m3-_m2:.2f} mention={_m4-_m3:.2f} voice={_m5-_m4:.2f} join={_m6-_m5:.2f} joinleave={_m7-_m6:.2f} online={_m8-_m7:.2f} heartbeat={_end-_m8:.2f}")
+        else:
+            log(f"FLUSHED online counts http_in_flight={hits}")
+    except Exception as e:
+        log(f"FLUSH EXCEPTION (task survived): {type(e).__name__}: {e}")
+
+
+@flush_all_buffers.before_loop
+async def _flush_before_loop():
+    await asyncio.sleep(1)
 
 
 async def _maybe_heartbeat():
@@ -207,6 +268,18 @@ async def check_reversed_actions():
     ponytail: every api_post is wrapped in wait_for(15s) so a slow Flask
     endpoint can't block this task indefinitely and starve the event loop.
     """
+    try:
+        await _check_reversed_actions_body()
+    except Exception as e:
+        log(f"check_reversed_actions EXCEPTION (task survived): {type(e).__name__}: {e}")
+
+
+async def _check_reversed_actions_body():
+    global _reversed_actions_first_run
+    if _reversed_actions_first_run:
+        _reversed_actions_first_run = False
+        print("[Observer] Skipping first run — Flask still busy with startup scans")
+        return
     now = datetime.now(timezone.utc)
     to_confirm = [
         key

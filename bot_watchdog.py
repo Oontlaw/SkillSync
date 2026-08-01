@@ -99,10 +99,13 @@ def _is_bot_alive():
     log_age = _check_bot_log_staleness()
     hb_age = _check_heartbeat_file()
     
-    # Use the best (most recent) signal
-    best_age = min(log_age, hb_age)
-    is_alive = best_age <= STALE_TIMEOUT
-    return is_alive, best_age
+    # ponytail: use worst (oldest) signal — BOTH must look fresh to call
+    # the bot alive.  The old min() was defeated by the heartbeat daemon
+    # thread writing to the log AND .bot_heartbeat, keeping both fresh
+    # even when the event loop was frozen.
+    worst_age = max(log_age, hb_age)
+    is_alive = worst_age <= STALE_TIMEOUT
+    return is_alive, worst_age
 
 
 def main():
@@ -150,6 +153,25 @@ def main():
                     break
                 time.sleep(1)
             continue
+
+        # ponytail: drain the stdout/stderr pipe so the child process never
+        # blocks on a write.  Without this, the 4KB pipe buffer fills up
+        # after ~60min of print() output and freezes the event loop.
+        def _drain_pipe(stream):
+            try:
+                for line in iter(stream.readline, b""):
+                    pass  # discard — bot already logs to skillsync_bot.log
+            except Exception:
+                pass
+            finally:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+
+        if proc.stdout:
+            t = threading.Thread(target=_drain_pipe, args=(proc.stdout,), daemon=True)
+            t.start()
 
         start_time = time.time()
         killed = False
