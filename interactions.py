@@ -22,6 +22,10 @@ sudden-drop telemetry: pings in the last 7 days vs the prior 23 days and the
 last-ping timestamp, so the admin view can flag pairs that used to interact
 heavily and went quiet.
 
+cross_guild_pair_rows(): read-time cross-server aggregation with the SAME
+math — pings merged across guilds so a person's relationships follow them
+instead of fragmenting per server. Nothing persisted; rows are plain dicts.
+
 No scikit-learn here by design (spec non-goal) — pure arithmetic.
 """
 import math
@@ -42,6 +46,7 @@ STALE_PING_DAYS = 14  # pings older than this with no pingee return resolve as u
 RECENT_WINDOW_DAYS = 7  # drift: "recent" slice of the scoring window
 FADING_PRIOR_MIN = 5  # drift: pair counted "fading" if it had at least this many pings
 FADING_RECENT_MAX = 1  # drift: ...in the prior slice but at most this many recently
+CROSS_GUILD = "__all__"  # sentinel guild_id for read-time cross-server rows
 
 
 # ── Pure scoring helpers (unit-tested directly) ──
@@ -68,17 +73,50 @@ def corrected_unaddressed_rate(pair_rate, baseline):
     return round(pair_rate - baseline, 4)
 
 
-def _shared_voice_sessions(guild_id, user_a, user_b, window_start):
+# ── Shared computation blocks (used by per-guild recompute AND cross-guild
+#    read-time aggregation — one math path, two keyings) ──
+
+def _active_days(window_start, pings, guild_ids=None):
+    """Distinct active days per author: the message-ref stream (all messaging)
+    plus the days a user sent pings (a ping is activity by the pinger)."""
+    active = defaultdict(set)
+    q = db.session.query(MessageRef.author_id, func.date(MessageRef.created_at)).filter(
+        MessageRef.created_at >= window_start
+    )
+    if guild_ids:
+        q = q.filter(MessageRef.guild_id.in_(guild_ids))
+    for author_id, day in q.distinct().all():
+        active[author_id].add(str(day))
+    for ping in pings:
+        active[ping.pinger_id].add(ping.created_at.date().isoformat())
+    return active
+
+
+def _baseline_stats(pings):
+    """Per-pinger [resolved, unaddressed] across ALL pingees — the baseline
+    every pair rate is deviated against."""
+    stats = defaultdict(lambda: [0, 0])
+    for ping in pings:
+        if ping.addressed is not None:
+            stats[ping.pinger_id][0] += 1
+            if not ping.addressed:
+                stats[ping.pinger_id][1] += 1
+    return stats
+
+
+def _shared_voice_sessions(guild_ids, user_a, user_b, window_start):
     """Count same-channel voice sessions between two users with overlapping
     time ranges inside the scoring window — the voice dimension the text-ping
-    graph can't see."""
-    rows = VoiceActivity.query.filter(
-        VoiceActivity.guild_id == guild_id,
+    graph can't see. Cross-guild mode merges sessions from every guild."""
+    q = VoiceActivity.query.filter(
         VoiceActivity.joined_at.isnot(None),
         VoiceActivity.left_at.isnot(None),
         VoiceActivity.created_at >= window_start,
         VoiceActivity.discord_id.in_([user_a, user_b]),
-    ).all()
+    )
+    if guild_ids:
+        q = q.filter(VoiceActivity.guild_id.in_(guild_ids))
+    rows = q.all()
     a_sessions = [
         (r.channel_name, r.joined_at, r.left_at)
         for r in rows
@@ -112,6 +150,117 @@ def _unaddressed_streak(ordered, pinger_id):
         else:
             run = 0
     return streak
+
+
+def _pair_rows(
+    plist,
+    a_id,
+    b_id,
+    guild_id,
+    *,
+    now,
+    window_start,
+    active_days,
+    total_days,
+    baseline_stats,
+    voice_guild_ids=None,
+):
+    """Build the two directional row dicts for ONE unordered pair.
+
+    Returns dicts (not ORM objects) so both the per-guild recompute and the
+    cross-guild read-time path share identical math.
+    """
+    sample = len(plist)
+    latest = max(plist, key=lambda p: p.created_at)
+
+    seven_days_ago = now - timedelta(days=RECENT_WINDOW_DAYS)
+    recent = sum(1 for p in plist if p.created_at >= seven_days_ago)
+    prior = sample - recent
+    last_ping_at = max(p.created_at for p in plist)
+
+    channel_count = len({p.channel_id for p in plist})
+    voice = _shared_voice_sessions(voice_guild_ids, a_id, b_id, window_start)
+    ordered = sorted(plist, key=lambda p: p.created_at)
+
+    affinity = None
+    if sample >= MIN_PAIR_SAMPLE:
+        days_ab = {p.created_at.date().isoformat() for p in plist}
+        p_ab = len(days_ab) / total_days
+        p_a = len(active_days.get(a_id, set())) / total_days
+        p_b = len(active_days.get(b_id, set())) / total_days
+        affinity = npmi(p_ab, p_a, p_b)
+        if affinity is not None:
+            affinity = round(affinity, 4)
+
+    rows = []
+    for pinger_id, pingee_id in ((a_id, b_id), (b_id, a_id)):
+        pair_rate = None
+        baseline = None
+        unaddressed = None
+        if sample >= MIN_PAIR_SAMPLE:
+            resolved_pair = [
+                p
+                for p in plist
+                if p.pinger_id == pinger_id and p.addressed is not None
+            ]
+            if resolved_pair:
+                pair_rate = sum(1 for p in resolved_pair if not p.addressed) / len(
+                    resolved_pair
+                )
+            stats = baseline_stats.get(pinger_id)
+            if stats and stats[0] >= MIN_PAIR_SAMPLE:
+                baseline = stats[1] / stats[0]
+            unaddressed = corrected_unaddressed_rate(pair_rate, baseline)
+
+        if pinger_id == latest.pinger_id:
+            pinger_name, pingee_name = latest.pinger_name, latest.pingee_name
+        else:
+            pinger_name, pingee_name = latest.pingee_name, latest.pinger_name
+
+        mine = [p for p in plist if p.pinger_id == pinger_id]
+        init_share = round(len(mine) / sample, 3) if sample else None
+        delays = [
+            (p.first_response_at - p.created_at).total_seconds() / 60.0
+            for p in mine
+            if p.addressed and p.first_response_at
+        ]
+        resp_med = round(statistics.median(delays), 1) if delays else None
+        streak = _unaddressed_streak(ordered, pinger_id)
+
+        rows.append(
+            {
+                "guild_id": guild_id,
+                "pinger_id": pinger_id,
+                "pinger_name": pinger_name,
+                "pingee_id": pingee_id,
+                "pingee_name": pingee_name,
+                "affinity_score": affinity,
+                "unaddressed_rate": unaddressed,
+                "baseline_unaddressed": baseline,
+                "sample_size": sample,
+                "recent_pings": recent,
+                "prior_pings": prior,
+                "last_ping_at": last_ping_at,
+                "initiation_share": init_share,
+                "median_response_minutes": resp_med,
+                "max_unaddressed_streak": streak,
+                "channels": channel_count,
+                "voice_sessions": voice,
+                "last_computed_at": now,
+            }
+        )
+    return rows
+
+
+def _group_pairs(pings, cross_guild=False):
+    """Group pings by unordered pair — with or without the guild dimension."""
+    groups = defaultdict(list)
+    for ping in pings:
+        key = (min(ping.pinger_id, ping.pingee_id), max(ping.pinger_id, ping.pingee_id))
+        if not cross_guild:
+            key = (ping.guild_id,) + key
+        groups[key].append(ping)
+    return groups
 
 
 # ── Resolver ──
@@ -204,8 +353,7 @@ def resolve_pending_pings(now=None):
 # ── Batch scorer ──
 
 def recompute_pair_scores(now=None):
-    """Rebuild pair_scores from the trailing AFFINITY_WINDOW_DAYS of
-    qualifying pings (requires_response only, per the spec filter).
+    """Rebuild pair_scores from the trailing AFFINITY_WINDOW_DAYS of pings.
 
     Pairs below MIN_PAIR_SAMPLE get sample_size only, with NULL scores —
     insufficient_data, never a computed number.
@@ -214,133 +362,70 @@ def recompute_pair_scores(now=None):
     window_start = now - timedelta(days=AFFINITY_WINDOW_DAYS)
     total_days = AFFINITY_WINDOW_DAYS
 
-    pings = PingEvent.query.filter(
-        PingEvent.created_at >= window_start,
-    ).all()
-
-    # distinct active days per author: refs (all messaging) plus the days a
-    # user sent qualifying pings (a ping is activity by the pinger)
-    active_days = defaultdict(set)
-    day_rows = (
-        db.session.query(MessageRef.author_id, func.date(MessageRef.created_at))
-        .filter(MessageRef.created_at >= window_start)
-        .distinct()
-        .all()
-    )
-    for author_id, day in day_rows:
-        active_days[author_id].add(str(day))
-    for ping in pings:
-        active_days[ping.pinger_id].add(ping.created_at.date().isoformat())
-
-    # canonical (unordered) pair grouping for affinity
-    pair_pings = defaultdict(list)
-    for ping in pings:
-        key = (
-            ping.guild_id,
-            min(ping.pinger_id, ping.pingee_id),
-            max(ping.pinger_id, ping.pingee_id),
-        )
-        pair_pings[key].append(ping)
-
-    # pinger baseline: unaddressed rate across ALL pingees (resolved only)
-    baseline_stats = defaultdict(lambda: [0, 0])  # [resolved, unaddressed]
-    for ping in pings:
-        if ping.addressed is not None:
-            baseline_stats[ping.pinger_id][0] += 1
-            if not ping.addressed:
-                baseline_stats[ping.pinger_id][1] += 1
+    pings = PingEvent.query.filter(PingEvent.created_at >= window_start).all()
+    active_days = _active_days(window_start, pings)
+    baseline_stats = _baseline_stats(pings)
 
     rows = []
-    for (guild_id, a_id, b_id), plist in pair_pings.items():
-        sample = len(plist)
-        latest = max(plist, key=lambda p: p.created_at)
-
-        # sudden-drop telemetry: last 7 days vs the prior 23 days of the window
-        seven_days_ago = now - timedelta(days=RECENT_WINDOW_DAYS)
-        recent = sum(1 for p in plist if p.created_at >= seven_days_ago)
-        prior = sample - recent
-        last_ping_at = max(p.created_at for p in plist)
-
-        # interaction depth parameters
-        channel_count = len({p.channel_id for p in plist})
-        voice = _shared_voice_sessions(guild_id, a_id, b_id, window_start)
-        ordered = sorted(plist, key=lambda p: p.created_at)
-
-        affinity = None
-        if sample >= MIN_PAIR_SAMPLE:
-            days_ab = {p.created_at.date().isoformat() for p in plist}
-            p_ab = len(days_ab) / total_days
-            p_a = len(active_days.get(a_id, set())) / total_days
-            p_b = len(active_days.get(b_id, set())) / total_days
-            affinity = npmi(p_ab, p_a, p_b)
-            if affinity is not None:
-                affinity = round(affinity, 4)
-
-        for pinger_id, pingee_id in ((a_id, b_id), (b_id, a_id)):
-            pair_rate = None
-            baseline = None
-            unaddressed = None
-            if sample >= MIN_PAIR_SAMPLE:
-                resolved_pair = [
-                    p
-                    for p in plist
-                    if p.pinger_id == pinger_id and p.addressed is not None
-                ]
-                if resolved_pair:
-                    pair_rate = sum(
-                        1 for p in resolved_pair if not p.addressed
-                    ) / len(resolved_pair)
-                stats = baseline_stats.get(pinger_id)
-                if stats and stats[0] >= MIN_PAIR_SAMPLE:
-                    baseline = stats[1] / stats[0]
-                unaddressed = corrected_unaddressed_rate(pair_rate, baseline)
-
-            if pinger_id == latest.pinger_id:
-                pinger_name, pingee_name = latest.pinger_name, latest.pingee_name
-            else:
-                pinger_name, pingee_name = latest.pingee_name, latest.pinger_name
-
-            mine = [p for p in plist if p.pinger_id == pinger_id]
-            init_share = round(len(mine) / sample, 3) if sample else None
-            delays = [
-                (p.first_response_at - p.created_at).total_seconds() / 60.0
-                for p in mine
-                if p.addressed and p.first_response_at
-            ]
-            resp_med = round(statistics.median(delays), 1) if delays else None
-            streak = _unaddressed_streak(ordered, pinger_id)
-
-            rows.append(
-                PairScore(
-                    guild_id=guild_id,
-                    pinger_id=pinger_id,
-                    pinger_name=pinger_name,
-                    pingee_id=pingee_id,
-                    pingee_name=pingee_name,
-                    affinity_score=affinity,
-                    unaddressed_rate=unaddressed,
-                    baseline_unaddressed=baseline,
-                    sample_size=sample,
-                    recent_pings=recent,
-                    prior_pings=prior,
-                    last_ping_at=last_ping_at,
-                    initiation_share=init_share,
-                    median_response_minutes=resp_med,
-                    max_unaddressed_streak=streak,
-                    channels=channel_count,
-                    voice_sessions=voice,
-                    last_computed_at=now,
-                )
+    for (guild_id, a_id, b_id), plist in _group_pairs(pings).items():
+        rows.extend(
+            _pair_rows(
+                plist,
+                a_id,
+                b_id,
+                guild_id,
+                now=now,
+                window_start=window_start,
+                active_days=active_days,
+                total_days=total_days,
+                baseline_stats=baseline_stats,
+                voice_guild_ids=[guild_id],
             )
+        )
 
     # batch rebuild: pair_scores are window-scoped, so stale rows are dropped
     db.session.query(PairScore).delete()
     if rows:
-        db.session.add_all(rows)
+        db.session.add_all([PairScore(**r) for r in rows])
     db.session.commit()
     return {
-        "pairs": len(rows),
-        "scored": sum(1 for r in rows if r.affinity_score is not None),
+        "pairs": len(rows) // 2,
+        "scored": sum(1 for r in rows if r["affinity_score"] is not None) // 2,
         "window_days": AFFINITY_WINDOW_DAYS,
         "min_sample": MIN_PAIR_SAMPLE,
     }
+
+
+def cross_guild_pair_rows(guild_ids, now=None):
+    """Read-time cross-server aggregation: the same math as the per-guild
+    recompute but with pings merged across guilds, so a person's
+    relationships follow them across servers. Returns plain dicts — nothing
+    is persisted."""
+    now = now or datetime.utcnow()
+    window_start = now - timedelta(days=AFFINITY_WINDOW_DAYS)
+    total_days = AFFINITY_WINDOW_DAYS
+
+    pings = PingEvent.query.filter(
+        PingEvent.created_at >= window_start,
+        PingEvent.guild_id.in_(guild_ids),
+    ).all()
+    active_days = _active_days(window_start, pings, guild_ids=guild_ids)
+    baseline_stats = _baseline_stats(pings)
+
+    rows = []
+    for (a_id, b_id), plist in _group_pairs(pings, cross_guild=True).items():
+        rows.extend(
+            _pair_rows(
+                plist,
+                a_id,
+                b_id,
+                CROSS_GUILD,
+                now=now,
+                window_start=window_start,
+                active_days=active_days,
+                total_days=total_days,
+                baseline_stats=baseline_stats,
+                voice_guild_ids=guild_ids,
+            )
+        )
+    return rows

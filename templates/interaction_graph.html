@@ -38,6 +38,11 @@ endblock %} {% block content %}
                     {{ g.name }}
                 </option>
                 {% endfor %}
+                {% if cross_ok %}
+                <option value="__all__" {% if guild_id == '__all__' %}selected{% endif %}>
+                    All servers
+                </option>
+                {% endif %}
             </select>
         </form>
     </div>

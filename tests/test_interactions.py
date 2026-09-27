@@ -338,6 +338,49 @@ def test_interaction_depth_parameters(app):
         db.session.remove()
 
 
+def test_cross_guild_pair_merge(app):
+    """Same pair pinging in two guilds merges into one cross-server row —
+    relationships follow the person, not the server. The per-guild fragments
+    stay below the threshold; only the merged view crosses it."""
+    with app.app_context():
+        from database import MessageRef, PairScore, PingEvent, db
+        from interactions import CROSS_GUILD, cross_guild_pair_rows
+
+        now = datetime.utcnow()
+        for gi, g in enumerate(("g1", "g2")):
+            for i in range(5):
+                day = now - timedelta(days=10 - i - gi)
+                db.session.add(
+                    PingEvent(
+                        guild_id=g, pinger_id="A", pingee_id="B",
+                        channel_id="c", channel_name="c",
+                        message_id=f"{g}-{i}", ping_type="mention",
+                        requires_response=False, addressed=True,
+                        resolved_at=now, created_at=day,
+                    )
+                )
+                db.session.add(
+                    MessageRef(guild_id=g, channel_id="c", message_id=f"{g}r{i}",
+                               author_id="A", created_at=day)
+                )
+                db.session.add(
+                    MessageRef(guild_id=g, channel_id="c", message_id=f"{g}b{i}",
+                               author_id="B", created_at=day)
+                )
+        db.session.commit()
+
+        rows = cross_guild_pair_rows(["g1", "g2"])
+        ab = next(r for r in rows if r["pinger_id"] == "A" and r["pingee_id"] == "B")
+        assert ab["guild_id"] == CROSS_GUILD
+        assert ab["sample_size"] == 10  # merged across guilds
+        assert ab["affinity_score"] is not None  # only the merged view crosses N
+
+        recompute_pair_scores()  # per-guild storage stays fragmented
+        g1 = PairScore.query.filter_by(guild_id="g1", pinger_id="A", pingee_id="B").first()
+        assert g1.sample_size == 5 and g1.affinity_score is None
+        db.session.remove()
+
+
 def test_recompute_insufficient_data_stays_null(app):
     with app.app_context():
         from database import PairScore, PingEvent, db

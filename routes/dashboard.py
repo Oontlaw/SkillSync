@@ -43,9 +43,11 @@ from ml import burnout as ml_burnout
 from ml import engine as ml_engine
 from ml import forecast as ml_forecast
 from interactions import (
+    CROSS_GUILD,
     FADING_PRIOR_MIN,
     FADING_RECENT_MAX,
     MIN_PAIR_SAMPLE,
+    cross_guild_pair_rows,
 )
 
 dashboard_bp = Blueprint("dashboard", __name__)
@@ -1464,15 +1466,95 @@ def _is_guild_admin(g):
     return bool(perms & PERM_ADMINISTRATOR or perms & PERM_MANAGE_GUILD)
 
 
-def _select_accessible_guild():
-    """Return (guilds, guild_id) for the logged-in user, honoring ?guild_id."""
+def _administered_guilds(guilds):
+    """Guilds from the session list that this user actually administers —
+    the only guilds a cross-server view is ever allowed to merge. This keeps
+    server-specific data inside its authority boundary: no cross-guild view
+    can ever include a server the viewer doesn't govern (mirrors the ML-side
+    rule that fedavg/isolation forest never see cross-guild raw data)."""
+    return [g for g in guilds if _is_guild_admin(g)]
+
+
+def _select_accessible_guild(allow_all=False):
+    """Return (guilds, guild_id) for the logged-in user, honoring ?guild_id.
+    With allow_all, '__all__' selects the cross-server view (only when the
+    user has more than one accessible guild — a merged view needs merging)."""
     guilds = [g for g in session.get("accessible_guilds", []) if isinstance(g, dict)]
     if not guilds:
         return [], None
     guild_id = request.args.get("guild_id")
+    if allow_all and guild_id == CROSS_GUILD and len(guilds) > 1:
+        return guilds, CROSS_GUILD
     if guild_id not in [str(g.get("id")) for g in guilds]:
         guild_id = str(guilds[0].get("id"))
     return guilds, guild_id
+
+
+def _rows_to_dicts(rows):
+    return [{c.name: getattr(r, c.name) for c in PairScore.__table__.columns} for r in rows]
+
+
+def _build_graph_nodes(guild_ids, endpoints):
+    """Graph nodes across the given guilds, deduped by discord_id — the same
+    person in two servers is ONE node. Activity = message_refs count (30d)
+    with historical total_messages as fallback (that field is unmaintained
+    for most regular members). Online = online in ANY guild. Scored-pair
+    endpoints are always included, fetched directly — the top-activity
+    window can miss exactly the members that ping a lot."""
+    window_start = datetime.utcnow() - timedelta(days=30)
+    ref_counts = dict(
+        db.session.query(MessageRef.author_id, db.func.count())
+        .filter(
+            MessageRef.guild_id.in_(guild_ids),
+            MessageRef.created_at >= window_start,
+        )
+        .group_by(MessageRef.author_id)
+        .all()
+    )
+    members = (
+        GuildMember.query.filter(
+            GuildMember.guild_id.in_(guild_ids), GuildMember.is_bot.is_(False)
+        )
+        .order_by(GuildMember.total_messages.desc())
+        .limit(500)
+        .all()
+    )
+    merged = {}
+
+    def _merge(m):
+        entry = merged.get(m.member_id)
+        if entry is None:
+            merged[m.member_id] = {
+                "name": m.display_name or m.name or "",
+                "activity": ref_counts.get(m.member_id) or (m.total_messages or 0),
+                "online": bool(m.is_online),
+            }
+        else:
+            entry["online"] = entry["online"] or bool(m.is_online)
+            if not entry["name"] and (m.display_name or m.name):
+                entry["name"] = m.display_name or m.name
+
+    if endpoints:
+        for m in GuildMember.query.filter(
+            GuildMember.guild_id.in_(guild_ids),
+            GuildMember.member_id.in_(endpoints),
+            GuildMember.is_bot.is_(False),
+        ).all():
+            _merge(m)
+    for m in members:
+        if len(merged) >= 80:
+            break
+        _merge(m)
+
+    return [
+        {
+            "id": mid,
+            "name": info["name"] or mid,
+            "activity": info["activity"],
+            "online": info["online"],
+        }
+        for mid, info in merged.items()
+    ][:80]
 
 
 @dashboard_bp.route("/interaction-graph")
@@ -1480,14 +1562,19 @@ def interaction_graph():
     auth_redirect = require_auth()
     if auth_redirect:
         return auth_redirect
-    guilds, guild_id = _select_accessible_guild()
+    guilds, guild_id = _select_accessible_guild(allow_all=True)
     if not guilds:
         return redirect(url_for("dashboard.index"))
+    administered = _administered_guilds(guilds)
+    cross_ok = len(administered) > 1
+    if guild_id == CROSS_GUILD and not cross_ok:
+        guild_id = str(guilds[0].get("id"))
     return render_template(
         "interaction_graph.html",
         user=session.get("user"),
         accessible_guilds=guilds,
         guild_id=guild_id,
+        cross_ok=cross_ok,
         logged_out=False,
         invite_url=BOT_INVITE_URL,
     )
@@ -1498,100 +1585,65 @@ def interaction_graph_data():
     auth_redirect = require_auth()
     if auth_redirect:
         return auth_redirect
-    guilds, guild_id = _select_accessible_guild()
+    guilds, guild_id = _select_accessible_guild(allow_all=True)
     if not guilds:
         return jsonify({"error": "No accessible guilds"}), 403
+    administered = _administered_guilds(guilds)
+    cross_ok = len(administered) > 1
 
-    scores = PairScore.query.filter(
-        PairScore.guild_id == guild_id,
-        PairScore.affinity_score.isnot(None),
-    ).all()
-
-    member_ids = {s.pinger_id for s in scores} | {s.pingee_id for s in scores}
-    members = (
-        GuildMember.query.filter(
-            GuildMember.guild_id == guild_id, GuildMember.is_bot.is_(False)
-        )
-        .order_by(GuildMember.total_messages.desc())
-        .limit(200)
-        .all()
-    )
-
-    # activity volume: current message stream (message_refs, last 30 days)
-    # with historical total_messages as fallback — total_messages alone is
-    # unmaintained for most regular members and ranks them all near zero
-    window_start = datetime.utcnow() - timedelta(days=30)
-    ref_counts = dict(
-        db.session.query(MessageRef.author_id, db.func.count())
-        .filter(MessageRef.guild_id == guild_id, MessageRef.created_at >= window_start)
-        .group_by(MessageRef.author_id)
-        .all()
-    )
-
-    nodes, by_id = [], set()
-
-    def _add(m):
-        if m.member_id in by_id:
-            return
-        by_id.add(m.member_id)
-        nodes.append(
-            {
-                "id": m.member_id,
-                "name": m.display_name or m.name,
-                "activity": ref_counts.get(m.member_id) or (m.total_messages or 0),
-                "online": bool(m.is_online),
-            }
+    if guild_id == CROSS_GUILD and cross_ok:
+        # cross-server merge is admin-tier and covers ONLY administered
+        # guilds — a partial admin never sees another server's data here
+        guild_ids = [str(g.get("id")) for g in administered]
+        pair_rows = cross_guild_pair_rows(guild_ids)
+    else:
+        if guild_id == CROSS_GUILD or guild_id not in [
+            str(g.get("id")) for g in guilds
+        ]:
+            guild_id = str(guilds[0].get("id"))
+        guild_ids = [guild_id]
+        pair_rows = _rows_to_dicts(
+            PairScore.query.filter(PairScore.guild_id == guild_id).all()
         )
 
-    # guaranteed nodes: every scored-pair endpoint, fetched directly — the
-    # top-activity window can miss exactly the members that ping a lot but
-    # have low tracked totals
-    if member_ids:
-        for m in GuildMember.query.filter(
-            GuildMember.guild_id == guild_id, GuildMember.member_id.in_(member_ids)
-        ).all():
-            _add(m)
-    for m in members:
-        if len(nodes) >= 80:
-            break
-        _add(m)
+    scored = [r for r in pair_rows if r["affinity_score"] is not None]
+    member_ids = {r["pinger_id"] for r in scored} | {r["pingee_id"] for r in scored}
+    nodes = _build_graph_nodes(guild_ids, member_ids)
+    by_id = {n["id"] for n in nodes}
 
     links, seen = [], set()
-    for s in scores:
-        edge = tuple(sorted((s.pinger_id, s.pingee_id)))
-        if edge in seen or s.pinger_id not in by_id or s.pingee_id not in by_id:
+    for r in scored:
+        edge = tuple(sorted((r["pinger_id"], r["pingee_id"])))
+        if edge in seen or r["pinger_id"] not in by_id or r["pingee_id"] not in by_id:
             continue
         seen.add(edge)
         links.append(
             {
-                "source": s.pinger_id,
-                "target": s.pingee_id,
-                "affinity": s.affinity_score,
-                "sample": s.sample_size,
+                "source": r["pinger_id"],
+                "target": r["pingee_id"],
+                "affinity": r["affinity_score"],
+                "sample": r["sample_size"],
                 "init_share": (
-                    round(s.initiation_share, 2)
-                    if s.initiation_share is not None
+                    round(r["initiation_share"], 2)
+                    if r["initiation_share"] is not None
                     else None
                 ),
-                "resp_min": s.median_response_minutes,
-                "streak": s.max_unaddressed_streak,
-                "voice": s.voice_sessions,
+                "resp_min": r["median_response_minutes"],
+                "streak": r["max_unaddressed_streak"],
+                "voice": r["voice_sessions"],
             }
         )
 
     # aggregate forming progress only — per-pair detail below the threshold
     # stays unsurfaced (spec: insufficient_data is never exposed as a score).
-    # pair_scores holds both directions, so pinger_id < pingee_id selects
-    # exactly one row per unordered pair.
-    forming = (
-        PairScore.query.filter(
-            PairScore.guild_id == guild_id,
-            PairScore.affinity_score.is_(None),
-            PairScore.sample_size > 0,
-            PairScore.pinger_id < PairScore.pingee_id,
-        )
-        .distinct()
-        .count()
+    # rows hold both directions, so pinger_id < pingee_id selects exactly one
+    # row per unordered pair.
+    forming = sum(
+        1
+        for r in pair_rows
+        if r["affinity_score"] is None
+        and r["sample_size"] > 0
+        and r["pinger_id"] < r["pingee_id"]
     )
 
     return jsonify(
@@ -1611,59 +1663,80 @@ def responsiveness():
     auth_redirect = require_auth()
     if auth_redirect:
         return auth_redirect
-    guilds, guild_id = _select_accessible_guild()
+    guilds, guild_id = _select_accessible_guild(allow_all=True)
     if not guilds:
         return redirect(url_for("dashboard.index"))
 
-    # Interpersonal data: admin-tier only, enforced per guild
-    guild_entry = next(
-        (g for g in guilds if str(g.get("id")) == str(guild_id)), None
-    )
-    if not _is_guild_admin(guild_entry):
-        return jsonify({"error": "Guild administrator access required"}), 403
-
-    rows = (
-        PairScore.query.filter(PairScore.guild_id == guild_id)
-        .order_by(PairScore.sample_size.desc())
-        .all()
-    )
+    # Interpersonal data: admin-tier only. Cross-server mode merges ONLY the
+    # guilds this user administers — never another server's data.
+    administered = _administered_guilds(guilds)
+    cross_ok = len(administered) > 1
+    if guild_id == CROSS_GUILD and not cross_ok:
+        guild_id = (
+            str(administered[0].get("id")) if administered else str(guilds[0].get("id"))
+        )
+    if guild_id == CROSS_GUILD:
+        admin_ids = [str(g.get("id")) for g in administered]
+        rows = sorted(
+            cross_guild_pair_rows(admin_ids), key=lambda r: -r["sample_size"]
+        )
+    else:
+        guild_entry = next(
+            (g for g in guilds if str(g.get("id")) == str(guild_id)), None
+        )
+        if not _is_guild_admin(guild_entry):
+            return jsonify({"error": "Guild administrator access required"}), 403
+        rows = _rows_to_dicts(
+            PairScore.query.filter(PairScore.guild_id == guild_id)
+            .order_by(PairScore.sample_size.desc())
+            .all()
+        )
 
     # sudden drop-offs: pairs that used to interact and went quiet
     fading = [
         r
         for r in rows
-        if r.prior_pings >= FADING_PRIOR_MIN
-        and r.recent_pings <= FADING_RECENT_MAX
-        and r.pinger_id < r.pingee_id  # one row per unordered pair
+        if r["prior_pings"] >= FADING_PRIOR_MIN
+        and r["recent_pings"] <= FADING_RECENT_MAX
+        and r["pinger_id"] < r["pingee_id"]  # one row per unordered pair
     ]
-    fading.sort(key=lambda r: (-(r.prior_pings or 0), r.last_ping_at or datetime.min))
+    fading.sort(key=lambda r: (-(r["prior_pings"] or 0), r["last_ping_at"] or datetime.min))
 
     detail = None
     pinger_id = request.args.get("pinger_id")
     pingee_id = request.args.get("pingee_id")
     if pinger_id and pingee_id:
+        score = next(
+            (
+                r
+                for r in rows
+                if r["pinger_id"] == pinger_id and r["pingee_id"] == pingee_id
+            ),
+            None,
+        )
+        ping_q = PingEvent.query.filter(
+            or_(
+                (PingEvent.pinger_id == pinger_id)
+                & (PingEvent.pingee_id == pingee_id),
+                (PingEvent.pinger_id == pingee_id)
+                & (PingEvent.pingee_id == pinger_id),
+            )
+        )
+        if guild_id == CROSS_GUILD:
+            ping_q = ping_q.filter(
+                PingEvent.guild_id.in_([str(g.get("id")) for g in administered])
+            )
+        else:
+            ping_q = ping_q.filter(PingEvent.guild_id == guild_id)
         detail = {
             "pinger_id": pinger_id,
             "pingee_id": pingee_id,
-            "score": PairScore.query.filter_by(
-                guild_id=guild_id, pinger_id=pinger_id, pingee_id=pingee_id
-            ).first(),
-            "pings": PingEvent.query.filter(
-                PingEvent.guild_id == guild_id,
-                or_(
-                    (PingEvent.pinger_id == pinger_id)
-                    & (PingEvent.pingee_id == pingee_id),
-                    (PingEvent.pinger_id == pingee_id)
-                    & (PingEvent.pingee_id == pinger_id),
-                ),
-            )
-            .order_by(PingEvent.created_at.desc())
-            .limit(50)
-            .all(),
+            "score": score,
+            "pings": ping_q.order_by(PingEvent.created_at.desc()).limit(50).all(),
         }
-        if detail["score"]:
-            detail["pinger_name"] = detail["score"].pinger_name or pinger_id
-            detail["pingee_name"] = detail["score"].pingee_name or pingee_id
+        if score:
+            detail["pinger_name"] = score["pinger_name"] or pinger_id
+            detail["pingee_name"] = score["pingee_name"] or pingee_id
         elif detail["pings"]:
             first = detail["pings"][0]
             if first.pinger_id == pinger_id:
@@ -1684,6 +1757,7 @@ def responsiveness():
         rows=rows,
         fading=fading,
         detail=detail,
+        cross_ok=cross_ok,
         logged_out=False,
         invite_url=BOT_INVITE_URL,
     )
