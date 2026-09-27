@@ -28,6 +28,7 @@ from database import (
     MemberJoinLeave,
     MentionRecord,
     MessageRecord,
+    MessageRef,
     PairScore,
     PingEvent,
     PingJoinEvent,
@@ -1516,6 +1517,17 @@ def interaction_graph_data():
         .all()
     )
 
+    # activity volume: current message stream (message_refs, last 30 days)
+    # with historical total_messages as fallback — total_messages alone is
+    # unmaintained for most regular members and ranks them all near zero
+    window_start = datetime.utcnow() - timedelta(days=30)
+    ref_counts = dict(
+        db.session.query(MessageRef.author_id, db.func.count())
+        .filter(MessageRef.guild_id == guild_id, MessageRef.created_at >= window_start)
+        .group_by(MessageRef.author_id)
+        .all()
+    )
+
     nodes, by_id = [], set()
 
     def _add(m):
@@ -1526,13 +1538,18 @@ def interaction_graph_data():
             {
                 "id": m.member_id,
                 "name": m.display_name or m.name,
-                "activity": m.total_messages or 0,
+                "activity": ref_counts.get(m.member_id) or (m.total_messages or 0),
                 "online": bool(m.is_online),
             }
         )
 
-    for m in members:
-        if m.member_id in member_ids:
+    # guaranteed nodes: every scored-pair endpoint, fetched directly — the
+    # top-activity window can miss exactly the members that ping a lot but
+    # have low tracked totals
+    if member_ids:
+        for m in GuildMember.query.filter(
+            GuildMember.guild_id == guild_id, GuildMember.member_id.in_(member_ids)
+        ).all():
             _add(m)
     for m in members:
         if len(nodes) >= 80:
