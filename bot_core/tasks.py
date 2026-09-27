@@ -465,6 +465,13 @@ async def message_cleanup_loop():
 @tasks.loop(minutes=5)
 async def check_ping_joins():
     """Every 5 min, expire @everyone pings after 20 min window."""
+    try:
+        await _check_ping_joins_body()
+    except Exception as e:
+        log(f"check_ping_joins EXCEPTION (task survived): {type(e).__name__}: {e}")
+
+
+async def _check_ping_joins_body():
     now = datetime.now(timezone.utc)
     expired = [
         gid
@@ -754,7 +761,10 @@ async def check_overdue_tasks():
                     worker_id=task.worker_id,
                 )
 
-    await asyncio.to_thread(_check_overdue)
+    try:
+        await asyncio.to_thread(_check_overdue)
+    except Exception as e:
+        log(f"check_overdue_tasks EXCEPTION (task survived): {type(e).__name__}: {e}")
 
 
 @tasks.loop(hours=168)
@@ -824,4 +834,7 @@ async def weekly_health_digest():
                     red=red,
                 )
 
-    await asyncio.to_thread(_weekly_digest)
+    try:
+        await asyncio.to_thread(_weekly_digest)
+    except Exception as e:
+        log(f"weekly_health_digest EXCEPTION (task survived): {type(e).__name__}: {e}")

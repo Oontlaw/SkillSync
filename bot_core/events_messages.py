@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from bot_core.config import MAX_BUFFER_SIZE, MESSAGE_BUFFER_LIMIT, MENTION_BUFFER_LIMIT
 from bot_core.state import (
     last_staff_activity, content_trust, message_buffer, mention_buffer,
@@ -69,6 +69,12 @@ async def handle_message(bot, message):
     stale = [gid for gid, data in last_staff_activity.items() if (now - data['timestamp']).total_seconds() > 60]
     for gid in stale:
         del last_staff_activity[gid]
+
+    # Prune stale pending mentions (>6h old) so the dict can't grow unbounded
+    if len(pending_mentions) > 4096:
+        stale_cutoff = now - timedelta(hours=6)
+        for key in [k for k, v in pending_mentions.items() if v['ts'] < stale_cutoff]:
+            pending_mentions.pop(key, None)
 
     # ── Job 2: Track potential moderator activity ──
     content_lower = message.content.lower().lstrip()

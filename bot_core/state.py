@@ -144,114 +144,114 @@ def consume_retrain_request():
 
 async def flush_message_buffer():
     """Send buffered messages to the API for behavioral analysis."""
-    global message_buffer
     if not message_buffer:
         return
     batch = message_buffer[:]
+    del message_buffer[:]  # in-place clear: imported references stay valid
     try:
         result = await api_post("/observer/messages", batch)
         if result is not None:
-            message_buffer = []
             log(f"FLUSHED {len(batch)} messages to behavioral log")
         else:
+            message_buffer[:0] = batch  # restore for retry
             log(f"FLUSH FAILED {len(batch)} messages (API returned None)")
     except Exception as e:
+        message_buffer[:0] = batch
         log(f"FLUSH FAILED {len(batch)} messages: {e}")
-        # Keep batch in buffer for retry
 
 
 async def flush_presence_buffer():
     """Send buffered presence updates to the API."""
-    global presence_buffer
     if not presence_buffer:
         return
     batch = presence_buffer[:]
+    del presence_buffer[:]  # in-place clear: imported references stay valid
     try:
         result = await api_post("/observer/presence", {"updates": batch})
         if result is not None:
-            presence_buffer = []
             log(f"FLUSHED {len(batch)} presence updates")
         else:
+            presence_buffer[:0] = batch  # restore for retry
             log(f"FLUSH FAILED {len(batch)} presence updates (API returned None)")
     except Exception as e:
+        presence_buffer[:0] = batch
         log(f"FLUSH FAILED {len(batch)} presence updates: {e}")
-        # Keep batch in buffer for retry
 
 
 async def flush_voice_buffer():
     """Send buffered voice sessions to the API."""
-    global voice_buffer
     if not voice_buffer:
         return
     batch = voice_buffer[:]
+    del voice_buffer[:]  # in-place clear: imported references stay valid
     try:
         result = await api_post(
             "/observer/voice-activity", {"batch": True, "sessions": batch}
         )
         if result is not None:
-            voice_buffer = []
             log(f"FLUSHED {len(batch)} voice sessions")
         else:
+            voice_buffer[:0] = batch  # restore for retry
             log(f"FLUSH FAILED {len(batch)} voice sessions (API returned None)")
     except Exception as e:
+        voice_buffer[:0] = batch
         log(f"FLUSH FAILED {len(batch)} voice sessions: {e}")
-        # Keep batch in buffer for retry
 
 
 async def flush_mention_buffer():
     """Send buffered mention records to the API."""
-    global mention_buffer
     if not mention_buffer:
         return
     batch = mention_buffer[:]
+    del mention_buffer[:]  # in-place clear: imported references stay valid
     try:
         result = await api_post("/observer/mentions", batch)
         if result is not None:
-            mention_buffer = []
             log(f"FLUSHED {len(batch)} mentions")
         else:
+            mention_buffer[:0] = batch  # restore for retry
             log(f"FLUSH FAILED {len(batch)} mentions (API returned None)")
     except Exception as e:
+        mention_buffer[:0] = batch
         log(f"FLUSH FAILED {len(batch)} mentions: {e}")
-        # Keep batch in buffer for retry
 
 
 async def flush_join_buffer():
     """Send buffered member join records to the API."""
-    global join_buffer
     if not join_buffer:
         return
     batch = join_buffer[:]
+    del join_buffer[:]  # in-place clear: imported references stay valid
     try:
         result = await api_post("/observer/join-leave", {"events": batch})
         if result is not None:
-            join_buffer = []
             log(f"FLUSHED {len(batch)} joins")
         else:
+            join_buffer[:0] = batch  # restore for retry
             log(f"FLUSH FAILED {len(batch)} joins (API returned None)")
     except Exception as e:
+        join_buffer[:0] = batch
         log(f"FLUSH FAILED {len(batch)} joins: {e}")
-        # Keep batch in buffer for retry
 
 
 async def flush_member_presence_buffer():
     """Send buffered presence updates to update GuildMember online status and activity."""
-    global member_presence_buffer
     if not member_presence_buffer:
         return
     batch = member_presence_buffer[:]
+    del member_presence_buffer[:]  # in-place clear: imported references stay valid
     try:
         result = await api_post("/observer/presence", {"updates": batch})
         if result is not None:
-            member_presence_buffer = []
             log(f"FLUSHED {len(batch)} member presence updates")
         else:
+            member_presence_buffer[:0] = batch  # restore for retry
             log(
                 f"FLUSH FAILED {len(batch)} member presence updates (API returned None)"
             )
     except Exception as e:
+        member_presence_buffer[:0] = batch
         log(f"FLUSH FAILED {len(batch)} member presence updates: {e}")
-        # Keep batch in buffer for retry
 
 
 async def flush_online_count():
@@ -274,19 +274,19 @@ async def flush_online_count():
 
 async def flush_join_leave_buffer():
     """Send buffered member join/leave records to the API."""
-    global join_leave_buffer
     if not join_leave_buffer:
         return
     batch = join_leave_buffer[:]
+    del join_leave_buffer[:]  # in-place clear: imported references stay valid
     try:
         result = await api_post(
             "/observer/join-leave", {"batch": True, "events": batch}
         )
         if result is not None:
-            join_leave_buffer = []
             log(f"FLUSHED {len(batch)} join/leave events")
         else:
+            join_leave_buffer[:0] = batch  # restore for retry
             log(f"FLUSH FAILED {len(batch)} join/leave events (API returned None)")
     except Exception as e:
+        join_leave_buffer[:0] = batch
         log(f"FLUSH FAILED {len(batch)} join/leave events: {e}")
-        # Keep batch in buffer for retry
