@@ -10,10 +10,17 @@ False — i.e. unaddressed_after_return. General activity elsewhere never
 resolves a ping.
 
 recompute_pair_scores(): batch-rebuilds pair_scores from ping_events.
-affinity_score is NPMI (normalized pointwise mutual information) over daily
-activity buckets — never raw interaction counts. unaddressed_rate is the
-pair's unaddressed rate minus the pinger's own baseline unaddressed rate
-across all pingees (a deviation, not an absolute rate).
+Since 2026-09-27 (user directive) affinity and unaddressed rates cover EVERY
+directed 1:1 ping — reply or mention, question or not — so the graph reflects
+how people actually chat, not just explicit asks. requires_response is still
+recorded per ping for future re-tightening. affinity_score is NPMI
+(normalized pointwise mutual information) over daily activity buckets — never
+raw interaction counts. unaddressed_rate is the pair's unaddressed rate minus
+the pinger's own baseline unaddressed rate across all pingees (a deviation,
+not an absolute rate; no intent is ever claimed). Each pair also gets
+sudden-drop telemetry: pings in the last 7 days vs the prior 23 days and the
+last-ping timestamp, so the admin view can flag pairs that used to interact
+heavily and went quiet.
 
 No scikit-learn here by design (spec non-goal) — pure arithmetic.
 """
@@ -29,8 +36,11 @@ from database import MessageRef, PairScore, PingEvent, db
 ADDRESS_WINDOW_MINUTES = 30  # W: ping resolves once pingee has been active this long
 ADDRESS_MAX_MESSAGES = 5  # K: same-channel post within pingee's next K messages counts
 AFFINITY_WINDOW_DAYS = 30  # trailing window for the PMI day-buckets
-MIN_PAIR_SAMPLE = 10  # N: minimum qualifying pings before any score is surfaced
+MIN_PAIR_SAMPLE = 10  # N: minimum pings before any score is surfaced
 STALE_PING_DAYS = 14  # pings older than this with no pingee return resolve as unaddressed
+RECENT_WINDOW_DAYS = 7  # drift: "recent" slice of the scoring window
+FADING_PRIOR_MIN = 5  # drift: pair counted "fading" if it had at least this many pings
+FADING_RECENT_MAX = 1  # drift: ...in the prior slice but at most this many recently
 
 
 # ── Pure scoring helpers (unit-tested directly) ──
@@ -150,7 +160,6 @@ def recompute_pair_scores(now=None):
 
     pings = PingEvent.query.filter(
         PingEvent.created_at >= window_start,
-        PingEvent.requires_response.is_(True),
     ).all()
 
     # distinct active days per author: refs (all messaging) plus the days a
@@ -189,6 +198,12 @@ def recompute_pair_scores(now=None):
     for (guild_id, a_id, b_id), plist in pair_pings.items():
         sample = len(plist)
         latest = max(plist, key=lambda p: p.created_at)
+
+        # sudden-drop telemetry: last 7 days vs the prior 23 days of the window
+        seven_days_ago = now - timedelta(days=RECENT_WINDOW_DAYS)
+        recent = sum(1 for p in plist if p.created_at >= seven_days_ago)
+        prior = sample - recent
+        last_ping_at = max(p.created_at for p in plist)
 
         affinity = None
         if sample >= MIN_PAIR_SAMPLE:
@@ -234,6 +249,9 @@ def recompute_pair_scores(now=None):
                     unaddressed_rate=unaddressed,
                     baseline_unaddressed=baseline,
                     sample_size=sample,
+                    recent_pings=recent,
+                    prior_pings=prior,
+                    last_ping_at=last_ping_at,
                     last_computed_at=now,
                 )
             )

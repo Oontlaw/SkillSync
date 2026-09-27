@@ -41,7 +41,11 @@ from database import (
 from ml import burnout as ml_burnout
 from ml import engine as ml_engine
 from ml import forecast as ml_forecast
-from interactions import MIN_PAIR_SAMPLE
+from interactions import (
+    FADING_PRIOR_MIN,
+    FADING_RECENT_MAX,
+    MIN_PAIR_SAMPLE,
+)
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -1599,6 +1603,16 @@ def responsiveness():
         .all()
     )
 
+    # sudden drop-offs: pairs that used to interact and went quiet
+    fading = [
+        r
+        for r in rows
+        if r.prior_pings >= FADING_PRIOR_MIN
+        and r.recent_pings <= FADING_RECENT_MAX
+        and r.pinger_id < r.pingee_id  # one row per unordered pair
+    ]
+    fading.sort(key=lambda r: (-(r.prior_pings or 0), r.last_ping_at or datetime.min))
+
     detail = None
     pinger_id = request.args.get("pinger_id")
     pingee_id = request.args.get("pingee_id")
@@ -1643,6 +1657,7 @@ def responsiveness():
         accessible_guilds=guilds,
         guild_id=guild_id,
         rows=rows,
+        fading=fading,
         detail=detail,
         logged_out=False,
         invite_url=BOT_INVITE_URL,

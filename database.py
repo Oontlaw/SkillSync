@@ -779,6 +779,11 @@ class PairScore(db.Model):
     )  # deviation from pinger's own baseline, not an absolute rate
     baseline_unaddressed = db.Column(db.Float, nullable=True)
     sample_size = db.Column(db.Integer, nullable=False, default=0)
+    # sudden drop-off detection: interaction in the last 7 days vs the
+    # prior 23 days of the scoring window, and when the pair last pinged
+    recent_pings = db.Column(db.Integer, nullable=False, default=0)
+    prior_pings = db.Column(db.Integer, nullable=False, default=0)
+    last_ping_at = db.Column(db.DateTime, nullable=True)
     last_computed_at = db.Column(
         db.DateTime, default=datetime.utcnow, nullable=False
     )

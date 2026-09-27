@@ -127,7 +127,7 @@ def test_corrected_unaddressed_rate_is_deviation():
 G = "test-guild"
 
 
-def _ping(a, b, ts, addressed=None, mid="", ch="chan-1"):
+def _ping(a, b, ts, addressed=None, mid="", ch="chan-1", rr=True):
     from database import PingEvent
 
     return PingEvent(
@@ -138,7 +138,7 @@ def _ping(a, b, ts, addressed=None, mid="", ch="chan-1"):
         channel_name=ch,
         message_id=mid or f"{a}-{b}-{ts.isoformat()}",
         ping_type="mention",
-        requires_response=True,
+        requires_response=rr,
         addressed=addressed,
         resolved_at=datetime.utcnow() if addressed is not None else None,
         created_at=ts,
@@ -235,6 +235,61 @@ def test_resolver_leaves_window_open(app):
 
 
 # ── batch scorer ──
+
+
+def test_recompute_counts_all_pings_not_just_asks(app):
+    """Widened rule (2026-09-27): every 1:1 ping counts toward affinity,
+    not only response-demanding ones."""
+    with app.app_context():
+        from database import MessageRef, PairScore, db
+
+        now = datetime.utcnow()
+        for i in range(MIN_PAIR_SAMPLE):
+            day = now - timedelta(days=15 - i)
+            db.session.add(
+                _ping("A", "B", day, addressed=(i >= 3), rr=False, mid=f"w{i}")
+            )
+            db.session.add(
+                MessageRef(guild_id=G, channel_id="chan-1", message_id=f"wr{i}", author_id="A", created_at=day)
+            )
+            db.session.add(
+                MessageRef(guild_id=G, channel_id="chan-1", message_id=f"wb{i}", author_id="B", created_at=day)
+            )
+        db.session.commit()
+        recompute_pair_scores()
+        ab = PairScore.query.filter_by(guild_id=G, pinger_id="A", pingee_id="B").first()
+        assert ab.sample_size == MIN_PAIR_SAMPLE
+        assert ab.affinity_score is not None and -1 <= ab.affinity_score <= 1
+        db.session.remove()
+
+
+def test_fading_pair_detection(app):
+    """Sudden drop-off: prior-period pings with near-silence recently."""
+    with app.app_context():
+        from database import PairScore, db
+        from interactions import FADING_PRIOR_MIN, FADING_RECENT_MAX
+
+        now = datetime.utcnow()
+        for i in range(6):  # 6 pings in the prior slice (8-18 days ago)
+            db.session.add(
+                _ping("A", "B", now - timedelta(days=8 + i * 2), addressed=True, mid=f"f{i}")
+            )
+        db.session.add(_ping("A", "B", now - timedelta(days=2), addressed=True, mid="fnew"))
+        # control pair: still active (pings within the last 6 days)
+        for i in range(12):
+            db.session.add(
+                _ping("C", "D", now - timedelta(days=i % 6), addressed=True, mid=f"a{i}")
+            )
+        db.session.commit()
+        recompute_pair_scores()
+
+        ab = PairScore.query.filter_by(guild_id=G, pinger_id="A", pingee_id="B").first()
+        assert ab.recent_pings == 1 and ab.prior_pings == 6
+        assert ab.prior_pings >= FADING_PRIOR_MIN and ab.recent_pings <= FADING_RECENT_MAX
+
+        cd = PairScore.query.filter_by(guild_id=G, pinger_id="C", pingee_id="D").first()
+        assert not (cd.prior_pings >= FADING_PRIOR_MIN and cd.recent_pings <= FADING_RECENT_MAX)
+        db.session.remove()
 
 
 def test_recompute_insufficient_data_stays_null(app):
