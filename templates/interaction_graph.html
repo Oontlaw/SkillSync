@@ -144,6 +144,8 @@ endblock %} {% block content %}
         var currentSim = null;
         var currentData = null;
         var showAll = false;
+        var REFRESH_MS = 60 * 1000; // online status: Discord→DB ~30s + one poll
+        var posCache = {}; // node id -> last layout position (stable re-renders)
 
         // zoom + pan — attached once, survives re-renders
         svg.call(
@@ -180,7 +182,12 @@ endblock %} {% block content %}
         }
 
         function render(data) {
-            if (currentSim) currentSim.stop();
+            if (currentSim) {
+                currentSim.nodes().forEach(function (n) {
+                    if (n.x != null) posCache[n.id] = { x: n.x, y: n.y };
+                });
+                currentSim.stop();
+            }
             gLinks.selectAll("*").remove();
             gNodes.selectAll("*").remove();
             gLabels.selectAll("*").remove();
@@ -203,6 +210,15 @@ endblock %} {% block content %}
             var visible = showAll
                 ? allNodes
                 : allNodes.filter(function (n) { return (degree[n.id] || 0) > 0; });
+
+            // restore previous layout positions so frequent polls don't re-boil
+            var settled = visible.some(function (d) { return posCache[d.id]; });
+            visible.forEach(function (d) {
+                if (posCache[d.id]) {
+                    d.x = posCache[d.id].x;
+                    d.y = posCache[d.id].y;
+                }
+            });
 
             if (!allNodes.length) {
                 msg.textContent = "No member activity data yet.";
@@ -378,13 +394,17 @@ endblock %} {% block content %}
                          .attr("y", function (d) { return d.y + 3; });
                 });
 
+                // re-renders restore cached positions — settle gently, don't re-boil
+                if (settled) sim.alpha(0.3);
+
                 currentSim = sim;
             }
 
             var shown = (data.nodes || []).length;
             var edges = (data.links || []).length;
             var line = "Last computed " + fmtTime(data.generated_at) +
-                " · auto-refreshes every 5 min · " + edges + " edge" + (edges === 1 ? "" : "s") + " drawn";
+                " · auto-refreshes every " + Math.round(REFRESH_MS / 1000) +
+                " s · " + edges + " edge" + (edges === 1 ? "" : "s") + " drawn";
             if (data.forming_pairs != null && data.forming_pairs > 0) {
                 line += " · " + data.forming_pairs + " pair" +
                     (data.forming_pairs === 1 ? "" : "s") + " forming (an edge draws at " +
@@ -411,7 +431,7 @@ endblock %} {% block content %}
             });
 
         refresh();
-        setInterval(refresh, 5 * 60 * 1000);
+        setInterval(refresh, REFRESH_MS);
     })();
 </script>
 {% endblock %}
