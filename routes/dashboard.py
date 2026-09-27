@@ -41,6 +41,7 @@ from database import (
 from ml import burnout as ml_burnout
 from ml import engine as ml_engine
 from ml import forecast as ml_forecast
+from interactions import MIN_PAIR_SAMPLE
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -1549,11 +1550,28 @@ def interaction_graph_data():
             }
         )
 
+    # aggregate forming progress only — per-pair detail below the threshold
+    # stays unsurfaced (spec: insufficient_data is never exposed as a score).
+    # pair_scores holds both directions, so pinger_id < pingee_id selects
+    # exactly one row per unordered pair.
+    forming = (
+        PairScore.query.filter(
+            PairScore.guild_id == guild_id,
+            PairScore.affinity_score.is_(None),
+            PairScore.sample_size > 0,
+            PairScore.pinger_id < PairScore.pingee_id,
+        )
+        .distinct()
+        .count()
+    )
+
     return jsonify(
         {
             "guild_id": guild_id,
             "nodes": nodes,
             "links": links,
+            "forming_pairs": forming,
+            "min_sample": MIN_PAIR_SAMPLE,
             "generated_at": datetime.utcnow().isoformat(),
         }
     )

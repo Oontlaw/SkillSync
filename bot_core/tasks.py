@@ -514,9 +514,10 @@ async def ping_resolution_loop():
         log(f"ping_resolution_loop error: {e}")
 
 
-@tasks.loop(hours=6)
+@tasks.loop(minutes=30)
 async def pair_scores_loop():
-    """Recompute pair_scores from ping_events — batch aggregate, not real-time."""
+    """Recompute pair_scores from ping_events every 30 min — the graph is a
+    living view, not a 6-hour snapshot. Batch aggregate, not real-time."""
     try:
         await api_post("/observer/recompute-pair-scores", {})
     except Exception as e:

@@ -62,10 +62,19 @@ endblock %} {% block content %}
         <div
             id="graph-msg"
             style="
-                padding: 28px;
+                padding: 28px 28px 8px;
                 text-align: center;
                 color: var(--text-muted);
                 font-size: 13px;
+            "
+        ></div>
+        <div
+            id="graph-status"
+            style="
+                padding: 0 28px 20px;
+                text-align: center;
+                color: var(--text-muted);
+                font-size: 12px;
             "
         ></div>
         <div
@@ -103,21 +112,28 @@ endblock %} {% block content %}
 
         var gid = {{ guild_id | tojson }};
         var svg = d3.select("#graph");
-        var width = svg.node().clientWidth || 1100;
-        var height = svg.node().clientHeight || 620;
         var g = svg.append("g");
+        var currentSim = null;
 
-        fetch("/interaction-graph/data?guild_id=" + encodeURIComponent(gid))
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                var nodes = data.nodes || [];
-                var links = data.links || [];
-                var msg = document.getElementById("graph-msg");
-                if (!nodes.length) {
-                    msg.textContent =
-                        "No interaction data yet. Edges appear once pairs reach the minimum sample of qualifying pings.";
-                    return;
-                }
+        function fmtTime(iso) {
+            var d = new Date(iso && iso.indexOf("T") > -1 ? iso + "Z" : iso);
+            return isNaN(d)
+                ? iso
+                : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        }
+
+        function render(data) {
+            if (currentSim) currentSim.stop();
+            g.selectAll("*").remove();
+
+            var nodes = data.nodes || [];
+            var links = data.links || [];
+            var msg = document.getElementById("graph-msg");
+            var status = document.getElementById("graph-status");
+
+            if (!nodes.length) {
+                msg.textContent = "No member activity data yet.";
+            } else {
                 msg.textContent = "";
 
                 var degree = {};
@@ -128,8 +144,10 @@ endblock %} {% block content %}
                 var radius = function (d) {
                     return Math.max(5, Math.min(26, 5 + Math.sqrt(d.activity || 0) / 2.2));
                 };
+                var width = svg.node().clientWidth || 1100;
+                var height = svg.node().clientHeight || 620;
 
-                var sim = d3
+                currentSim = d3
                     .forceSimulation(nodes)
                     .force(
                         "link",
@@ -164,12 +182,12 @@ endblock %} {% block content %}
                     .call(
                         d3.drag()
                             .on("start", function (e, d) {
-                                if (!e.active) sim.alphaTarget(0.3).restart();
+                                if (!e.active) currentSim.alphaTarget(0.3).restart();
                                 d.fx = d.x; d.fy = d.y;
                             })
                             .on("drag", function (e, d) { d.fx = e.x; d.fy = e.y; })
                             .on("end", function (e, d) {
-                                if (!e.active) sim.alphaTarget(0);
+                                if (!e.active) currentSim.alphaTarget(0);
                                 d.fx = null; d.fy = null;
                             })
                     );
@@ -183,7 +201,7 @@ endblock %} {% block content %}
                     .attr("fill", C.label)
                     .attr("pointer-events", "none");
 
-                sim.on("tick", function () {
+                currentSim.on("tick", function () {
                     link.attr("x1", function (d) { return d.source.x; })
                         .attr("y1", function (d) { return d.source.y; })
                         .attr("x2", function (d) { return d.target.x; })
@@ -192,11 +210,34 @@ endblock %} {% block content %}
                     label.attr("x", function (d) { return d.x + radius(d) + 3; })
                          .attr("y", function (d) { return d.y + 3; });
                 });
-            })
-            .catch(function () {
-                document.getElementById("graph-msg").textContent =
-                    "Could not load interaction data.";
-            });
+            }
+
+            // liveness line — data recomputes every 30 min server-side;
+            // the page re-fetches every 5 min so it picks changes up fast
+            var formed = links.length;
+            var line = "Last computed " + fmtTime(data.generated_at) +
+                " · auto-refreshes every 5 min · " + formed +
+                " edge" + (formed === 1 ? "" : "s") + " drawn";
+            if (data.forming_pairs != null && data.forming_pairs > 0) {
+                line += " · " + data.forming_pairs + " pair" +
+                    (data.forming_pairs === 1 ? "" : "s") + " forming (an edge draws at " +
+                    (data.min_sample || 10) + " pings)";
+            }
+            status.textContent = line;
+        }
+
+        function refresh() {
+            fetch("/interaction-graph/data?guild_id=" + encodeURIComponent(gid))
+                .then(function (r) { return r.json(); })
+                .then(render)
+                .catch(function () {
+                    var msg = document.getElementById("graph-msg");
+                    if (msg) msg.textContent = "Could not load interaction data.";
+                });
+        }
+
+        refresh();
+        setInterval(refresh, 5 * 60 * 1000);
     })();
 </script>
 {% endblock %}
