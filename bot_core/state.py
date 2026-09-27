@@ -290,3 +290,44 @@ async def flush_join_leave_buffer():
     except Exception as e:
         join_leave_buffer[:0] = batch
         log(f"FLUSH FAILED {len(batch)} join/leave events: {e}")
+
+
+# ── Pairwise interaction buffers ──
+ping_buffer = []
+message_ref_buffer = []
+
+
+async def flush_ping_buffer():
+    """Send buffered directed pings to the API."""
+    if not ping_buffer:
+        return
+    batch = ping_buffer[:]
+    del ping_buffer[:]  # in-place clear: imported references stay valid
+    try:
+        result = await api_post("/observer/ping-events", batch)
+        if result is not None:
+            log(f"FLUSHED {len(batch)} pings")
+        else:
+            ping_buffer[:0] = batch  # restore for retry
+            log(f"FLUSH FAILED {len(batch)} pings (API returned None)")
+    except Exception as e:
+        ping_buffer[:0] = batch
+        log(f"FLUSH FAILED {len(batch)} pings: {e}")
+
+
+async def flush_message_ref_buffer():
+    """Send buffered content-free message refs to the API."""
+    if not message_ref_buffer:
+        return
+    batch = message_ref_buffer[:]
+    del message_ref_buffer[:]  # in-place clear: imported references stay valid
+    try:
+        result = await api_post("/observer/message-refs", batch)
+        if result is not None:
+            log(f"FLUSHED {len(batch)} message refs")
+        else:
+            message_ref_buffer[:0] = batch  # restore for retry
+            log(f"FLUSH FAILED {len(batch)} message refs (API returned None)")
+    except Exception as e:
+        message_ref_buffer[:0] = batch
+        log(f"FLUSH FAILED {len(batch)} message refs: {e}")

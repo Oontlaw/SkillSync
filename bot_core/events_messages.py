@@ -1,13 +1,24 @@
 from datetime import datetime, timedelta, timezone
-from bot_core.config import MAX_BUFFER_SIZE, MESSAGE_BUFFER_LIMIT, MENTION_BUFFER_LIMIT
+from bot_core.config import (
+    MAX_BUFFER_SIZE,
+    MESSAGE_BUFFER_LIMIT,
+    MENTION_BUFFER_LIMIT,
+    PING_BUFFER_LIMIT,
+    REF_BUFFER_LIMIT,
+)
 from bot_core.state import (
     last_staff_activity, content_trust, message_buffer, mention_buffer,
     pending_mentions, automod_alert_channels, active_pings,
+    ping_buffer, message_ref_buffer,
 )
 from bot_core.privacy import is_channel_public, is_mod_bot
 from bot_core.parsers import extract_warn_from_embed, extract_automod_alert
+from bot_core.ping_detect import extract_pings
 from bot_core.api_client import api_post
-from bot_core.state import flush_message_buffer, flush_mention_buffer
+from bot_core.state import (
+    flush_message_buffer, flush_mention_buffer,
+    flush_ping_buffer, flush_message_ref_buffer,
+)
 from bot_core.logging import log
 
 
@@ -142,6 +153,20 @@ async def handle_message(bot, message):
     elif len(message_buffer) > MAX_BUFFER_SIZE:
         message_buffer[:] = message_buffer[-MAX_BUFFER_SIZE:]
 
+    # ── Job 3b: Content-free message refs (ping resolution + attribution) ──
+    message_ref_buffer.append({
+        'guild_id': str(guild.id),
+        'channel_id': str(message.channel.id),
+        'message_id': str(message.id),
+        'author_id': str(author.id),
+        'reply_to_message_id': (
+            str(message.reference.message_id)
+            if message.reference and message.reference.message_id else None
+        ),
+    })
+    if len(message_ref_buffer) >= REF_BUFFER_LIMIT:
+        await flush_message_ref_buffer()
+
     # ── Job 4: Track mentions and reply times ──
     for mentioned in message.mentions:
         if mentioned.bot:
@@ -181,6 +206,12 @@ async def handle_message(bot, message):
 
     if len(mention_buffer) >= MENTION_BUFFER_LIMIT:
         await flush_mention_buffer()
+
+    # ── Job 7: Directed 1:1 pings (pairwise interaction profiling) ──
+    for ping_entry in extract_pings(message):
+        ping_buffer.append(ping_entry)
+    if len(ping_buffer) >= PING_BUFFER_LIMIT:
+        await flush_ping_buffer()
 
     # ── Job 5: Detect @everyone / @here pings by staff ──
     is_member = hasattr(author, 'roles')

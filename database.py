@@ -712,3 +712,100 @@ class MemberJoinLeave(db.Model):
         return (
             f"<MemberJoinLeave {self.member_name} {self.event_type} in {self.guild_id}>"
         )
+
+
+class PingEvent(db.Model):
+    """One directed user-to-user ping (reply or direct mention).
+
+    `addressed` stays NULL until the resolver decides whether the pingee
+    acknowledged the ping after their return to activity; False means
+    unaddressed_after_return. Broadcast pings (@everyone/@here/role) are
+    never recorded — those are not 1:1 signals.
+    """
+
+    __tablename__ = "ping_events"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "message_id", "pingee_id", name="uq_ping_events_message_pingee"
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
+    pinger_id = db.Column(db.String(50), nullable=False, index=True)
+    pinger_name = db.Column(db.String(100), nullable=True)
+    pingee_id = db.Column(db.String(50), nullable=False, index=True)
+    pingee_name = db.Column(db.String(100), nullable=True)
+    channel_id = db.Column(db.String(50), nullable=False)
+    channel_name = db.Column(db.String(100), nullable=True)
+    message_id = db.Column(db.String(50), nullable=False)
+    ping_type = db.Column(
+        db.String(20), nullable=False, default="mention"
+    )  # reply | mention | reaction_target
+    requires_response = db.Column(db.Boolean, nullable=False, default=False)
+    addressed = db.Column(db.Boolean, nullable=True)
+    resolved_at = db.Column(db.DateTime, nullable=True)
+    return_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return (
+            f"<PingEvent {self.pinger_id} -> {self.pingee_id} "
+            f"type={self.ping_type} addressed={self.addressed}>"
+        )
+
+
+class PairScore(db.Model):
+    """Batch-computed pairwise statistics. Written only by the recompute job,
+    never per-message. NULL affinity_score / unaddressed_rate means
+    insufficient_data (sample below the minimum threshold)."""
+
+    __tablename__ = "pair_scores"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "guild_id", "pinger_id", "pingee_id", name="uq_pair_scores_guild_pair"
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
+    pinger_id = db.Column(db.String(50), nullable=False, index=True)
+    pinger_name = db.Column(db.String(100), nullable=True)
+    pingee_id = db.Column(db.String(50), nullable=False, index=True)
+    pingee_name = db.Column(db.String(100), nullable=True)
+    affinity_score = db.Column(db.Float, nullable=True)
+    unaddressed_rate = db.Column(
+        db.Float, nullable=True
+    )  # deviation from pinger's own baseline, not an absolute rate
+    baseline_unaddressed = db.Column(db.Float, nullable=True)
+    sample_size = db.Column(db.Integer, nullable=False, default=0)
+    last_computed_at = db.Column(
+        db.DateTime, default=datetime.utcnow, nullable=False
+    )
+
+    def __repr__(self):
+        return (
+            f"<PairScore {self.pinger_id}->{self.pingee_id} "
+            f"affinity={self.affinity_score} unaddressed={self.unaddressed_rate}>"
+        )
+
+
+class MessageRef(db.Model):
+    """Content-free per-message pointers (IDs only, never content) used to
+    resolve ping_events and attribute interactions. Pruned on cleanup."""
+
+    __tablename__ = "message_refs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
+    channel_id = db.Column(db.String(50), nullable=False, index=True)
+    message_id = db.Column(db.String(50), nullable=False, index=True)
+    author_id = db.Column(db.String(50), nullable=False, index=True)
+    reply_to_message_id = db.Column(db.String(50), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return (
+            f"<MessageRef {self.message_id} by {self.author_id} "
+            f"reply_to={self.reply_to_message_id}>"
+        )

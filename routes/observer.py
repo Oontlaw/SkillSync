@@ -21,9 +21,11 @@ from database import (
     GuildRole,
     MemberJoinLeave,
     MentionRecord,
+    MessageRef,
     MessageRecord,
     PendingBan,
     PendingTimeout,
+    PingEvent,
     PingJoinEvent,
     RoleChangeLog,
     ScoreLog,
@@ -1477,15 +1479,109 @@ def cleanup_old_messages():
     deleted_mentions = MentionRecord.query.filter(
         MentionRecord.created_at < cutoff
     ).delete()
+    deleted_refs = 0
+    ref_days = int(data.get("message_ref_days", 14))
+    ref_days = max(3, min(60, ref_days))
+    ref_cutoff = datetime.utcnow() - timedelta(days=ref_days)
+    deleted_refs = MessageRef.query.filter(
+        MessageRef.created_at < ref_cutoff
+    ).delete()
     db.session.commit()
 
     return jsonify(
         {
             "deleted": deleted_msgs,
             "deleted_mentions": deleted_mentions,
+            "deleted_refs": deleted_refs,
             "retention_days": retention_days,
+            "message_ref_days": ref_days,
         }
     )
+
+
+# ─────────────────────────────────────────────
+# PAIRWISE INTERACTION INGEST
+# ─────────────────────────────────────────────
+
+
+@observer_bp.route("/observer/ping-events", methods=["POST"])
+@require_api_key
+def log_ping_events():
+    """Batch-ingest directed 1:1 pings from the bot.
+
+    Idempotent per (message_id, pingee_id) so bot-side flush retries can't
+    double-count a ping. Broadcast pings never reach this endpoint.
+    """
+    data = request.json
+    if not data:
+        return jsonify({"error": "No JSON body"}), 400
+    pings = data if isinstance(data, list) else [data]
+    inserted = 0
+    for p in pings:
+        ok, _err = validate_payload(
+            p, ["pinger_id", "pingee_id", "guild_id", "message_id"]
+        )
+        if not ok:
+            continue
+        pingee_id = sanitize_str(p["pingee_id"], 50)
+        message_id = sanitize_str(p["message_id"], 50)
+        if PingEvent.query.filter_by(
+            message_id=message_id, pingee_id=pingee_id
+        ).first():
+            continue
+        db.session.add(
+            PingEvent(
+                guild_id=sanitize_str(p.get("guild_id"), 50),
+                pinger_id=sanitize_str(p["pinger_id"], 50),
+                pinger_name=sanitize_str(p.get("pinger_name"), 100),
+                pingee_id=pingee_id,
+                pingee_name=sanitize_str(p.get("pingee_name"), 100),
+                channel_id=sanitize_str(p.get("channel_id"), 50),
+                channel_name=sanitize_str(p.get("channel_name"), 100),
+                message_id=message_id,
+                ping_type=sanitize_str(p.get("ping_type") or "mention", 20),
+                requires_response=bool(p.get("requires_response", False)),
+            )
+        )
+        inserted += 1
+    db.session.commit()
+    return jsonify({"inserted": inserted, "received": len(pings)}), 201
+
+
+@observer_bp.route("/observer/message-refs", methods=["POST"])
+@require_api_key
+def log_message_refs():
+    """Batch-ingest content-free message pointers (IDs only, never content).
+
+    Used by the ping resolver for reply-to matching, mention-back windows,
+    and same-channel checks. Idempotent per message_id.
+    """
+    data = request.json
+    if not data:
+        return jsonify({"error": "No JSON body"}), 400
+    refs = data if isinstance(data, list) else [data]
+    inserted = 0
+    for r in refs:
+        ok, _err = validate_payload(
+            r, ["guild_id", "channel_id", "message_id", "author_id"]
+        )
+        if not ok:
+            continue
+        message_id = sanitize_str(r["message_id"], 50)
+        if MessageRef.query.filter_by(message_id=message_id).first():
+            continue
+        db.session.add(
+            MessageRef(
+                guild_id=sanitize_str(r["guild_id"], 50),
+                channel_id=sanitize_str(r["channel_id"], 50),
+                message_id=message_id,
+                author_id=sanitize_str(r["author_id"], 50),
+                reply_to_message_id=sanitize_str(r.get("reply_to_message_id"), 50),
+            )
+        )
+        inserted += 1
+    db.session.commit()
+    return jsonify({"inserted": inserted, "received": len(refs)}), 201
 
 
 # ─────────────────────────────────────────────

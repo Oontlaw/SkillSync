@@ -25,7 +25,9 @@ from bot_core.state import (  # re-exported for other modules
     flush_member_presence_buffer,
     flush_mention_buffer,
     flush_message_buffer,
+    flush_message_ref_buffer,
     flush_online_count,
+    flush_ping_buffer,
     flush_presence_buffer,
     flush_voice_buffer,
 )
@@ -193,6 +195,10 @@ async def flush_all_buffers():
         _m7 = _time.monotonic()
         await flush_online_count()
         _m8 = _time.monotonic()
+        # pairwise interaction buffers ride the same cycle (online= label
+        # in the SLOW log includes them — negligible volume)
+        await flush_ping_buffer()
+        await flush_message_ref_buffer()
         await _maybe_heartbeat()
         _end = _time.monotonic()
 
