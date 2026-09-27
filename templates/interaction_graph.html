@@ -1,0 +1,202 @@
+{% extends "base.html" %} {% block title %}Interaction Graph – SkillSync{%
+endblock %} {% block content %}
+
+<section class="ws-section">
+    <div
+        class="section-header"
+        style="
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            gap: 16px;
+            flex-wrap: wrap;
+        "
+    >
+        <div>
+            <div class="section-eyebrow">Community network</div>
+            <h1 class="ws-title">Interaction Graph</h1>
+            <p class="ws-subtitle">
+                1:1 pings between members — node size = activity volume, edge
+                thickness = affinity
+            </p>
+        </div>
+        <form method="get" style="margin: 0">
+            <select
+                name="guild_id"
+                onchange="this.form.submit()"
+                style="
+                    padding: 8px 12px;
+                    border-radius: 8px;
+                    border: 1px solid var(--border);
+                    background: var(--surface);
+                    color: var(--text-main);
+                    font-size: 13px;
+                "
+            >
+                {% for g in accessible_guilds %}
+                <option value="{{ g.id }}" {% if g.id|string == guild_id|string %}selected{% endif %}>
+                    {{ g.name }}
+                </option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+
+    <div
+        style="
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        "
+    >
+        <svg
+            id="graph"
+            style="
+                display: block;
+                width: 100%;
+                height: 620px;
+                background: var(--surface-soft);
+            "
+        ></svg>
+        <div
+            id="graph-msg"
+            style="
+                padding: 28px;
+                text-align: center;
+                color: var(--text-muted);
+                font-size: 13px;
+            "
+        ></div>
+        <div
+            style="
+                padding: 12px 16px;
+                border-top: 1px solid var(--border-soft);
+                font-size: 12px;
+                color: var(--text-muted);
+            "
+        >
+            <strong style="color: var(--text-main)">How to read this:</strong>
+            node size = message volume · edge thickness = affinity (expected vs
+            actual interaction, −1 to 1) · petrol = interact more than expected ·
+            red = less than expected. Pairs under 10 qualifying pings are never
+            drawn. Pairwise unaddressed (responsiveness) data is
+            <a href="/responsiveness" style="color: var(--accent)">admin-only</a>
+            and never shown here.
+        </div>
+    </div>
+</section>
+{% endblock %} {% block scripts %}
+<script src="{{ url_for('static', filename='d3.min.js') }}"></script>
+<script>
+    (function () {
+        // dashboard theme tokens (mirrored from dashboard.css — SVG attrs
+        // can't resolve CSS vars, so the palette is pinned here)
+        var C = {
+            positive: "#155e75", // --accent (petrol cyan)
+            negative: "#dc2626", // --danger
+            nodeOnline: "#155e75",
+            nodeOffline: "#94a3b8",
+            nodeStroke: "#ffffff",
+            label: "#374151",
+        };
+
+        var gid = {{ guild_id | tojson }};
+        var svg = d3.select("#graph");
+        var width = svg.node().clientWidth || 1100;
+        var height = svg.node().clientHeight || 620;
+        var g = svg.append("g");
+
+        fetch("/interaction-graph/data?guild_id=" + encodeURIComponent(gid))
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                var nodes = data.nodes || [];
+                var links = data.links || [];
+                var msg = document.getElementById("graph-msg");
+                if (!nodes.length) {
+                    msg.textContent =
+                        "No interaction data yet. Edges appear once pairs reach the minimum sample of qualifying pings.";
+                    return;
+                }
+                msg.textContent = "";
+
+                var degree = {};
+                links.forEach(function (l) {
+                    degree[l.source] = (degree[l.source] || 0) + 1;
+                    degree[l.target] = (degree[l.target] || 0) + 1;
+                });
+                var radius = function (d) {
+                    return Math.max(5, Math.min(26, 5 + Math.sqrt(d.activity || 0) / 2.2));
+                };
+
+                var sim = d3
+                    .forceSimulation(nodes)
+                    .force(
+                        "link",
+                        d3.forceLink(links).id(function (d) { return d.id; })
+                            .distance(95)
+                            .strength(function (l) { return 0.15 + 0.6 * Math.max(0, l.affinity); })
+                    )
+                    .force("charge", d3.forceManyBody().strength(-180))
+                    .force("center", d3.forceCenter(width / 2, height / 2))
+                    .force("collide", d3.forceCollide(function (d) { return radius(d) + 4; }));
+
+                var link = g.append("g").selectAll("line").data(links).join("line")
+                    .attr("stroke", function (l) { return l.affinity >= 0 ? C.positive : C.negative; })
+                    .attr("stroke-width", function (l) { return 1 + 5 * Math.max(0.05, Math.abs(l.affinity)); })
+                    .attr("stroke-opacity", 0.5);
+                // tooltip appended AFTER capturing the selection — .append()
+                // rebinds it, and tick would otherwise position tooltips
+                link.append("title").text(function (l) {
+                    var nm = function (id) {
+                        var n = nodes.find(function (x) { return x.id === id; });
+                        return n ? n.name : id;
+                    };
+                    return nm(l.source) + " ↔ " + nm(l.target) + " · affinity " + l.affinity + " · sample " + l.sample;
+                });
+
+                var node = g.append("g").selectAll("circle").data(nodes).join("circle")
+                    .attr("r", radius)
+                    .attr("fill", function (d) { return d.online ? C.nodeOnline : C.nodeOffline; })
+                    .attr("fill-opacity", 0.9)
+                    .attr("stroke", C.nodeStroke)
+                    .attr("stroke-width", 1.5)
+                    .call(
+                        d3.drag()
+                            .on("start", function (e, d) {
+                                if (!e.active) sim.alphaTarget(0.3).restart();
+                                d.fx = d.x; d.fy = d.y;
+                            })
+                            .on("drag", function (e, d) { d.fx = e.x; d.fy = e.y; })
+                            .on("end", function (e, d) {
+                                if (!e.active) sim.alphaTarget(0);
+                                d.fx = null; d.fy = null;
+                            })
+                    );
+                node.append("title").text(function (d) { return d.name + " · " + d.activity + " messages"; });
+
+                var label = g.append("g").selectAll("text")
+                    .data(nodes.filter(function (d) { return (degree[d.id] || 0) > 0; }))
+                    .join("text")
+                    .text(function (d) { return d.name; })
+                    .attr("font-size", 10.5)
+                    .attr("fill", C.label)
+                    .attr("pointer-events", "none");
+
+                sim.on("tick", function () {
+                    link.attr("x1", function (d) { return d.source.x; })
+                        .attr("y1", function (d) { return d.source.y; })
+                        .attr("x2", function (d) { return d.target.x; })
+                        .attr("y2", function (d) { return d.target.y; });
+                    node.attr("cx", function (d) { return d.x; }).attr("cy", function (d) { return d.y; });
+                    label.attr("x", function (d) { return d.x + radius(d) + 3; })
+                         .attr("y", function (d) { return d.y + 3; });
+                });
+            })
+            .catch(function () {
+                document.getElementById("graph-msg").textContent =
+                    "Could not load interaction data.";
+            });
+    })();
+</script>
+{% endblock %}

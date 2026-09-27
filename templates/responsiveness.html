@@ -1,0 +1,226 @@
+{% extends "base.html" %} {% block title %}Responsiveness – SkillSync{%
+endblock %} {% block content %}
+
+<section class="ws-section">
+    <div
+        class="section-header"
+        style="
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            gap: 16px;
+            flex-wrap: wrap;
+        "
+    >
+        <div>
+            <div class="section-eyebrow">Admin only</div>
+            <h1 class="ws-title">Responsiveness</h1>
+            <p class="ws-subtitle">
+                Unaddressed-after-return rate between named pairs, corrected
+                against each member's own baseline
+            </p>
+        </div>
+        <form method="get" style="margin: 0">
+            <select
+                name="guild_id"
+                onchange="this.form.submit()"
+                style="
+                    padding: 8px 12px;
+                    border-radius: 8px;
+                    border: 1px solid var(--border);
+                    background: var(--surface);
+                    color: var(--text-main);
+                    font-size: 13px;
+                "
+            >
+                {% for g in accessible_guilds %}
+                <option value="{{ g.id }}" {% if g.id|string == guild_id|string %}selected{% endif %}>
+                    {{ g.name }}
+                </option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+
+    <div
+        style="
+            background: var(--warning-soft);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--warning);
+            border-radius: 10px;
+            padding: 14px 16px;
+            margin-bottom: 16px;
+            font-size: 12.5px;
+            color: var(--text-muted);
+        "
+    >
+        <strong style="color: var(--text-main)">Interpersonal data — admin tier only.</strong>
+        This view shows how often one member's directed pings go unaddressed by
+        another specific member, measured as a deviation from the pinger's own
+        baseline (not an absolute "rate of ignoring" — no intent is inferred; a
+        ping counts as unaddressed only when the pingee returned to activity and
+        still did not respond within the window). Deliberately separate from the
+        <a href="/interaction-graph" style="color: var(--accent)">interaction graph</a>.
+    </div>
+
+    {% if rows %}
+    <div
+        style="
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow-x: auto;
+        "
+    >
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px">
+            <thead>
+                <tr style="text-align: left; color: var(--text-muted)">
+                    <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Pinger</th>
+                    <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Pingee</th>
+                    <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Sample</th>
+                    <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Affinity</th>
+                    <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Unaddressed rate</th>
+                    <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Pinger baseline</th>
+                    <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Last computed</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr>
+                    <td style="padding: 9px 14px; border-bottom: 1px solid var(--border-soft); font-weight: 600">
+                        <a
+                            style="color: var(--text-main); text-decoration: none"
+                            href="/responsiveness?guild_id={{ guild_id }}&pinger_id={{ row.pinger_id }}&pingee_id={{ row.pingee_id }}"
+                        >{{ row.pinger_name or row.pinger_id }}</a>
+                    </td>
+                    <td style="padding: 9px 14px; border-bottom: 1px solid var(--border-soft)">
+                        {{ row.pingee_name or row.pingee_id }}
+                    </td>
+                    <td style="padding: 9px 14px; border-bottom: 1px solid var(--border-soft)">
+                        {{ row.sample_size }}
+                    </td>
+                    <td style="padding: 9px 14px; border-bottom: 1px solid var(--border-soft)">
+                        {% if row.affinity_score is none %}
+                        <span style="color: var(--text-muted)">insufficient data</span>
+                        {% else %}{{ '%.2f'|format(row.affinity_score) }}{% endif %}
+                    </td>
+                    <td style="padding: 9px 14px; border-bottom: 1px solid var(--border-soft)">
+                        {% if row.unaddressed_rate is none %}
+                        <span style="color: var(--text-muted)">insufficient data</span>
+                        {% elif row.unaddressed_rate > 0.15 %}
+                        <span style="color: var(--danger)">+{{ '%.2f'|format(row.unaddressed_rate) }}</span>
+                        {% elif row.unaddressed_rate < -0.15 %}
+                        <span style="color: var(--success)">{{ '%.2f'|format(row.unaddressed_rate) }}</span>
+                        {% else %}
+                        {{ '%+.2f'|format(row.unaddressed_rate) }}
+                        {% endif %}
+                    </td>
+                    <td style="padding: 9px 14px; border-bottom: 1px solid var(--border-soft)">
+                        {% if row.baseline_unaddressed is none %}
+                        <span style="color: var(--text-muted)">—</span>
+                        {% else %}{{ '%.2f'|format(row.baseline_unaddressed) }}{% endif %}
+                    </td>
+                    <td style="padding: 9px 14px; border-bottom: 1px solid var(--border-soft); color: var(--text-muted)">
+                        <span data-utc="{{ row.last_computed_at.isoformat() }}"></span>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div
+        style="
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+            color: var(--text-muted);
+        "
+    >
+        No pairs recorded yet for this guild. Data accumulates once the bot is
+        running: pings are captured live, resolved on a 5-minute cycle, and
+        scored in a 6-hour batch.
+    </div>
+    {% endif %} {% if detail %}
+    <div
+        style="
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 18px;
+            margin-top: 20px;
+        "
+    >
+        <div
+            style="
+                font-family: var(--font-display, inherit);
+                font-size: 15px;
+                font-weight: 700;
+                margin-bottom: 10px;
+            "
+        >
+            Pair detail — {{ detail.pinger_name }} → {{ detail.pingee_name }}
+        </div>
+        {% if detail.score %}
+        <div style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px">
+            Sample {{ detail.score.sample_size }} ·
+            affinity {% if detail.score.affinity_score is none %}insufficient data{% else %}{{ '%.2f'|format(detail.score.affinity_score) }}{% endif %} ·
+            unaddressed rate {% if detail.score.unaddressed_rate is none %}insufficient data{% else %}{{ '%+.2f'|format(detail.score.unaddressed_rate) }}{% endif %}
+            (baseline {% if detail.score.baseline_unaddressed is none %}—{% else %}{{ '%.2f'|format(detail.score.baseline_unaddressed) }}{% endif %})
+        </div>
+        {% endif %} {% if detail.pings %}
+        <div style="overflow-x: auto">
+            <table style="width: 100%; border-collapse: collapse; font-size: 12.5px">
+                <thead>
+                    <tr style="text-align: left; color: var(--text-muted)">
+                        <th style="padding: 8px 10px; border-bottom: 1px solid var(--border-soft)">When</th>
+                        <th style="padding: 8px 10px; border-bottom: 1px solid var(--border-soft)">Direction</th>
+                        <th style="padding: 8px 10px; border-bottom: 1px solid var(--border-soft)">Type</th>
+                        <th style="padding: 8px 10px; border-bottom: 1px solid var(--border-soft)">Needs response</th>
+                        <th style="padding: 8px 10px; border-bottom: 1px solid var(--border-soft)">Status</th>
+                        <th style="padding: 8px 10px; border-bottom: 1px solid var(--border-soft)">Resolved</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in detail.pings %}
+                    <tr>
+                        <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">
+                            <span data-utc="{{ p.created_at.isoformat() }}"></span>
+                        </td>
+                        <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">
+                            {{ p.pinger_name or p.pinger_id }} → {{ p.pingee_name or p.pingee_id }}
+                        </td>
+                        <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">
+                            {{ p.ping_type }}
+                        </td>
+                        <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">
+                            {{ 'yes' if p.requires_response else 'no' }}
+                        </td>
+                        <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">
+                            {% if p.addressed is none %}
+                            <span style="color: var(--text-muted)">pending</span>
+                            {% elif p.addressed %}
+                            <span style="color: var(--success)">addressed</span>
+                            {% else %}
+                            <span style="color: var(--danger)">unaddressed after return</span>
+                            {% endif %}
+                        </td>
+                        <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft); color: var(--text-muted)">
+                            {% if p.resolved_at %}<span data-utc="{{ p.resolved_at.isoformat() }}"></span>{% else %}—{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div style="color: var(--text-muted); font-size: 13px">
+            No pings recorded between this pair.
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

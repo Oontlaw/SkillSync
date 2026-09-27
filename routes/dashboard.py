@@ -12,7 +12,7 @@ from flask import (
     session,
     url_for,
 )
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import selectinload
 
 from database import (
@@ -28,6 +28,8 @@ from database import (
     MemberJoinLeave,
     MentionRecord,
     MessageRecord,
+    PairScore,
+    PingEvent,
     PingJoinEvent,
     RoleChangeLog,
     ScoreLog,
@@ -1435,3 +1437,195 @@ def dashboard_ml_federated_train():
         return jsonify({"status": "ok", "result": result})
     except Exception as e:
         return jsonify({"error": f"Federated training failed: {str(e)}"}), 500
+
+
+# ---------------------------------------------------------------------------
+# Pairwise interaction graph + responsiveness (guild-scoped; unaddressed
+# data is admin-tier only and never merged into the graph view)
+# ---------------------------------------------------------------------------
+
+
+def _is_guild_admin(g):
+    """True if the session user administers this accessible-guild entry."""
+    if not isinstance(g, dict):
+        return False
+    if g.get("owner"):
+        return True
+    try:
+        perms = int(g.get("permissions") or 0)
+    except (TypeError, ValueError):
+        return False
+    return bool(perms & PERM_ADMINISTRATOR or perms & PERM_MANAGE_GUILD)
+
+
+def _select_accessible_guild():
+    """Return (guilds, guild_id) for the logged-in user, honoring ?guild_id."""
+    guilds = [g for g in session.get("accessible_guilds", []) if isinstance(g, dict)]
+    if not guilds:
+        return [], None
+    guild_id = request.args.get("guild_id")
+    if guild_id not in [str(g.get("id")) for g in guilds]:
+        guild_id = str(guilds[0].get("id"))
+    return guilds, guild_id
+
+
+@dashboard_bp.route("/interaction-graph")
+def interaction_graph():
+    auth_redirect = require_auth()
+    if auth_redirect:
+        return auth_redirect
+    guilds, guild_id = _select_accessible_guild()
+    if not guilds:
+        return redirect(url_for("dashboard.index"))
+    return render_template(
+        "interaction_graph.html",
+        user=session.get("user"),
+        accessible_guilds=guilds,
+        guild_id=guild_id,
+        logged_out=False,
+        invite_url=BOT_INVITE_URL,
+    )
+
+
+@dashboard_bp.route("/interaction-graph/data")
+def interaction_graph_data():
+    auth_redirect = require_auth()
+    if auth_redirect:
+        return auth_redirect
+    guilds, guild_id = _select_accessible_guild()
+    if not guilds:
+        return jsonify({"error": "No accessible guilds"}), 403
+
+    scores = PairScore.query.filter(
+        PairScore.guild_id == guild_id,
+        PairScore.affinity_score.isnot(None),
+    ).all()
+
+    member_ids = {s.pinger_id for s in scores} | {s.pingee_id for s in scores}
+    members = (
+        GuildMember.query.filter(
+            GuildMember.guild_id == guild_id, GuildMember.is_bot.is_(False)
+        )
+        .order_by(GuildMember.total_messages.desc())
+        .limit(200)
+        .all()
+    )
+
+    nodes, by_id = [], set()
+
+    def _add(m):
+        if m.member_id in by_id:
+            return
+        by_id.add(m.member_id)
+        nodes.append(
+            {
+                "id": m.member_id,
+                "name": m.display_name or m.name,
+                "activity": m.total_messages or 0,
+                "online": bool(m.is_online),
+            }
+        )
+
+    for m in members:
+        if m.member_id in member_ids:
+            _add(m)
+    for m in members:
+        if len(nodes) >= 80:
+            break
+        _add(m)
+
+    links, seen = [], set()
+    for s in scores:
+        edge = tuple(sorted((s.pinger_id, s.pingee_id)))
+        if edge in seen or s.pinger_id not in by_id or s.pingee_id not in by_id:
+            continue
+        seen.add(edge)
+        links.append(
+            {
+                "source": s.pinger_id,
+                "target": s.pingee_id,
+                "affinity": s.affinity_score,
+                "sample": s.sample_size,
+            }
+        )
+
+    return jsonify(
+        {
+            "guild_id": guild_id,
+            "nodes": nodes,
+            "links": links,
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+    )
+
+
+@dashboard_bp.route("/responsiveness")
+def responsiveness():
+    auth_redirect = require_auth()
+    if auth_redirect:
+        return auth_redirect
+    guilds, guild_id = _select_accessible_guild()
+    if not guilds:
+        return redirect(url_for("dashboard.index"))
+
+    # Interpersonal data: admin-tier only, enforced per guild
+    guild_entry = next(
+        (g for g in guilds if str(g.get("id")) == str(guild_id)), None
+    )
+    if not _is_guild_admin(guild_entry):
+        return jsonify({"error": "Guild administrator access required"}), 403
+
+    rows = (
+        PairScore.query.filter(PairScore.guild_id == guild_id)
+        .order_by(PairScore.sample_size.desc())
+        .all()
+    )
+
+    detail = None
+    pinger_id = request.args.get("pinger_id")
+    pingee_id = request.args.get("pingee_id")
+    if pinger_id and pingee_id:
+        detail = {
+            "pinger_id": pinger_id,
+            "pingee_id": pingee_id,
+            "score": PairScore.query.filter_by(
+                guild_id=guild_id, pinger_id=pinger_id, pingee_id=pingee_id
+            ).first(),
+            "pings": PingEvent.query.filter(
+                PingEvent.guild_id == guild_id,
+                or_(
+                    (PingEvent.pinger_id == pinger_id)
+                    & (PingEvent.pingee_id == pingee_id),
+                    (PingEvent.pinger_id == pingee_id)
+                    & (PingEvent.pingee_id == pinger_id),
+                ),
+            )
+            .order_by(PingEvent.created_at.desc())
+            .limit(50)
+            .all(),
+        }
+        if detail["score"]:
+            detail["pinger_name"] = detail["score"].pinger_name or pinger_id
+            detail["pingee_name"] = detail["score"].pingee_name or pingee_id
+        elif detail["pings"]:
+            first = detail["pings"][0]
+            if first.pinger_id == pinger_id:
+                detail["pinger_name"] = first.pinger_name or pinger_id
+                detail["pingee_name"] = first.pingee_name or pingee_id
+            else:
+                detail["pinger_name"] = first.pingee_name or pinger_id
+                detail["pingee_name"] = first.pinger_name or pingee_id
+        else:
+            detail["pinger_name"] = pinger_id
+            detail["pingee_name"] = pingee_id
+
+    return render_template(
+        "responsiveness.html",
+        user=session.get("user"),
+        accessible_guilds=guilds,
+        guild_id=guild_id,
+        rows=rows,
+        detail=detail,
+        logged_out=False,
+        invite_url=BOT_INVITE_URL,
+    )
