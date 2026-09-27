@@ -44,6 +44,11 @@
                     class="ws-nav-link {% if request.endpoint == 'workspace.workspace_team_health' %}active{% endif %}"
                     >Team Health</a
                 >
+                <a
+                    href="{{ url_for('workspace.workspace_interaction_graph') }}"
+                    class="ws-nav-link {% if request.endpoint in ('workspace.workspace_interaction_graph','workspace.workspace_responsiveness') %}active{% endif %}"
+                    >Interactions</a
+                >
                 {% endif %}
                 <a
                     href="{{ url_for('workspace.workspace_identities') }}"

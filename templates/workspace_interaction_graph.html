@@ -1,0 +1,155 @@
+{% extends "workspace_base.html" %}
+{% block title %}Interaction Graph — {{ org_name }}{% endblock %}
+{% block content %}
+<div class="ws-page">
+  <div class="ws-wrap">
+    <div class="ws-section ws-flex-between mb-24">
+      <div>
+        <div class="ws-eyebrow">Community</div>
+        <div class="ws-title">Interaction Graph</div>
+        <div class="ws-subtitle">1:1 pings between members — node size = activity volume, edge thickness = affinity</div>
+      </div>
+      <form method="get" style="margin:0">
+        <select name="guild_id" onchange="this.form.submit()" style="padding:6px 10px;border-radius:6px;background:var(--bg-card,#111827);color:var(--text);border:1px solid rgba(148,163,184,0.25)">
+          {% for g in guilds %}
+          <option value="{{ g.guild_id }}" {% if g.guild_id == guild_id %}selected{% endif %}>{{ g.name }}</option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+
+    <div class="ws-card" style="padding:0;overflow:hidden">
+      <svg id="graph" style="display:block;width:100%;height:620px;background:rgba(2,6,23,0.35)"></svg>
+      <div id="graph-msg" style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px"></div>
+    </div>
+
+    <div class="ws-card" style="margin-top:12px;padding:14px 16px;font-size:12px;color:var(--text-muted)">
+      <strong style="color:var(--text)">How to read this:</strong>
+      node size = member activity volume (message count) · edge thickness = affinity (expected vs actual interaction, −1 to 1) ·
+      teal edges = interact more than expected, red = less than expected · hollow presence: brighter fill = online now.
+      Pairs with fewer than 10 qualifying pings are not shown — no score is computed below the sample threshold.
+      Pairwise unaddressed (responsiveness) data is <a href="{{ url_for('workspace.workspace_responsiveness') }}" style="color:var(--text)">admin-only</a> and never shown here.
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='d3.min.js') }}"></script>
+<script>
+(function () {
+  const gid = {{ guild_id | tojson }};
+  const svg = d3.select("#graph");
+  const width = svg.node().clientWidth || 1100;
+  const height = svg.node().clientHeight || 620;
+  const g = svg.append("g");
+
+  fetch("/workspace/api/interaction-graph?guild_id=" + encodeURIComponent(gid))
+    .then((r) => r.json())
+    .then((data) => {
+      const nodes = data.nodes || [];
+      const links = data.links || [];
+      const msg = document.getElementById("graph-msg");
+      if (!nodes.length) {
+        msg.textContent =
+          "No interaction data yet. Edges appear once pairs reach the minimum sample of qualifying pings.";
+        return;
+      }
+      msg.textContent = "";
+
+      const degree = {};
+      links.forEach((l) => {
+        degree[l.source] = (degree[l.source] || 0) + 1;
+        degree[l.target] = (degree[l.target] || 0) + 1;
+      });
+      const radius = (d) =>
+        Math.max(5, Math.min(26, 5 + Math.sqrt(d.activity || 0) / 2.2));
+
+      const sim = d3
+        .forceSimulation(nodes)
+        .force(
+          "link",
+          d3
+            .forceLink(links)
+            .id((d) => d.id)
+            .distance(95)
+            .strength((l) => 0.15 + 0.6 * Math.max(0, l.affinity))
+        )
+        .force("charge", d3.forceManyBody().strength(-180))
+        .force("center", d3.forceCenter(width / 2, height / 2))
+        .force("collide", d3.forceCollide((d) => radius(d) + 4));
+
+      const link = g
+        .append("g")
+        .selectAll("line")
+        .data(links)
+        .join("line")
+        .attr("stroke", (l) => (l.affinity >= 0 ? "#22d3ee" : "#f87171"))
+        .attr("stroke-width", (l) => 1 + 5 * Math.max(0.05, Math.abs(l.affinity)))
+        .attr("stroke-opacity", 0.45)
+        .append("title")
+        .text((l) => {
+          const nm = (id) => (nodes.find((n) => n.id === id) || {}).name || id;
+          return (
+            nm(l.source) + " ↔ " + nm(l.target) +
+            " · affinity " + l.affinity + " · sample " + l.sample
+          );
+        });
+
+      const node = g
+        .append("g")
+        .selectAll("circle")
+        .data(nodes)
+        .join("circle")
+        .attr("r", radius)
+        .attr("fill", (d) => (d.online ? "#0891b2" : "#64748b"))
+        .attr("fill-opacity", 0.9)
+        .attr("stroke", "#0f172a")
+        .attr("stroke-width", 1)
+        .call(
+          d3
+            .drag()
+            .on("start", (e, d) => {
+              if (!e.active) sim.alphaTarget(0.3).restart();
+              d.fx = d.x;
+              d.fy = d.y;
+            })
+            .on("drag", (e, d) => {
+              d.fx = e.x;
+              d.fy = e.y;
+            })
+            .on("end", (e, d) => {
+              if (!e.active) sim.alphaTarget(0);
+              d.fx = null;
+              d.fy = null;
+            })
+        );
+      node.append("title").text((d) => d.name + " · " + d.activity + " messages");
+
+      const label = g
+        .append("g")
+        .selectAll("text")
+        .data(nodes.filter((d) => (degree[d.id] || 0) > 0))
+        .join("text")
+        .text((d) => d.name)
+        .attr("font-size", 10)
+        .attr("fill", "#cbd5e1")
+        .attr("pointer-events", "none");
+
+      sim.on("tick", () => {
+        link
+          .attr("x1", (d) => d.source.x)
+          .attr("y1", (d) => d.source.y)
+          .attr("x2", (d) => d.target.x)
+          .attr("y2", (d) => d.target.y);
+        node.attr("cx", (d) => d.x).attr("cy", (d) => d.y);
+        label.attr("x", (d) => d.x + radius(d) + 3).attr("y", (d) => d.y + 3);
+      });
+    })
+    .catch(() => {
+      document.getElementById("graph-msg").textContent =
+        "Could not load interaction data.";
+    });
+})();
+</script>
+{% endblock %}

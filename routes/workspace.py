@@ -15,15 +15,19 @@ from flask import (
     url_for,
 )
 from sqlalchemy import Date as SADate
-from sqlalchemy import cast, func
+from sqlalchemy import cast, func, or_
 
 from database import (
     AdminCorrection,
     BehavioralAnomaly,
     BurnoutRisk,
+    GuildInfo,
+    GuildMember,
     LoginAttempt,
     Organisation,
     OrgMember,
+    PairScore,
+    PingEvent,
     ScoreLog,
     Task,
     Worker,
@@ -1762,3 +1766,165 @@ def workspace_scan_anomalies():
     org_id = session["ws_org_id"]
     results = run_org_scan(org_id)
     return jsonify({"ok": True, "anomalies": results})
+
+
+# ---------------------------------------------------------------------------
+# Pairwise interaction graph + responsiveness (interpersonal data: admin-tier)
+# ---------------------------------------------------------------------------
+
+
+@workspace_bp.route("/interaction-graph")
+@ws_admin_required
+def workspace_interaction_graph():
+    """Force-directed 1:1 interaction graph. Affinity edges only — pairwise
+    unaddressed data lives exclusively on the admin-only responsiveness view."""
+    guilds = GuildInfo.query.order_by(GuildInfo.name).all()
+    guild_id = request.args.get("guild_id") or (guilds[0].guild_id if guilds else "")
+    return render_template(
+        "workspace_interaction_graph.html",
+        guilds=guilds,
+        guild_id=guild_id,
+        org_name=session.get("ws_org_name", ""),
+        role=session.get("ws_member_role", ""),
+    )
+
+
+@workspace_bp.route("/api/interaction-graph")
+@ws_admin_required
+def workspace_interaction_graph_api():
+    """Nodes and scored edges for the interaction graph.
+
+    Node size = activity volume (total_messages); edge thickness = affinity.
+    Pairs below the min sample size have no affinity score and are never
+    surfaced. Unaddressed data is intentionally absent from this view.
+    """
+    guild_id = request.args.get("guild_id", "")
+    if not guild_id:
+        return jsonify({"error": "guild_id required"}), 400
+
+    scores = PairScore.query.filter(
+        PairScore.guild_id == guild_id,
+        PairScore.affinity_score.isnot(None),
+    ).all()
+
+    member_ids = {s.pinger_id for s in scores} | {s.pingee_id for s in scores}
+    members = (
+        GuildMember.query.filter(
+            GuildMember.guild_id == guild_id, GuildMember.is_bot.is_(False)
+        )
+        .order_by(GuildMember.total_messages.desc())
+        .limit(200)
+        .all()
+    )
+
+    nodes, by_id = [], set()
+
+    def _add(m):
+        if m.member_id in by_id:
+            return
+        by_id.add(m.member_id)
+        nodes.append(
+            {
+                "id": m.member_id,
+                "name": m.display_name or m.name,
+                "activity": m.total_messages or 0,
+                "online": bool(m.is_online),
+            }
+        )
+
+    for m in members:
+        if m.member_id in member_ids:
+            _add(m)
+    for m in members:
+        if len(nodes) >= 80:
+            break
+        _add(m)
+
+    links, seen = [], set()
+    for s in scores:
+        edge = tuple(sorted((s.pinger_id, s.pingee_id)))
+        if edge in seen or s.pinger_id not in by_id or s.pingee_id not in by_id:
+            continue
+        seen.add(edge)
+        links.append(
+            {
+                "source": s.pinger_id,
+                "target": s.pingee_id,
+                "affinity": s.affinity_score,
+                "sample": s.sample_size,
+            }
+        )
+
+    return jsonify(
+        {
+            "guild_id": guild_id,
+            "nodes": nodes,
+            "links": links,
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+    )
+
+
+@workspace_bp.route("/responsiveness")
+@ws_strict_admin_required
+def workspace_responsiveness():
+    """Admin-only responsiveness view. Pairwise unaddressed_after_return data
+    is interpersonal — never exposed to HR or member roles, and never merged
+    into the interaction graph."""
+    guilds = GuildInfo.query.order_by(GuildInfo.name).all()
+    guild_id = request.args.get("guild_id") or (guilds[0].guild_id if guilds else "")
+    rows = []
+    if guild_id:
+        rows = (
+            PairScore.query.filter(PairScore.guild_id == guild_id)
+            .order_by(PairScore.sample_size.desc())
+            .all()
+        )
+
+    detail = None
+    pinger_id = request.args.get("pinger_id")
+    pingee_id = request.args.get("pingee_id")
+    if guild_id and pinger_id and pingee_id:
+        detail = {
+            "pinger_id": pinger_id,
+            "pingee_id": pingee_id,
+            "score": PairScore.query.filter_by(
+                guild_id=guild_id, pinger_id=pinger_id, pingee_id=pingee_id
+            ).first(),
+            "pings": PingEvent.query.filter(
+                PingEvent.guild_id == guild_id,
+                or_(
+                    (PingEvent.pinger_id == pinger_id)
+                    & (PingEvent.pingee_id == pingee_id),
+                    (PingEvent.pinger_id == pingee_id)
+                    & (PingEvent.pingee_id == pinger_id),
+                ),
+            )
+            .order_by(PingEvent.created_at.desc())
+            .limit(50)
+            .all(),
+        }
+        if detail["score"]:
+            detail["pinger_name"] = detail["score"].pinger_name or pinger_id
+            detail["pingee_name"] = detail["score"].pingee_name or pingee_id
+        elif detail["pings"]:
+            first = detail["pings"][0]
+            if first.pinger_id == pinger_id:
+                detail["pinger_name"] = first.pinger_name or pinger_id
+                detail["pingee_name"] = first.pingee_name or pingee_id
+            else:
+                detail["pinger_name"] = first.pingee_name or pinger_id
+                detail["pingee_name"] = first.pinger_name or pingee_id
+        else:
+            detail["pinger_name"] = pinger_id
+            detail["pingee_name"] = pingee_id
+
+    return render_template(
+        "workspace_responsiveness.html",
+        guilds=guilds,
+        guild_id=guild_id,
+        rows=rows,
+        detail=detail,
+        org_name=session.get("ws_org_name", ""),
+        role=session.get("ws_member_role", ""),
+    )
