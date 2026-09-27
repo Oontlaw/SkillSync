@@ -100,8 +100,10 @@ def _kill_all_skill_sync_processes():
         ["run_dashboard.py", "run_bot.py", "app.py", "bot.py", "bot_watchdog.py"],
     )
 
-    # Third pass — kill only SkillSync-owned ngrok.exe instances
-    _kill_processes_by_name_and_cmd("ngrok.exe", ["http 5000"])
+    # Third pass — kill only SkillSync-owned ngrok.exe instances.
+    # "5000" matches both `ngrok http 5000` and `ngrok http --domain=… 5000`;
+    # scoping to ngrok.exe launched from this project's .venv keeps it safe.
+    _kill_processes_by_name_and_cmd("ngrok.exe", ["5000"])
 
 
 def launch(script: str, log_name: str, pid_file: str) -> int:
@@ -120,11 +122,39 @@ def launch(script: str, log_name: str, pid_file: str) -> int:
     return proc.pid
 
 
+def _ngrok_domain() -> str:
+    """Reserved ngrok domain for the tunnel.
+
+    Derived from DISCORD_REDIRECT_URI in .env (with optional NGROK_DOMAIN
+    override) so the tunnel URL and the Discord OAuth redirect can never
+    drift apart — a random ngrok URL silently breaks OAuth login.
+    """
+    override = os.getenv("NGROK_DOMAIN", "")
+    if override:
+        return override
+    try:
+        with open(os.path.join(BASE, ".env"), encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("DISCORD_REDIRECT_URI="):
+                    from urllib.parse import urlparse
+
+                    return urlparse(line.split("=", 1)[1]).netloc
+    except Exception:
+        pass
+    return ""
+
+
 def launch_ngrok() -> int:
     """Launch ngrok as a detached process. Returns PID."""
     log_path = os.path.join(BASE, "ngrok.log")
+    cmd = [NGROK, "http", "--log=stdout", "--log-level=warn"]
+    domain = _ngrok_domain()
+    if domain:
+        cmd.append(f"--domain={domain}")
+    cmd.append("5000")
     proc = subprocess.Popen(
-        [NGROK, "http", "--log=stdout", "--log-level=warn", "5000"],
+        cmd,
         stdout=open(log_path, "w"),
         stderr=subprocess.STDOUT,
         cwd=BASE,
