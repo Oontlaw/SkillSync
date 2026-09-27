@@ -137,3 +137,4 @@ skillsync_dump.sql
 
 # Platform-specific setup guides
 LINUX_SETUP.md
+skillsync_bot.log.*
