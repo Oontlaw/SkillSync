@@ -25,12 +25,13 @@ heavily and went quiet.
 No scikit-learn here by design (spec non-goal) — pure arithmetic.
 """
 import math
+import statistics
 from collections import defaultdict
 from datetime import datetime, timedelta
 
 from sqlalchemy import func
 
-from database import MessageRef, PairScore, PingEvent, db
+from database import MessageRef, PairScore, PingEvent, VoiceActivity, db
 
 # ── Tunables ──
 ADDRESS_WINDOW_MINUTES = 30  # W: ping resolves once pingee has been active this long
@@ -65,6 +66,52 @@ def corrected_unaddressed_rate(pair_rate, baseline):
     if pair_rate is None or baseline is None:
         return None
     return round(pair_rate - baseline, 4)
+
+
+def _shared_voice_sessions(guild_id, user_a, user_b, window_start):
+    """Count same-channel voice sessions between two users with overlapping
+    time ranges inside the scoring window — the voice dimension the text-ping
+    graph can't see."""
+    rows = VoiceActivity.query.filter(
+        VoiceActivity.guild_id == guild_id,
+        VoiceActivity.joined_at.isnot(None),
+        VoiceActivity.left_at.isnot(None),
+        VoiceActivity.created_at >= window_start,
+        VoiceActivity.discord_id.in_([user_a, user_b]),
+    ).all()
+    a_sessions = [
+        (r.channel_name, r.joined_at, r.left_at)
+        for r in rows
+        if r.discord_id == user_a
+    ]
+    b_sessions = [
+        (r.channel_name, r.joined_at, r.left_at)
+        for r in rows
+        if r.discord_id == user_b
+    ]
+    count = 0
+    for ch_a, ja, la in a_sessions:
+        for ch_b, jb, lb in b_sessions:
+            if ch_a and ch_a == ch_b and ja < lb and jb < la:
+                count += 1
+    return count
+
+
+def _unaddressed_streak(ordered, pinger_id):
+    """Longest run of consecutive unanswered pings sent by pinger_id.
+    A ping from the other side, or one that got addressed, resets the run;
+    still-unresolved pings neither extend nor reset it (conservative)."""
+    streak = run = 0
+    for p in ordered:
+        if p.pinger_id == pinger_id:
+            if p.addressed is False:
+                run += 1
+                streak = max(streak, run)
+            elif p.addressed is True:
+                run = 0
+        else:
+            run = 0
+    return streak
 
 
 # ── Resolver ──
@@ -115,10 +162,12 @@ def resolve_pending_pings(now=None):
                 continue  # still inside the window — leave unresolved
 
             addressed = False
+            first_response_at = None
             # 1) direct reply to the ping's message after returning
             for ref in refs:
                 if ref.created_at >= return_at and ref.reply_to_message_id == ping.message_id:
                     addressed = True
+                    first_response_at = ref.created_at
                     break
             # 2) mention-back within W minutes of returning
             if not addressed:
@@ -129,15 +178,22 @@ def resolve_pending_pings(now=None):
                     PingEvent.created_at >= return_at,
                     PingEvent.created_at <= deadline,
                 ).first()
-                addressed = back is not None
+                if back is not None:
+                    addressed = True
+                    first_response_at = back.created_at
             # 3) post in the ping's channel within their next K messages
             if not addressed:
                 next_msgs = [r for r in refs if r.created_at >= return_at][
                     :ADDRESS_MAX_MESSAGES
                 ]
-                addressed = any(r.channel_id == ping.channel_id for r in next_msgs)
+                for r in next_msgs:
+                    if r.channel_id == ping.channel_id:
+                        addressed = True
+                        first_response_at = r.created_at
+                        break
 
             ping.addressed = addressed
+            ping.first_response_at = first_response_at
             ping.resolved_at = now
             resolved += 1
 
@@ -205,6 +261,11 @@ def recompute_pair_scores(now=None):
         prior = sample - recent
         last_ping_at = max(p.created_at for p in plist)
 
+        # interaction depth parameters
+        channel_count = len({p.channel_id for p in plist})
+        voice = _shared_voice_sessions(guild_id, a_id, b_id, window_start)
+        ordered = sorted(plist, key=lambda p: p.created_at)
+
         affinity = None
         if sample >= MIN_PAIR_SAMPLE:
             days_ab = {p.created_at.date().isoformat() for p in plist}
@@ -238,6 +299,17 @@ def recompute_pair_scores(now=None):
                 pinger_name, pingee_name = latest.pinger_name, latest.pingee_name
             else:
                 pinger_name, pingee_name = latest.pingee_name, latest.pinger_name
+
+            mine = [p for p in plist if p.pinger_id == pinger_id]
+            init_share = round(len(mine) / sample, 3) if sample else None
+            delays = [
+                (p.first_response_at - p.created_at).total_seconds() / 60.0
+                for p in mine
+                if p.addressed and p.first_response_at
+            ]
+            resp_med = round(statistics.median(delays), 1) if delays else None
+            streak = _unaddressed_streak(ordered, pinger_id)
+
             rows.append(
                 PairScore(
                     guild_id=guild_id,
@@ -252,6 +324,11 @@ def recompute_pair_scores(now=None):
                     recent_pings=recent,
                     prior_pings=prior,
                     last_ping_at=last_ping_at,
+                    initiation_share=init_share,
+                    median_response_minutes=resp_med,
+                    max_unaddressed_streak=streak,
+                    channels=channel_count,
+                    voice_sessions=voice,
                     last_computed_at=now,
                 )
             )

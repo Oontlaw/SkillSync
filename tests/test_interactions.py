@@ -292,6 +292,52 @@ def test_fading_pair_detection(app):
         db.session.remove()
 
 
+def test_interaction_depth_parameters(app):
+    """Initiation share, response latency, streak, channels, voice overlap."""
+    with app.app_context():
+        from database import MessageRef, PairScore, VoiceActivity, db
+        from interactions import resolve_pending_pings
+
+        now = datetime.utcnow()
+
+        def ref(author, ts, reply_to=None, mid=""):
+            return MessageRef(
+                guild_id=G, channel_id="chan-1", message_id=mid or f"{author}-{ts.isoformat()}",
+                author_id=author, reply_to_message_id=reply_to, created_at=ts,
+            )
+
+        # A pings B 4x over 4 hours; B is active 2 min later and reply-to's
+        # each ping 5+i min later; B pings back once (A initiates 80%)
+        for i in range(4):
+            t = now - timedelta(hours=8, minutes=60 * (4 - i))
+            db.session.add(_ping("A", "B", t, mid=f"d{i}"))
+            db.session.add(ref("B", t + timedelta(minutes=2), mid=f"bact{i}"))
+            db.session.add(ref("B", t + timedelta(minutes=5 + i), reply_to=f"d{i}", mid=f"br{i}"))
+        db.session.add(_ping("B", "A", now - timedelta(hours=2), mid="dback"))
+        # voice: two overlapping same-channel sessions + one non-overlapping
+        vs = lambda u, j, l: VoiceActivity(
+            guild_id=G, discord_id=u, channel_name="vc1",
+            joined_at=j, left_at=l, created_at=j,
+        )
+        db.session.add(vs("A", now - timedelta(hours=5), now - timedelta(hours=4)))
+        db.session.add(vs("B", now - timedelta(hours=5, minutes=30), now - timedelta(hours=3)))
+        db.session.add(vs("A", now - timedelta(minutes=15), now - timedelta(minutes=8)))
+        db.session.add(vs("B", now - timedelta(minutes=10), now - timedelta(minutes=5)))
+        db.session.commit()
+
+        resolve_pending_pings()
+        recompute_pair_scores()
+
+        ab = PairScore.query.filter_by(guild_id=G, pinger_id="A", pingee_id="B").first()
+        assert ab.initiation_share == 0.8
+        assert ab.median_response_minutes is not None and ab.median_response_minutes > 0
+        assert ab.max_unaddressed_streak == 0  # B addressed every ping
+        assert ab.channels == 1 and ab.voice_sessions == 2
+        ba = PairScore.query.filter_by(guild_id=G, pinger_id="B", pingee_id="A").first()
+        assert ba.initiation_share == 0.2
+        db.session.remove()
+
+
 def test_recompute_insufficient_data_stays_null(app):
     with app.app_context():
         from database import PairScore, PingEvent, db

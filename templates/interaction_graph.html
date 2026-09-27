@@ -170,7 +170,17 @@ endblock %} {% block content %}
                         var n = nodes.find(function (x) { return x.id === id; });
                         return n ? n.name : id;
                     };
-                    return nm(l.source) + " ↔ " + nm(l.target) + " · affinity " + l.affinity + " · sample " + l.sample;
+                    var t = nm(l.source) + " ↔ " + nm(l.target) +
+                        " · affinity " + l.affinity + " · sample " + l.sample;
+                    if (l.init_share != null)
+                        t += " · " + nm(l.source) + " initiates " + Math.round(l.init_share * 100) + "%";
+                    if (l.resp_min != null)
+                        t += " · median response " + l.resp_min + " min";
+                    if (l.streak)
+                        t += " · longest unanswered run " + l.streak;
+                    if (l.voice)
+                        t += " · " + l.voice + " shared voice sessions";
+                    return t;
                 });
 
                 var node = g.append("g").selectAll("circle").data(nodes).join("circle")

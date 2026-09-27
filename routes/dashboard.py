@@ -1568,6 +1568,14 @@ def interaction_graph_data():
                 "target": s.pingee_id,
                 "affinity": s.affinity_score,
                 "sample": s.sample_size,
+                "init_share": (
+                    round(s.initiation_share, 2)
+                    if s.initiation_share is not None
+                    else None
+                ),
+                "resp_min": s.median_response_minutes,
+                "streak": s.max_unaddressed_streak,
+                "voice": s.voice_sessions,
             }
         )
 

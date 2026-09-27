@@ -131,6 +131,8 @@ endblock %} {% block content %}
                     <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Affinity</th>
                     <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Unaddressed rate</th>
                     <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Pinger baseline</th>
+                    <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Initiates</th>
+                    <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Unansw. run</th>
                     <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Last computed</th>
                 </tr>
             </thead>
@@ -169,6 +171,18 @@ endblock %} {% block content %}
                         {% if row.baseline_unaddressed is none %}
                         <span style="color: var(--text-muted)">—</span>
                         {% else %}{{ '%.2f'|format(row.baseline_unaddressed) }}{% endif %}
+                    </td>
+                    <td style="padding: 9px 14px; border-bottom: 1px solid var(--border-soft)">
+                        {% if row.initiation_share is none %}
+                        <span style="color: var(--text-muted)">—</span>
+                        {% else %}{{ '%.0f%%'|format(row.initiation_share * 100) }}{% endif %}
+                    </td>
+                    <td style="padding: 9px 14px; border-bottom: 1px solid var(--border-soft)">
+                        {% if row.max_unaddressed_streak is none or row.max_unaddressed_streak == 0 %}
+                        <span style="color: var(--text-muted)">—</span>
+                        {% elif row.max_unaddressed_streak >= 3 %}
+                        <span style="color: var(--danger)">{{ row.max_unaddressed_streak }}</span>
+                        {% else %}{{ row.max_unaddressed_streak }}{% endif %}
                     </td>
                     <td style="padding: 9px 14px; border-bottom: 1px solid var(--border-soft); color: var(--text-muted)">
                         <span data-utc="{{ row.last_computed_at.isoformat() }}"></span>
@@ -219,6 +233,12 @@ endblock %} {% block content %}
             affinity {% if detail.score.affinity_score is none %}insufficient data{% else %}{{ '%.2f'|format(detail.score.affinity_score) }}{% endif %} ·
             unaddressed rate {% if detail.score.unaddressed_rate is none %}insufficient data{% else %}{{ '%+.2f'|format(detail.score.unaddressed_rate) }}{% endif %}
             (baseline {% if detail.score.baseline_unaddressed is none %}—{% else %}{{ '%.2f'|format(detail.score.baseline_unaddressed) }}{% endif %})
+            <br/>
+            initiates {{ '%.0f%%'|format(detail.score.initiation_share * 100) if detail.score.initiation_share is not none else '—' }} ·
+            median response {% if detail.score.median_response_minutes is not none %}{{ '%.1f'|format(detail.score.median_response_minutes) }} min{% else %}—{% endif %} ·
+            longest unanswered run {{ detail.score.max_unaddressed_streak or 0 }} ·
+            channels {{ detail.score.channels or 0 }} ·
+            shared voice sessions {{ detail.score.voice_sessions or 0 }}
         </div>
         {% endif %} {% if detail.pings %}
         <div style="overflow-x: auto">

@@ -746,6 +746,9 @@ class PingEvent(db.Model):
     addressed = db.Column(db.Boolean, nullable=True)
     resolved_at = db.Column(db.DateTime, nullable=True)
     return_at = db.Column(db.DateTime, nullable=True)
+    # earliest action that addressed the ping (reply-to / mention-back /
+    # same-channel post) — enables response-latency statistics
+    first_response_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     def __repr__(self):
@@ -784,6 +787,20 @@ class PairScore(db.Model):
     recent_pings = db.Column(db.Integer, nullable=False, default=0)
     prior_pings = db.Column(db.Integer, nullable=False, default=0)
     last_ping_at = db.Column(db.DateTime, nullable=True)
+    # interaction depth parameters (see interactions.py)
+    initiation_share = db.Column(
+        db.Float, nullable=True
+    )  # this pinger's fraction of the pair's pings (0.5 = balanced)
+    median_response_minutes = db.Column(
+        db.Float, nullable=True
+    )  # median time for the OTHER side to address this pinger's pings
+    max_unaddressed_streak = db.Column(
+        db.Integer, nullable=True
+    )  # longest run of consecutive unanswered pings by this pinger
+    channels = db.Column(db.Integer, nullable=True)  # distinct channels used
+    voice_sessions = db.Column(
+        db.Integer, nullable=True
+    )  # shared same-channel voice sessions in the window
     last_computed_at = db.Column(
         db.DateTime, default=datetime.utcnow, nullable=False
     )
