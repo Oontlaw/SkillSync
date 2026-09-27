@@ -86,15 +86,16 @@
         .join("line")
         .attr("stroke", (l) => (l.affinity >= 0 ? "#22d3ee" : "#f87171"))
         .attr("stroke-width", (l) => 1 + 5 * Math.max(0.05, Math.abs(l.affinity)))
-        .attr("stroke-opacity", 0.45)
-        .append("title")
-        .text((l) => {
-          const nm = (id) => (nodes.find((n) => n.id === id) || {}).name || id;
-          return (
-            nm(l.source) + " ↔ " + nm(l.target) +
-            " · affinity " + l.affinity + " · sample " + l.sample
-          );
-        });
+        .attr("stroke-opacity", 0.45);
+      // hover tooltip must be appended AFTER the link selection is captured,
+      // otherwise .append() rebinds the selection and tick never positions lines
+      link.append("title").text((l) => {
+        const nm = (id) => (nodes.find((n) => n.id === id) || {}).name || id;
+        return (
+          nm(l.source) + " ↔ " + nm(l.target) +
+          " · affinity " + l.affinity + " · sample " + l.sample
+        );
+      });
 
       const node = g
         .append("g")
