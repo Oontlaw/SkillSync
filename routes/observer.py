@@ -1585,6 +1585,37 @@ def log_message_refs():
     return jsonify({"inserted": inserted, "received": len(refs)}), 201
 
 
+@observer_bp.route("/observer/member-name", methods=["POST"])
+@require_api_key
+def update_member_name():
+    """Live nickname/username rename from the bot's on_member_update — keeps
+    node labels current without waiting for the 6h rescan."""
+    data = request.json or {}
+    ok, _err = validate_payload(data, ["guild_id", "member_id", "name"])
+    if not ok:
+        return jsonify({"error": "Missing required fields"}), 400
+    guild_id = sanitize_str(data["guild_id"], 50)
+    member_id = sanitize_str(data["member_id"], 50)
+    name = sanitize_str(data["name"], 100)
+    display_name = sanitize_str(data.get("display_name"), 100)
+    member = GuildMember.query.filter_by(guild_id=guild_id, member_id=member_id).first()
+    if member is None:
+        member = GuildMember(
+            guild_id=guild_id,
+            member_id=member_id,
+            name=name,
+            display_name=display_name,
+            is_online=False,
+            status="offline",
+        )
+        db.session.add(member)
+    else:
+        member.name = name
+        member.display_name = display_name
+    db.session.commit()
+    return jsonify({"updated": member_id, "display_name": display_name}), 200
+
+
 # ─────────────────────────────────────────────
 # PAIRWISE INTERACTION JOBS (batch, not real-time)
 # ─────────────────────────────────────────────

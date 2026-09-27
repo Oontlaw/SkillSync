@@ -252,6 +252,18 @@ async def handle_member_update(before, after):
         if not guild:
             return
 
+        # ── nickname / username change → update GuildMember on the spot ──
+        # (otherwise node labels stay stale until the 6h rescan)
+        if before.display_name != after.display_name or before.name != after.name:
+            await api_post('/observer/member-name', {
+                'guild_id': str(guild.id),
+                'member_id': str(after.id),
+                'name': after.name,
+                'display_name': after.display_name,
+                'old_display_name': before.display_name,
+            })
+            log(f'NICK: {before.display_name} is now {after.display_name} in {guild.name}')
+
         await _handle_role_change(before, after, guild)
 
         if before.timed_out_until is None and after.timed_out_until is not None:

@@ -381,6 +381,22 @@ def test_cross_guild_pair_merge(app):
         db.session.remove()
 
 
+def test_recompute_resolves_fresh_names_from_guildmember(app):
+    """A rename reflected in GuildMember flows into pair rows even when the
+    latest ping still carries the old name (renames pushed live by the bot)."""
+    with app.app_context():
+        from database import GuildMember, PairScore, db
+
+        db.session.add(_ping("A", "B", datetime.utcnow() - timedelta(days=1), addressed=True, mid="nm1"))
+        db.session.add(GuildMember(guild_id=G, member_id="A", name="old_a", display_name="NewA"))
+        db.session.add(GuildMember(guild_id=G, member_id="B", name="old_b", display_name="NewB"))
+        db.session.commit()
+        recompute_pair_scores()
+        ab = PairScore.query.filter_by(guild_id=G, pinger_id="A", pingee_id="B").first()
+        assert ab.pinger_name == "NewA" and ab.pingee_name == "NewB"
+        db.session.remove()
+
+
 def test_recompute_insufficient_data_stays_null(app):
     with app.app_context():
         from database import PairScore, PingEvent, db

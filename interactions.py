@@ -35,7 +35,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import func
 
-from database import MessageRef, PairScore, PingEvent, VoiceActivity, db
+from database import GuildMember, MessageRef, PairScore, PingEvent, VoiceActivity, db
 
 # ── Tunables ──
 ADDRESS_WINDOW_MINUTES = 30  # W: ping resolves once pingee has been active this long
@@ -152,6 +152,27 @@ def _unaddressed_streak(ordered, pinger_id):
     return streak
 
 
+def _name_maps(guild_ids, member_ids):
+    """GuildMember is the source of truth for display names — ping snapshots
+    go stale the moment someone renames (the bot now pushes renames live via
+    /observer/member-name). Returns a per-(guild, member) map plus a
+    cross-guild member map for '__all__' rows."""
+    if not guild_ids or not member_ids:
+        return {}, {}
+    rows = GuildMember.query.filter(
+        GuildMember.guild_id.in_(guild_ids),
+        GuildMember.member_id.in_(member_ids),
+    ).all()
+    per_guild, global_names = {}, {}
+    for r in rows:
+        nm = r.display_name or r.name
+        if not nm:
+            continue
+        per_guild[(r.guild_id, r.member_id)] = nm
+        global_names.setdefault(r.member_id, nm)
+    return per_guild, global_names
+
+
 def _pair_rows(
     plist,
     a_id,
@@ -164,6 +185,8 @@ def _pair_rows(
     total_days,
     baseline_stats,
     voice_guild_ids=None,
+    name_map=None,
+    global_names=None,
 ):
     """Build the two directional row dicts for ONE unordered pair.
 
@@ -212,10 +235,24 @@ def _pair_rows(
                 baseline = stats[1] / stats[0]
             unaddressed = corrected_unaddressed_rate(pair_rate, baseline)
 
+        def _name(member_id, snapshot):
+            """Fresh GuildMember name; ping snapshot only as last resort."""
+            if name_map:
+                nm = name_map.get((guild_id, member_id))
+                if nm:
+                    return nm
+                if global_names:
+                    g = global_names.get(member_id)
+                    if g:
+                        return g
+            return snapshot
+
         if pinger_id == latest.pinger_id:
-            pinger_name, pingee_name = latest.pinger_name, latest.pingee_name
+            pinger_name = _name(pinger_id, latest.pinger_name)
+            pingee_name = _name(pingee_id, latest.pingee_name)
         else:
-            pinger_name, pingee_name = latest.pingee_name, latest.pinger_name
+            pinger_name = _name(pinger_id, latest.pingee_name)
+            pingee_name = _name(pingee_id, latest.pinger_name)
 
         mine = [p for p in plist if p.pinger_id == pinger_id]
         init_share = round(len(mine) / sample, 3) if sample else None
@@ -365,6 +402,10 @@ def recompute_pair_scores(now=None):
     pings = PingEvent.query.filter(PingEvent.created_at >= window_start).all()
     active_days = _active_days(window_start, pings)
     baseline_stats = _baseline_stats(pings)
+    name_map, global_names = _name_maps(
+        {p.guild_id for p in pings},
+        {p.pinger_id for p in pings} | {p.pingee_id for p in pings},
+    )
 
     rows = []
     for (guild_id, a_id, b_id), plist in _group_pairs(pings).items():
@@ -380,6 +421,8 @@ def recompute_pair_scores(now=None):
                 total_days=total_days,
                 baseline_stats=baseline_stats,
                 voice_guild_ids=[guild_id],
+                name_map=name_map,
+                global_names=global_names,
             )
         )
 
@@ -411,6 +454,10 @@ def cross_guild_pair_rows(guild_ids, now=None):
     ).all()
     active_days = _active_days(window_start, pings, guild_ids=guild_ids)
     baseline_stats = _baseline_stats(pings)
+    name_map, global_names = _name_maps(
+        set(guild_ids),
+        {p.pinger_id for p in pings} | {p.pingee_id for p in pings},
+    )
 
     rows = []
     for (a_id, b_id), plist in _group_pairs(pings, cross_guild=True).items():
@@ -426,6 +473,8 @@ def cross_guild_pair_rows(guild_ids, now=None):
                 total_days=total_days,
                 baseline_stats=baseline_stats,
                 voice_guild_ids=guild_ids,
+                name_map=name_map,
+                global_names=global_names,
             )
         )
     return rows
