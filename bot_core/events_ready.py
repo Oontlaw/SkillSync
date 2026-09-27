@@ -30,6 +30,8 @@ from bot_core.tasks import (
     jira_per_org_poll_loop,
     jira_poll_loop,
     message_cleanup_loop,
+    pair_scores_loop,
+    ping_resolution_loop,
     rescan_guilds_loop,
     set_bot,
     weekly_health_digest,
@@ -68,6 +70,10 @@ async def handle_ready(bot):
         message_cleanup_loop.start()
     if not check_ping_joins.is_running():
         check_ping_joins.start()
+    if not ping_resolution_loop.is_running():
+        ping_resolution_loop.start()
+    if not pair_scores_loop.is_running():
+        pair_scores_loop.start()
     if not jira_poll_loop.is_running():
         jira_poll_loop.start()
     if not jira_per_org_poll_loop.is_running():

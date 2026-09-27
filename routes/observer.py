@@ -39,6 +39,7 @@ from ml import engine as ml_engine
 from ml import federated as ml_federated
 from ml import forecast as ml_forecast
 from ml import growth as ml_growth
+from interactions import recompute_pair_scores, resolve_pending_pings
 
 observer_bp = Blueprint("observer", __name__)
 
@@ -1582,6 +1583,32 @@ def log_message_refs():
         inserted += 1
     db.session.commit()
     return jsonify({"inserted": inserted, "received": len(refs)}), 201
+
+
+# ─────────────────────────────────────────────
+# PAIRWISE INTERACTION JOBS (batch, not real-time)
+# ─────────────────────────────────────────────
+
+
+@observer_bp.route("/observer/resolve-pings", methods=["POST"])
+@require_api_key
+def resolve_pings_route():
+    """Finalize addressed/unaddressed for pings whose window has closed.
+
+    Called periodically by the bot (mirrors the burnout-job pattern: bot
+    loop -> observer endpoint -> Flask-side computation).
+    """
+    resolved = resolve_pending_pings()
+    return jsonify({"resolved": resolved}), 200
+
+
+@observer_bp.route("/observer/recompute-pair-scores", methods=["POST"])
+@require_api_key
+def recompute_pair_scores_route():
+    """Batch-rebuild pair_scores (NPMI affinity + baseline-corrected
+    unaddressed_rate) from the trailing window of qualifying pings."""
+    result = recompute_pair_scores()
+    return jsonify(result), 200
 
 
 # ─────────────────────────────────────────────

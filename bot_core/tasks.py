@@ -505,6 +505,24 @@ async def _check_ping_joins_body():
             )
 
 
+@tasks.loop(minutes=5)
+async def ping_resolution_loop():
+    """Resolve ping_events.addressed (addressed-window logic) via the API."""
+    try:
+        await api_post("/observer/resolve-pings", {})
+    except Exception as e:
+        log(f"ping_resolution_loop error: {e}")
+
+
+@tasks.loop(hours=6)
+async def pair_scores_loop():
+    """Recompute pair_scores from ping_events — batch aggregate, not real-time."""
+    try:
+        await api_post("/observer/recompute-pair-scores", {})
+    except Exception as e:
+        log(f"pair_scores_loop error: {e}")
+
+
 @tasks.loop(hours=1)
 async def jira_poll_loop():
     """Poll Jira for updated issues and sync to internal tasks.
