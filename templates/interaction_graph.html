@@ -16,11 +16,54 @@ endblock %} {% block content %}
             <div class="section-eyebrow">Community network</div>
             <h1 class="ws-title">Interaction Graph</h1>
             <p class="ws-subtitle">
-                1:1 pings between members — hover a member to focus their
-                connections, scroll to zoom, drag to arrange
+                1:1 pings between members — search a member to zoom to them,
+                hover to focus, scroll to zoom, drag to arrange
             </p>
         </div>
         <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap">
+            <input
+                id="member-search"
+                list="member-list"
+                placeholder="Find a member…"
+                autocomplete="off"
+                style="
+                    padding: 8px 12px;
+                    border-radius: 8px;
+                    border: 1px solid var(--border);
+                    background: var(--surface);
+                    color: var(--text-main);
+                    font-size: 13px;
+                    min-width: 180px;
+                "
+            />
+            <datalist id="member-list"></datalist>
+            <label
+                style="
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 6px;
+                    font-size: 12.5px;
+                    color: var(--text-muted);
+                "
+            >
+                Members
+                <select
+                    id="member-count"
+                    style="
+                        padding: 6px 10px;
+                        border-radius: 8px;
+                        border: 1px solid var(--border);
+                        background: var(--surface);
+                        color: var(--text-main);
+                        font-size: 13px;
+                    "
+                >
+                    <option value="15">Top 15</option>
+                    <option value="25" selected>Top 25</option>
+                    <option value="40">Top 40</option>
+                    <option value="0">All</option>
+                </select>
+            </label>
             <label
                 style="
                     display: inline-flex;
@@ -113,8 +156,9 @@ endblock %} {% block content %}
             node size = message volume · edge thickness = affinity (expected vs
             actual interaction, −1 to 1) · petrol = interact more than expected ·
             red = less than expected · brighter fill = online now. Pairs under
-            10 pings are never drawn. Hover a member to isolate their
-            connections. Pairwise unaddressed (responsiveness) data is
+            10 pings are never drawn. Search focuses a member and zooms to
+            them; click the background to clear. Pairwise unaddressed
+            (responsiveness) data is
             <a href="/responsiveness" style="color: var(--accent)">admin-only</a>
             and never shown here.
         </div>
@@ -144,18 +188,26 @@ endblock %} {% block content %}
         var currentSim = null;
         var currentData = null;
         var showAll = false;
+        var topN = 25; // members-shown limiter (0 = all)
+        var pinnedId = null; // searched member: persistent focus + zoom
         var REFRESH_MS = 60 * 1000; // online status: Discord→DB ~30s + one poll
         var posCache = {}; // node id -> last layout position (stable re-renders)
 
-        // zoom + pan — attached once, survives re-renders
-        svg.call(
-            d3
-                .zoom()
-                .scaleExtent([0.4, 6])
-                .on("zoom", function (e) {
-                    gRoot.attr("transform", e.transform);
-                })
-        );
+        var zoomBehavior = d3
+            .zoom()
+            .scaleExtent([0.4, 6])
+            .on("zoom", function (e) {
+                gRoot.attr("transform", e.transform);
+            });
+        svg.call(zoomBehavior);
+
+        // clicking the background clears a pinned search focus
+        svg.on("click", function (e) {
+            if (e.target === svg.node() && pinnedId) {
+                pinnedId = null;
+                if (currentData) render(currentData);
+            }
+        });
 
         function fmtTime(iso) {
             var d = new Date(iso && iso.indexOf("T") > -1 ? iso + "Z" : iso);
@@ -179,6 +231,34 @@ endblock %} {% block content %}
                     voice: l.voice,
                 };
             });
+        }
+
+        function zoomToNode(id) {
+            // positions settle for ~1s after render, then center + zoom
+            setTimeout(function () {
+                var w = svg.node().clientWidth || 1100;
+                var h = svg.node().clientHeight || 620;
+                var n = null;
+                if (currentSim) {
+                    n = currentSim.nodes().find(function (x) { return x.id === id; });
+                }
+                if (!n || n.x == null) {
+                    var pc = posCache[id];
+                    if (!pc) return;
+                    n = { x: pc.x, y: pc.y };
+                }
+                var k = 1.8;
+                svg.transition().duration(600).call(
+                    zoomBehavior.transform,
+                    d3.zoomIdentity.translate(w / 2 - k * n.x, h / 2 - k * n.y).scale(k)
+                );
+            }, 900);
+        }
+
+        function focusOnMember(id) {
+            pinnedId = id;
+            if (currentData) render(currentData);
+            zoomToNode(id);
         }
 
         function render(data) {
@@ -206,19 +286,30 @@ endblock %} {% block content %}
                 (neighbors[l.target] = neighbors[l.target] || new Set()).add(l.source);
             });
 
-            // unconnected members are hidden by default — they're the clutter
-            var visible = showAll
+            // base candidates: linked members (orphans only when toggled on)
+            var base = showAll
                 ? allNodes
                 : allNodes.filter(function (n) { return (degree[n.id] || 0) > 0; });
-
-            // restore previous layout positions so frequent polls don't re-boil
-            var settled = visible.some(function (d) { return posCache[d.id]; });
-            visible.forEach(function (d) {
-                if (posCache[d.id]) {
-                    d.x = posCache[d.id].x;
-                    d.y = posCache[d.id].y;
-                }
+            // ranked: most-connected first, activity as tiebreak
+            var ranked = base.slice().sort(function (a, b) {
+                return ((degree[b.id] || 0) - (degree[a.id] || 0)) || (b.activity - a.activity);
             });
+            // members-shown limiter (0 = all); a searched member is always kept
+            var visible = topN > 0 ? ranked.slice(0, topN) : ranked.slice();
+            if (pinnedId && !visible.some(function (n) { return n.id === pinnedId; })) {
+                var pinnedNode = allNodes.find(function (n) { return n.id === pinnedId; });
+                if (pinnedNode) visible.push(pinnedNode);
+            }
+
+            // search datalist — every member, so anything is findable
+            var dl = document.getElementById("member-list");
+            if (dl) {
+                dl.innerHTML = allNodes
+                    .map(function (n) {
+                        return '<option value="' + String(n.name).replace(/"/g, "") + '"></option>';
+                    })
+                    .join("");
+            }
 
             if (!allNodes.length) {
                 msg.textContent = "No member activity data yet.";
@@ -275,10 +366,10 @@ endblock %} {% block content %}
                 });
 
                 var maxAff = d3.max(links, function (l) { return Math.abs(l.affinity); }) || 1;
+                var visSet = new Set(visible.map(function (n) { return n.id; }));
                 var linkSel = gLinks.selectAll("line")
                     .data(links.filter(function (l) {
-                        return visible.some(function (n) { return n.id === l.source; })
-                            && visible.some(function (n) { return n.id === l.target; });
+                        return visSet.has(l.source) && visSet.has(l.target);
                     }))
                     .join("line")
                     .attr("stroke", function (l) { return l.affinity >= 0 ? C.positive : C.negative; })
@@ -309,8 +400,7 @@ endblock %} {% block content %}
                     .force(
                         "link",
                         d3.forceLink(links.filter(function (l) {
-                            return visible.some(function (n) { return n.id === l.source; })
-                                && visible.some(function (n) { return n.id === l.target; });
+                            return visSet.has(l.source) && visSet.has(l.target);
                         })).id(function (d) { return d.id; })
                             .distance(90)
                             .strength(function (l) { return 0.15 + 0.5 * Math.max(0, l.affinity); })
@@ -328,20 +418,15 @@ endblock %} {% block content %}
                     .attr("r", radius)
                     .attr("fill", function (d) { return d.online ? C.nodeOnline : C.nodeOffline; })
                     .attr("fill-opacity", 0.92)
-                    .attr("stroke", C.nodeStroke)
-                    .attr("stroke-width", 1.5)
+                    .attr("stroke", function (d) { return d.id === pinnedId ? C.negative : C.nodeStroke; })
+                    .attr("stroke-width", function (d) { return d.id === pinnedId ? 3 : 1.5; })
                     .attr("cursor", "pointer");
                 nodeSel.append("title").text(function (d) {
                     return d.name + " · " + (d.activity || 0) + " messages · " + (degree[d.id] || 0) + " connections";
                 });
 
                 var labelSet = new Set(
-                    visible.slice()
-                        .sort(function (a, b) {
-                            return ((degree[b.id] || 0) - (degree[a.id] || 0)) || (b.activity - a.activity);
-                        })
-                        .slice(0, 12)
-                        .map(function (n) { return n.id; })
+                    ranked.slice(0, 12).map(function (n) { return n.id; })
                 );
                 var labelSel = gLabels.selectAll("text").data(visible, function (d) { return d.id; }).join("text")
                     .text(function (d) { return d.name; })
@@ -351,19 +436,20 @@ endblock %} {% block content %}
                     .attr("pointer-events", "none")
                     .attr("opacity", function (d) { return labelSet.has(d.id) ? 0.95 : 0; });
 
-                // hover-to-focus: dim everything except the member + their links
+                // hover-to-focus; a pinned (searched) member stays focused
                 function focus(hoverId) {
+                    var baseId = hoverId || pinnedId;
                     nodeSel.attr("opacity", function (d) {
-                        return !hoverId || d.id === hoverId ||
-                            (neighbors[hoverId] && neighbors[hoverId].has(d.id)) ? 1 : 0.12;
+                        return !baseId || d.id === baseId ||
+                            (neighbors[baseId] && neighbors[baseId].has(d.id)) ? 1 : 0.12;
                     });
                     linkSel.attr("opacity", function (l) {
-                        return !hoverId || l.source.id === hoverId || l.target.id === hoverId ? 0.65 : 0.05;
+                        return !baseId || l.source.id === baseId || l.target.id === baseId ? 0.65 : 0.05;
                     });
                     labelSel.attr("opacity", function (d) {
-                        if (hoverId) {
-                            if (d.id === hoverId) return 1;
-                            return neighbors[hoverId] && neighbors[hoverId].has(d.id) ? 1 : 0;
+                        if (baseId) {
+                            if (d.id === baseId) return 1;
+                            return neighbors[baseId] && neighbors[baseId].has(d.id) ? 1 : 0;
                         }
                         return labelSet.has(d.id) ? 0.95 : 0;
                     });
@@ -395,12 +481,18 @@ endblock %} {% block content %}
                 });
 
                 // re-renders restore cached positions — settle gently, don't re-boil
+                var settled = visible.some(function (d) { return posCache[d.id]; });
+                visible.forEach(function (d) {
+                    if (posCache[d.id]) {
+                        d.x = posCache[d.id].x;
+                        d.y = posCache[d.id].y;
+                    }
+                });
                 if (settled) sim.alpha(0.3);
 
                 currentSim = sim;
             }
 
-            var shown = (data.nodes || []).length;
             var edges = (data.links || []).length;
             var line = "Last computed " + fmtTime(data.generated_at) +
                 " · auto-refreshes every " + Math.round(REFRESH_MS / 1000) +
@@ -409,6 +501,10 @@ endblock %} {% block content %}
                 line += " · " + data.forming_pairs + " pair" +
                     (data.forming_pairs === 1 ? "" : "s") + " forming (an edge draws at " +
                     (data.min_sample || 10) + " pings)";
+            }
+            if (pinnedId) {
+                var pn = (data.nodes || []).find(function (n) { return n.id === pinnedId; });
+                line += " · focus: " + (pn ? pn.name : pinnedId) + " (click the background to clear)";
             }
             status.textContent = line;
         }
@@ -428,6 +524,27 @@ endblock %} {% block content %}
             .addEventListener("change", function () {
                 showAll = this.checked;
                 if (currentData) render(currentData);
+            });
+
+        document
+            .getElementById("member-count")
+            .addEventListener("change", function () {
+                topN = parseInt(this.value, 10) || 0;
+                if (currentData) render(currentData);
+            });
+
+        document
+            .getElementById("member-search")
+            .addEventListener("change", function () {
+                var q = this.value.trim().toLowerCase();
+                if (!q || !currentData) return;
+                var hit = (currentData.nodes || []).find(function (n) {
+                    return (n.name || "").toLowerCase() === q;
+                });
+                if (hit) {
+                    focusOnMember(hit.id);
+                    this.value = "";
+                }
             });
 
         refresh();
