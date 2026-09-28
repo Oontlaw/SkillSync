@@ -77,7 +77,9 @@ async def scan_guild(guild):
         staff_member_ids = []
         bot_count = 0
         online_count = 0
-        is_large_guild = guild.member_count > 1000
+        # member_count is None until member chunking completes on connect —
+        # comparing it directly crashed the startup scan for every guild.
+        is_large_guild = (guild.member_count or 0) > 1000
 
         # Reset online set for this guild so skipped members don't leak as stale online
         online_members[str(guild.id)] = set()
