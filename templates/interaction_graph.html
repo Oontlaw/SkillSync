@@ -369,6 +369,7 @@ endblock %} {% block content %}
                 // edge weight = interaction volume. NPMI affinity saturates at
                 // ±1 on small samples, so sizing purely by affinity makes every
                 // edge look equal → hairball. Scale by ping count instead.
+                var visSet = new Set(visible.map(function (n) { return n.id; }));
                 var maxSample = d3.max(links, function (l) { return l.sample || 0; }) || 1;
                 var edgeW = function (l) { return (l.sample || 0) / maxSample; };
                 var dragSet = links.filter(function (l) {
@@ -501,15 +502,7 @@ endblock %} {% block content %}
             }
 
             // show the drawn-edge count (quietest quarter is filtered out)
-            var drawnCount = 0;
-            if (currentData && currentData.links) {
-                var visAll = new Set((currentData.nodes || []).map(function (n) { return n.id; }));
-                var mx = d3.max(currentData.links, function (l) { return l.sample || 0; }) || 1;
-                drawnCount = currentData.links.filter(function (l) {
-                    return visAll.has(l.source) && visAll.has(l.target) &&
-                        (l.sample || 0) / mx >= 0.25;
-                }).length;
-            }
+            var drawnCount = linkSel ? linkSel.size() : 0;
             var line = "Last computed " + fmtTime(data.generated_at) +
                 " · auto-refreshes every " + Math.round(REFRESH_MS / 1000) +
                 " s · " + drawnCount + " edge" + (drawnCount === 1 ? "" : "s") + " drawn";
