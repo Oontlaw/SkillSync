@@ -133,6 +133,7 @@ endblock %} {% block content %}
                     <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Pinger</th>
                     <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Pingee</th>
                     <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Sample</th>
+                    <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Talks</th>
                     <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Affinity</th>
                     <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Unaddressed rate</th>
                     <th style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft)">Pinger baseline</th>
@@ -155,6 +156,11 @@ endblock %} {% block content %}
                     </td>
                     <td style="padding: 9px 14px; border-bottom: 1px solid var(--border-soft)">
                         {{ row.sample_size }}
+                    </td>
+                    <td style="padding: 9px 14px; border-bottom: 1px solid var(--border-soft)">
+                        {% if row.conversations %}
+                        {{ row.conversations }}
+                        {% else %}<span style="color: var(--text-muted)">—</span>{% endif %}
                     </td>
                     <td style="padding: 9px 14px; border-bottom: 1px solid var(--border-soft)">
                         {% if row.affinity_score is none %}
@@ -212,6 +218,131 @@ endblock %} {% block content %}
         running: pings are captured live, resolved on a 5-minute cycle, and
         scored in a 6-hour batch.
     </div>
+    {% endif %}
+
+    {% if user_rows %}
+    <div
+        style="
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 18px;
+            margin-top: 20px;
+            overflow-x: auto;
+        "
+    >
+        <div style="font-weight: 700; font-size: 14px; margin-bottom: 4px">
+            Member patterns
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px">
+            Per-member behavior signals over the last 30 days — message trend
+            (last 7 days vs the prior 23), daily-rhythm drift, voice hours,
+            week-1 pings for new joiners, and @everyone broadcasts for staff.
+            Computed metadata, not content.
+        </div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12.5px">
+            <thead>
+                <tr style="text-align: left; color: var(--text-muted)">
+                    <th style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">Member</th>
+                    <th style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">Msgs 7d</th>
+                    <th style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">Prior 23d</th>
+                    <th style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">Trend</th>
+                    <th style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">Rhythm shift</th>
+                    <th style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">Voice hrs</th>
+                    <th style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">Active days</th>
+                    <th style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">Week-1 pings</th>
+                    <th style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">Absorbed by</th>
+                    <th style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">Broadcasts</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in user_rows %}
+                <tr>
+                    <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft); font-weight: 600">
+                        {{ u.name or u.discord_id }}
+                    </td>
+                    <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">{{ u.recent_messages }}</td>
+                    <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">{{ u.prior_messages }}</td>
+                    <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">
+                        {% if u.trend == 'rising' %}
+                        <span style="color: var(--success)">▲ rising</span>
+                        {% elif u.trend == 'fading' %}
+                        <span style="color: var(--danger)">▼ fading</span>
+                        {% elif u.trend == 'stable' %}
+                        <span style="color: var(--text-muted)">stable</span>
+                        {% else %}
+                        <span style="color: var(--text-muted)">—</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">
+                        {% if u.rhythm_shift is none %}
+                        <span style="color: var(--text-muted)">—</span>
+                        {% else %}{{ '%.2f'|format(u.rhythm_shift) }}{% endif %}
+                    </td>
+                    <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">
+                        {% if u.voice_hours_30d %}{{ '%.1f'|format(u.voice_hours_30d) }}{% else %}<span style="color: var(--text-muted)">0</span>{% endif %}
+                    </td>
+                    <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">{{ u.active_days_30d }}</td>
+                    <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">
+                        {% if u.week1_pings_received is none %}
+                        <span style="color: var(--text-muted)">—</span>
+                        {% else %}{{ u.week1_pings_received }}{% endif %}
+                    </td>
+                    <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">
+                        {% if u.absorbed_by %}{{ u.absorbed_by }}{% else %}<span style="color: var(--text-muted)">—</span>{% endif %}
+                    </td>
+                    <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">
+                        {% if u.broadcast_count_30d is none %}
+                        <span style="color: var(--text-muted)">—</span>
+                        {% else %}{{ u.broadcast_count_30d }}{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% if voice_bonds %}
+    <div
+        style="
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 18px;
+            margin-top: 20px;
+        "
+    >
+        <div style="font-weight: 700; font-size: 14px; margin-bottom: 4px">
+            Voice-only bonds
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px">
+            Pairs that share voice-channel sessions but have no scored text
+            interaction — relationships the ping graph cannot see.
+        </div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12.5px">
+            <thead>
+                <tr style="text-align: left; color: var(--text-muted)">
+                    <th style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">Pair</th>
+                    <th style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">Shared sessions</th>
+                    <th style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">Channels</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for b in voice_bonds %}
+                <tr>
+                    <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft); font-weight: 600">
+                        {{ b.a_name }} ↔ {{ b.b_name }}
+                    </td>
+                    <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">{{ b.shared_sessions }}</td>
+                    <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft); color: var(--text-muted)">
+                        {{ b.channel_names | join(', ') }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
     {% endif %} {% if detail %}
     <div
         style="
@@ -244,6 +375,9 @@ endblock %} {% block content %}
             longest unanswered run {{ detail.score.max_unaddressed_streak or 0 }} ·
             channels {{ detail.score.channels or 0 }} ·
             shared voice sessions {{ detail.score.voice_sessions or 0 }}
+            <br/>
+            conversations {{ detail.score.conversations or 0 }} (30-min gap separates talks) ·
+            ping-back rate {% if detail.score.return_rate is not none %}{{ '%.0f%%'|format(detail.score.return_rate * 100) }} (directed ping back within 24h){% else %}—{% endif %}
         </div>
         {% endif %} {% if detail.pings %}
         <div style="overflow-x: auto">

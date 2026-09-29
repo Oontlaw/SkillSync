@@ -35,6 +35,7 @@ from database import (
     RoleChangeLog,
     ScoreLog,
     Task,
+    UserBehaviorMetric,
     VoiceActivity,
     Worker,
     db,
@@ -47,7 +48,9 @@ from interactions import (
     FADING_PRIOR_MIN,
     FADING_RECENT_MAX,
     MIN_PAIR_SAMPLE,
+    _message_trend,
     cross_guild_pair_rows,
+    voice_only_pairs,
 )
 
 dashboard_bp = Blueprint("dashboard", __name__)
@@ -1494,6 +1497,60 @@ def _rows_to_dicts(rows):
     return [{c.name: getattr(r, c.name) for c in PairScore.__table__.columns} for r in rows]
 
 
+def _user_rows_to_dicts(rows):
+    return [
+        {c.name: getattr(r, c.name) for c in UserBehaviorMetric.__table__.columns}
+        for r in rows
+    ]
+
+
+def _merge_user_metrics(rows):
+    """Cross-server '__all__' view: merge per-guild user metrics by
+    discord_id. Messages and voice sum; trend recomputes from the summed
+    counts; rhythm takes the biggest observed shift; active days take the
+    per-guild max (distinct days can't be recomputed from stored rows and
+    summing would double-count overlap); identity fields come from the first
+    row that has them."""
+    merged = {}
+    for r in rows:
+        m = merged.setdefault(r["discord_id"], dict(r))
+        if m is r:
+            continue
+        m["recent_messages"] += r["recent_messages"]
+        m["prior_messages"] += r["prior_messages"]
+        m["voice_hours_30d"] = round(
+            m["voice_hours_30d"] + (r["voice_hours_30d"] or 0.0), 2
+        )
+        m["active_days_30d"] = max(m["active_days_30d"], r["active_days_30d"])
+        m["trend"] = _message_trend(m["recent_messages"], m["prior_messages"])
+        shifts = [x for x in (m["rhythm_shift"], r["rhythm_shift"]) if x is not None]
+        m["rhythm_shift"] = max(shifts) if shifts else None
+        for fld in ("name", "absorbed_by", "first_seen_at"):
+            if m[fld] is None:
+                m[fld] = r[fld]
+        for fld in ("week1_pings_received", "broadcast_count_30d"):
+            if r[fld] is not None:
+                m[fld] = (m[fld] or 0) + r[fld]
+    return list(merged.values())
+
+
+def _voice_only_rows(guild_ids, window_start):
+    """Voice-only bonds with display names resolved, loudest first."""
+    bonds = voice_only_pairs(guild_ids, window_start)
+    ids = {b["a_id"] for b in bonds} | {b["b_id"] for b in bonds}
+    names = {}
+    if ids:
+        for gm in GuildMember.query.filter(
+            GuildMember.guild_id.in_(guild_ids), GuildMember.member_id.in_(ids)
+        ).all():
+            names.setdefault(gm.member_id, gm.display_name or gm.name)
+    for b in bonds:
+        b["a_name"] = names.get(b["a_id"]) or b["a_id"]
+        b["b_name"] = names.get(b["b_id"]) or b["b_id"]
+    bonds.sort(key=lambda b: -b["shared_sessions"])
+    return bonds
+
+
 def _build_graph_nodes(guild_ids, endpoints):
     """Graph nodes across the given guilds, deduped by discord_id — the same
     person in two servers is ONE node. Activity = message_refs count (30d)
@@ -1631,6 +1688,7 @@ def interaction_graph_data():
                 "resp_min": r["median_response_minutes"],
                 "streak": r["max_unaddressed_streak"],
                 "voice": r["voice_sessions"],
+                "conversations": r["conversations"],
             }
         )
 
@@ -1702,6 +1760,25 @@ def responsiveness():
     ]
     fading.sort(key=lambda r: (-(r["prior_pings"] or 0), r["last_ping_at"] or datetime.min))
 
+    # member patterns + voice-only bonds — same scope as the pair rows above:
+    # one guild, or the cross-server merge over administered guilds only
+    if guild_id == CROSS_GUILD:
+        scope_ids = [str(g.get("id")) for g in administered]
+        user_rows = _merge_user_metrics(
+            _user_rows_to_dicts(
+                UserBehaviorMetric.query.filter(
+                    UserBehaviorMetric.guild_id.in_(scope_ids)
+                ).all()
+            )
+        )
+    else:
+        scope_ids = [str(guild_id)]
+        user_rows = _user_rows_to_dicts(
+            UserBehaviorMetric.query.filter(UserBehaviorMetric.guild_id == guild_id).all()
+        )
+    user_rows.sort(key=lambda r: -(r["recent_messages"] + r["prior_messages"]))
+    voice_bonds = _voice_only_rows(scope_ids, datetime.utcnow() - timedelta(days=30))
+
     detail = None
     pinger_id = request.args.get("pinger_id")
     pingee_id = request.args.get("pingee_id")
@@ -1757,6 +1834,8 @@ def responsiveness():
         rows=rows,
         fading=fading,
         detail=detail,
+        user_rows=user_rows,
+        voice_bonds=voice_bonds,
         cross_ok=cross_ok,
         logged_out=False,
         invite_url=BOT_INVITE_URL,

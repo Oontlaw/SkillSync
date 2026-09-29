@@ -230,6 +230,7 @@ endblock %} {% block content %}
                     resp_min: l.resp_min,
                     streak: l.streak,
                     voice: l.voice,
+                    conversations: l.conversations,
                 };
             });
         }
@@ -401,6 +402,8 @@ endblock %} {% block content %}
                         t += " · longest unanswered run " + l.streak;
                     if (l.voice)
                         t += " · " + l.voice + " shared voice sessions";
+                    if (l.conversations)
+                        t += " · " + l.conversations + " conversations";
                     return t;
                 });
 
