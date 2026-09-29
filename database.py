@@ -801,6 +801,10 @@ class PairScore(db.Model):
     voice_sessions = db.Column(
         db.Integer, nullable=True
     )  # shared same-channel voice sessions in the window
+    # conversation structure: bursts of mutually close pings vs drive-bys,
+    # and how often this pinger's pings drew a directed ping back
+    conversations = db.Column(db.Integer, nullable=False, default=0)
+    return_rate = db.Column(db.Float, nullable=True)
     last_computed_at = db.Column(
         db.DateTime, default=datetime.utcnow, nullable=False
     )
@@ -830,4 +834,43 @@ class MessageRef(db.Model):
         return (
             f"<MessageRef {self.message_id} by {self.author_id} "
             f"reply_to={self.reply_to_message_id}>"
+        )
+
+
+class UserBehaviorMetric(db.Model):
+    """Per-user behavior patterns, batch-computed with the pair scores.
+
+    All metadata-derived: message volume trend (7d vs prior 23d), activity
+    rhythm drift (hourly-profile distance), voice hours, week-one absorption
+    for new joiners, and @everyone broadcast frequency for staff. Never
+    content. Refreshed every 30 min by the same batch as pair_scores.
+    """
+
+    __tablename__ = "user_behavior_metrics"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "guild_id", "discord_id", name="uq_user_behavior_guild_member"
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
+    discord_id = db.Column(db.String(50), nullable=False, index=True)
+    name = db.Column(db.String(100), nullable=True)
+    recent_messages = db.Column(db.Integer, nullable=False, default=0)  # last 7d
+    prior_messages = db.Column(db.Integer, nullable=False, default=0)  # prior 23d
+    trend = db.Column(db.String(10), nullable=True)  # rising | stable | fading
+    rhythm_shift = db.Column(db.Float, nullable=True)  # 0..1 hourly-profile distance
+    voice_hours_30d = db.Column(db.Float, nullable=False, default=0.0)
+    active_days_30d = db.Column(db.Integer, nullable=False, default=0)
+    week1_pings_received = db.Column(db.Integer, nullable=True)  # new joiners only
+    absorbed_by = db.Column(db.String(100), nullable=True)
+    broadcast_count_30d = db.Column(db.Integer, nullable=True)  # staff only
+    first_seen_at = db.Column(db.DateTime, nullable=True)
+    computed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return (
+            f"<UserBehaviorMetric {self.discord_id} trend={self.trend} "
+            f"rhythm={self.rhythm_shift}>"
         )
