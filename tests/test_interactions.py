@@ -451,3 +451,202 @@ def test_recompute_scores_and_baseline_deviation(app):
         # B never pinged A: directional unaddressed rate is insufficient
         assert ba.unaddressed_rate is None
         db.session.remove()
+
+
+# ── tier A behavior parameters ──
+
+
+def test_conversation_bursts(app):
+    """Pings clustered in 2 groups separated by > 30 min = 2 conversations,
+    not 4 — separates two long talks from drive-bys at the same sample."""
+    with app.app_context():
+        from database import PairScore, db
+        from interactions import CONVERSATION_GAP_MINUTES
+
+        now = datetime.utcnow()
+        # burst 1: two pings 10 min apart, 3h ago
+        db.session.add(_ping("A", "B", now - timedelta(hours=3), mid="c1"))
+        db.session.add(_ping("A", "B", now - timedelta(hours=3) + timedelta(minutes=10), mid="c2"))
+        # burst 2: two pings 10 min apart, 1h ago (gap from burst 1 ≈ 1h50m)
+        db.session.add(_ping("A", "B", now - timedelta(hours=1), mid="c3"))
+        db.session.add(_ping("A", "B", now - timedelta(hours=1) + timedelta(minutes=10), mid="c4"))
+        db.session.commit()
+        recompute_pair_scores()
+        ab = PairScore.query.filter_by(guild_id=G, pinger_id="A", pingee_id="B").first()
+        assert ab.conversations == 2
+        assert ab.sample_size == 4
+        db.session.remove()
+
+
+def test_return_rate(app):
+    """4 A→B pings, 2 of them draw a B→A ping back within 24h → 0.5."""
+    with app.app_context():
+        from database import PairScore, db
+
+        now = datetime.utcnow()
+        db.session.add(_ping("A", "B", now - timedelta(days=4), mid="r1"))
+        db.session.add(_ping("A", "B", now - timedelta(days=3), mid="r2"))
+        db.session.add(_ping("B", "A", now - timedelta(days=3) + timedelta(hours=1), mid="r2back"))
+        db.session.add(_ping("A", "B", now - timedelta(days=2), mid="r3"))
+        db.session.add(_ping("A", "B", now - timedelta(days=1), mid="r4"))
+        db.session.add(_ping("B", "A", now - timedelta(days=1) + timedelta(hours=1), mid="r4back"))
+        db.session.commit()
+        recompute_pair_scores()
+        ab = PairScore.query.filter_by(guild_id=G, pinger_id="A", pingee_id="B").first()
+        assert ab.return_rate == 0.5
+        db.session.remove()
+
+
+def test_user_trend_fading(app):
+    """6 messages 8–18 days ago, none in the last 7 days → fading."""
+    with app.app_context():
+        from database import UserBehaviorMetric, db
+        from interactions import recompute_user_metrics
+
+        now = datetime.utcnow()
+        for i in range(6):
+            db.session.add(
+                _ref("F", now - timedelta(days=8 + i * 2), mid=f"fad{i}")
+            )
+        db.session.commit()
+        recompute_user_metrics()
+        row = UserBehaviorMetric.query.filter_by(guild_id=G, discord_id="F").first()
+        assert row.recent_messages == 0 and row.prior_messages == 6
+        assert row.trend == "fading"
+        db.session.remove()
+
+
+def test_user_trend_rising(app):
+    """2 prior messages, 6 recent → rising."""
+    with app.app_context():
+        from database import UserBehaviorMetric, db
+        from interactions import recompute_user_metrics
+
+        now = datetime.utcnow()
+        for i in range(2):
+            db.session.add(_ref("U", now - timedelta(days=10 + i), mid=f"up{i}"))
+        for i in range(6):
+            db.session.add(_ref("U", now - timedelta(days=i % 5), mid=f"upr{i}"))
+        db.session.commit()
+        recompute_user_metrics()
+        row = UserBehaviorMetric.query.filter_by(guild_id=G, discord_id="U").first()
+        assert row.recent_messages == 6 and row.prior_messages == 2
+        assert row.trend == "rising"
+        db.session.remove()
+
+
+def test_rhythm_shift(app):
+    """Disjoint hourly distributions (prior always 10:00, recent always
+    22:00) → cosine distance 1.0."""
+    with app.app_context():
+        from database import UserBehaviorMetric, db
+        from interactions import recompute_user_metrics
+
+        now = datetime.utcnow()
+        for i in range(6):  # prior 23d slice, all at 10:00
+            t = now - timedelta(days=10 + i)
+            db.session.add(
+                _ref("R", t.replace(hour=10, minute=i), mid=f"rh-p{i}")
+            )
+        for i in range(6):  # recent 7d slice, all at 22:00
+            t = now - timedelta(days=i % 5)
+            db.session.add(
+                _ref("R", t.replace(hour=22, minute=i), mid=f"rh-r{i}")
+            )
+        db.session.commit()
+        recompute_user_metrics()
+        row = UserBehaviorMetric.query.filter_by(guild_id=G, discord_id="R").first()
+        assert row.rhythm_shift is not None
+        assert 0 < row.rhythm_shift <= 1.0
+        assert row.rhythm_shift == pytest.approx(1.0)  # fully disjoint hours
+        db.session.remove()
+
+
+def test_rhythm_shift_null_when_too_few_recent(app):
+    """Fewer than 5 recent messages → rhythm shift is None, not a guess."""
+    with app.app_context():
+        from database import UserBehaviorMetric, db
+        from interactions import recompute_user_metrics
+
+        now = datetime.utcnow()
+        for i in range(6):
+            db.session.add(_ref("S", now - timedelta(days=10 + i), mid=f"sr-p{i}"))
+        for i in range(2):  # only 2 recent
+            db.session.add(_ref("S", now - timedelta(days=i), mid=f"sr-r{i}"))
+        db.session.commit()
+        recompute_user_metrics()
+        row = UserBehaviorMetric.query.filter_by(guild_id=G, discord_id="S").first()
+        assert row.rhythm_shift is None
+        db.session.remove()
+
+
+def test_voice_only_bonds(app):
+    """Pairs sharing voice sessions with no text pings surface; a pair with a
+    pair_scores row (any sample size) is excluded — voice-ONLY means zero
+    scored text interaction."""
+    with app.app_context():
+        from database import VoiceActivity, db
+        from interactions import voice_only_pairs
+
+        now = datetime.utcnow()
+
+        def vs(u, j, l):
+            return VoiceActivity(
+                guild_id=G, discord_id=u, channel_name="vc1",
+                joined_at=j, left_at=l, created_at=j,
+            )
+
+        # A & B: two overlapping sessions, no pings ever
+        db.session.add(vs("A", now - timedelta(hours=5), now - timedelta(hours=4)))
+        db.session.add(vs("B", now - timedelta(hours=5, minutes=30), now - timedelta(hours=3)))
+        db.session.add(vs("A", now - timedelta(hours=2), now - timedelta(minutes=90)))
+        db.session.add(vs("B", now - timedelta(hours=2, minutes=10), now - timedelta(minutes=80)))
+        # C & D: overlapping sessions BUT they have text pings → excluded
+        db.session.add(vs("C", now - timedelta(hours=5), now - timedelta(hours=4)))
+        db.session.add(vs("D", now - timedelta(hours=5, minutes=30), now - timedelta(hours=3)))
+        db.session.add(_ping("C", "D", now - timedelta(days=1), addressed=True, mid="cd1"))
+        db.session.commit()
+        recompute_pair_scores()
+
+        bonds = voice_only_pairs([G], now - timedelta(days=30))
+        ab = next(
+            (b for b in bonds if {b["a_id"], b["b_id"]} == {"A", "B"}), None
+        )
+        assert ab is not None and ab["shared_sessions"] == 2
+        assert ab["channel_names"] == ["vc1"]
+        assert not any(
+            {b["a_id"], b["b_id"]} == {"C", "D"} for b in bonds
+        )
+        db.session.remove()
+
+
+def test_week1_absorption(app):
+    """A member who joined 3 days ago gets week1_pings_received and
+    absorbed_by from the pings they received during their first 7 days —
+    even with zero messages of their own."""
+    with app.app_context():
+        from database import GuildMember, UserBehaviorMetric, db
+        from interactions import recompute_user_metrics
+
+        now = datetime.utcnow()
+        joined = now - timedelta(days=3)
+        db.session.add(
+            GuildMember(guild_id=G, member_id="J", name="joiner", display_name="Joiner",
+                        joined_at=joined)
+        )
+        db.session.add(
+            GuildMember(guild_id=G, member_id="X", name="xavier", display_name="Xavier")
+        )
+        ping = _ping("X", "J", now - timedelta(days=2), mid="abs1")
+        ping.pinger_name = "Xavier"
+        db.session.add(ping)
+        db.session.add(_ping("X", "J", now - timedelta(days=2, hours=1), mid="abs2"))
+        db.session.commit()
+
+        result = recompute_user_metrics()
+        row = UserBehaviorMetric.query.filter_by(guild_id=G, discord_id="J").first()
+        assert row is not None  # rows exist for message-less new joiners
+        assert row.week1_pings_received == 2
+        assert row.absorbed_by == "Xavier"  # named ping wins over the unnamed one
+        assert result["new_members"] >= 1
+        db.session.remove()

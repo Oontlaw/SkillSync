@@ -580,19 +580,21 @@ def recompute_user_metrics(now=None):
     for guild_id, author_id, created_at in q.all():
         msgs[(guild_id, author_id)].append(created_at)
 
-    voice_hours = dict(
-        db.session.query(
+    voice_hours = {
+        (g, m): secs / 3600.0
+        for g, m, secs in db.session.query(
             VoiceActivity.guild_id,
             VoiceActivity.discord_id,
-            func.coalesce(func.sum(VoiceActivity.duration_seconds), 0.0) / 3600.0,
+            func.coalesce(func.sum(VoiceActivity.duration_seconds), 0.0),
         )
         .filter(VoiceActivity.created_at >= window_start)
         .group_by(VoiceActivity.guild_id, VoiceActivity.discord_id)
         .all()
-    )
+    }
 
-    broadcasts = dict(
-        db.session.query(
+    broadcasts = {
+        (g, m): n
+        for g, m, n in db.session.query(
             PingJoinEvent.guild_id,
             PingJoinEvent.moderator_id,
             func.count(),
@@ -600,16 +602,17 @@ def recompute_user_metrics(now=None):
         .filter(PingJoinEvent.created_at >= window_start)
         .group_by(PingJoinEvent.guild_id, PingJoinEvent.moderator_id)
         .all()
-    )
+    }
 
     # first-ever message ref per (guild, member) — full history, not the window
-    first_seen = dict(
-        db.session.query(
+    first_seen = {
+        (g, m): t
+        for g, m, t in db.session.query(
             MessageRef.guild_id,
             MessageRef.author_id,
             func.min(MessageRef.created_at),
         ).group_by(MessageRef.guild_id, MessageRef.author_id).all()
-    )
+    }
 
     # week-1 absorption: joiners who arrived inside the window, and who
     # pinged them during their first 7 days
