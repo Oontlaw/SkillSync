@@ -26,16 +26,33 @@ cross_guild_pair_rows(): read-time cross-server aggregation with the SAME
 math — pings merged across guilds so a person's relationships follow them
 instead of fragmenting per server. Nothing persisted; rows are plain dicts.
 
+recompute_user_metrics(): batch-rebuilds user_behavior_metrics — per-user
+message trend (7d vs prior 23d), hourly-rhythm drift, voice hours, active
+days, week-1 ping absorption for new joiners, and @everyone broadcast
+frequency for staff. Same delete-all + reinsert batch as pair_scores.
+
+voice_only_pairs(): pairs sharing voice sessions but with zero scored text
+interaction — surfaced separately from the graph, never scored.
+
 No scikit-learn here by design (spec non-goal) — pure arithmetic.
 """
 import math
 import statistics
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
 from sqlalchemy import func
 
-from database import GuildMember, MessageRef, PairScore, PingEvent, VoiceActivity, db
+from database import (
+    GuildMember,
+    MessageRef,
+    PairScore,
+    PingEvent,
+    PingJoinEvent,
+    UserBehaviorMetric,
+    VoiceActivity,
+    db,
+)
 
 # ── Tunables ──
 ADDRESS_WINDOW_MINUTES = 30  # W: ping resolves once pingee has been active this long
@@ -46,6 +63,8 @@ STALE_PING_DAYS = 14  # pings older than this with no pingee return resolve as u
 RECENT_WINDOW_DAYS = 7  # drift: "recent" slice of the scoring window
 FADING_PRIOR_MIN = 5  # drift: pair counted "fading" if it had at least this many pings
 FADING_RECENT_MAX = 1  # drift: ...in the prior slice but at most this many recently
+CONVERSATION_GAP_MINUTES = 30  # pair pings separated by more than this = new conversation
+RETURN_WINDOW_HOURS = 24  # directed ping-back window for return_rate
 CROSS_GUILD = "__all__"  # sentinel guild_id for read-time cross-server rows
 
 
@@ -205,6 +224,27 @@ def _pair_rows(
     voice = _shared_voice_sessions(voice_guild_ids, a_id, b_id, window_start)
     ordered = sorted(plist, key=lambda p: p.created_at)
 
+    # conversation structure: a gap > 30 min between consecutive pings starts
+    # a new conversation — separates two long talks from 83 drive-bys at the
+    # same sample_size
+    conversations = 1 if ordered else 0
+    for prev, cur in zip(ordered, ordered[1:]):
+        if cur.created_at - prev.created_at > timedelta(minutes=CONVERSATION_GAP_MINUTES):
+            conversations += 1
+
+    # directed response: per pinger, the fraction of their pings to this
+    # partner that drew a ping BACK from the partner within 24h. Complements
+    # unaddressed_rate (which accepts same-channel posts) by isolating
+    # directed response. None when the pinger has no outgoing pings.
+    def _return_rate(side_pinger):
+        mine = [p.created_at for p in plist if p.pinger_id == side_pinger]
+        if not mine:
+            return None
+        back_times = [p.created_at for p in plist if p.pinger_id != side_pinger]
+        horizon = timedelta(hours=RETURN_WINDOW_HOURS)
+        returned = sum(1 for t in mine if any(t < o <= t + horizon for o in back_times))
+        return round(returned / len(mine), 4)
+
     affinity = None
     if sample >= MIN_PAIR_SAMPLE:
         days_ab = {p.created_at.date().isoformat() for p in plist}
@@ -283,6 +323,8 @@ def _pair_rows(
                 "max_unaddressed_streak": streak,
                 "channels": channel_count,
                 "voice_sessions": voice,
+                "conversations": conversations,
+                "return_rate": _return_rate(pinger_id),
                 "last_computed_at": now,
             }
         )
@@ -478,3 +520,232 @@ def cross_guild_pair_rows(guild_ids, now=None):
             )
         )
     return rows
+
+
+# ── Per-user behavior metrics ──
+
+def _message_trend(recent, prior):
+    """7d vs prior-23d volume trend. Same fading thresholds as pair drift
+    (FADING_PRIOR_MIN); None below 3 total messages — too sparse to call."""
+    if recent + prior < 3:
+        return None
+    if prior >= FADING_PRIOR_MIN and recent == 0:
+        return "fading"
+    if recent > prior * 1.5:
+        return "rising"
+    return "stable"
+
+
+def _rhythm_shift(recent_times, prior_times):
+    """Cosine distance (0..1) between the 24-bin hourly histograms of the
+    recent and prior message streams — how far someone's daily rhythm moved.
+    None below 5 recent messages or when the prior histogram is empty."""
+    if len(recent_times) < 5:
+        return None
+
+    def hist(times):
+        h = [0.0] * 24
+        for t in times:
+            h[t.hour] += 1.0
+        return h
+
+    h1, h2 = hist(recent_times), hist(prior_times)
+    n1 = math.sqrt(sum(x * x for x in h1))
+    n2 = math.sqrt(sum(x * x for x in h2))
+    if n1 == 0 or n2 == 0:
+        return None
+    dot = sum(a * b for a, b in zip(h1, h2))
+    return round(1.0 - dot / (n1 * n2), 4)
+
+
+def recompute_user_metrics(now=None):
+    """Batch-rebuild user_behavior_metrics for the trailing 30-day window.
+
+    Row set = everyone with message refs in the window, plus brand-new
+    joiners (week-1 absorption needs rows for members with no messages yet),
+    plus broadcast moderators (staff with zero recent messages still post
+    @everyone). All metadata-derived — never content. Same batch lifecycle
+    as pair_scores: delete-all + reinsert, driven by the same 30-min bot
+    loop POST.
+    """
+    now = now or datetime.utcnow()
+    window_start = now - timedelta(days=AFFINITY_WINDOW_DAYS)
+    recent_start = now - timedelta(days=RECENT_WINDOW_DAYS)
+    week = timedelta(days=7)
+
+    msgs = defaultdict(list)  # (guild_id, author_id) -> [created_at]
+    q = db.session.query(MessageRef.guild_id, MessageRef.author_id, MessageRef.created_at).filter(
+        MessageRef.created_at >= window_start
+    )
+    for guild_id, author_id, created_at in q.all():
+        msgs[(guild_id, author_id)].append(created_at)
+
+    voice_hours = dict(
+        db.session.query(
+            VoiceActivity.guild_id,
+            VoiceActivity.discord_id,
+            func.coalesce(func.sum(VoiceActivity.duration_seconds), 0.0) / 3600.0,
+        )
+        .filter(VoiceActivity.created_at >= window_start)
+        .group_by(VoiceActivity.guild_id, VoiceActivity.discord_id)
+        .all()
+    )
+
+    broadcasts = dict(
+        db.session.query(
+            PingJoinEvent.guild_id,
+            PingJoinEvent.moderator_id,
+            func.count(),
+        )
+        .filter(PingJoinEvent.created_at >= window_start)
+        .group_by(PingJoinEvent.guild_id, PingJoinEvent.moderator_id)
+        .all()
+    )
+
+    # first-ever message ref per (guild, member) — full history, not the window
+    first_seen = dict(
+        db.session.query(
+            MessageRef.guild_id,
+            MessageRef.author_id,
+            func.min(MessageRef.created_at),
+        ).group_by(MessageRef.guild_id, MessageRef.author_id).all()
+    )
+
+    # week-1 absorption: joiners who arrived inside the window, and who
+    # pinged them during their first 7 days
+    joiners = GuildMember.query.filter(
+        GuildMember.joined_at.isnot(None),
+        GuildMember.joined_at >= window_start,
+        GuildMember.is_bot.is_(False),
+    ).all()
+    absorption = {}
+    for jm in joiners:
+        pings = PingEvent.query.filter(
+            PingEvent.guild_id == jm.guild_id,
+            PingEvent.pingee_id == jm.member_id,
+            PingEvent.created_at >= jm.joined_at,
+            PingEvent.created_at <= jm.joined_at + week,
+        ).all()
+        names = [p.pinger_name for p in pings if p.pinger_name]
+        absorption[(jm.guild_id, jm.member_id)] = (
+            len(pings),
+            Counter(names).most_common(1)[0][0] if names else None,
+        )
+
+    row_keys = set(msgs) | set(absorption) | set(broadcasts)
+    name_map, global_names = _name_maps(
+        {g for g, _ in row_keys}, {m for _, m in row_keys}
+    )
+    member_rows = {}
+    if row_keys:
+        for gm in GuildMember.query.filter(
+            GuildMember.guild_id.in_({g for g, _ in row_keys}),
+            GuildMember.member_id.in_({m for _, m in row_keys}),
+        ).all():
+            member_rows[(gm.guild_id, gm.member_id)] = gm
+
+    rows = []
+    fading = 0
+    new_members = 0
+    for guild_id, member_id in row_keys:
+        times = msgs.get((guild_id, member_id), [])
+        recent = [t for t in times if t >= recent_start]
+        prior = [t for t in times if t < recent_start]
+        trend = _message_trend(len(recent), len(prior))
+        if trend == "fading":
+            fading += 1
+        gm = member_rows.get((guild_id, member_id))
+        if gm and gm.joined_at and gm.joined_at >= window_start:
+            new_members += 1
+        week1_pings, absorbed_by = absorption.get((guild_id, member_id), (None, None))
+        name = (
+            name_map.get((guild_id, member_id))
+            or global_names.get(member_id)
+            or (gm.display_name or gm.name if gm else None)
+        )
+        rows.append(
+            {
+                "guild_id": guild_id,
+                "discord_id": member_id,
+                "name": name,
+                "recent_messages": len(recent),
+                "prior_messages": len(prior),
+                "trend": trend,
+                "rhythm_shift": _rhythm_shift(recent, prior),
+                "voice_hours_30d": round(voice_hours.get((guild_id, member_id), 0.0), 2),
+                "active_days_30d": len({t.date() for t in times}),
+                "week1_pings_received": week1_pings,
+                "absorbed_by": absorbed_by,
+                "broadcast_count_30d": broadcasts.get((guild_id, member_id)),
+                "first_seen_at": first_seen.get((guild_id, member_id)) or (gm.joined_at if gm else None),
+                "computed_at": now,
+            }
+        )
+
+    db.session.query(UserBehaviorMetric).delete()
+    if rows:
+        db.session.add_all([UserBehaviorMetric(**r) for r in rows])
+    db.session.commit()
+    return {"users": len(rows), "fading": fading, "new_members": new_members}
+
+
+# ── Voice-only bonds ──
+
+def voice_only_pairs(guild_ids, window_start):
+    """Pairs sharing same-channel voice sessions inside the window but with
+    ZERO scored text interaction (no pair_scores row in any direction) — the
+    bonds the ping graph structurally cannot see. Returns plain dicts."""
+    q = VoiceActivity.query.filter(
+        VoiceActivity.joined_at.isnot(None),
+        VoiceActivity.left_at.isnot(None),
+        VoiceActivity.created_at >= window_start,
+    )
+    if guild_ids:
+        q = q.filter(VoiceActivity.guild_id.in_(guild_ids))
+    sessions = q.all()
+
+    by_channel = defaultdict(list)
+    for s in sessions:
+        by_channel[(s.guild_id, s.channel_name)].append(s)
+
+    scored_q = PairScore.query.with_entities(
+        PairScore.guild_id, PairScore.pinger_id, PairScore.pingee_id
+    )
+    if guild_ids:
+        scored_q = scored_q.filter(PairScore.guild_id.in_(guild_ids))
+    text_pairs = {
+        (r.guild_id, frozenset((r.pinger_id, r.pingee_id))) for r in scored_q.all()
+    }
+
+    merged = {}  # (guild_id, frozenset(pair)) -> {"a": .., "b": .., "sessions": n, "channels": [..]}
+    for (guild_id, _channel), chan_sessions in by_channel.items():
+        chan_sessions.sort(key=lambda s: s.joined_at)
+        for i, s1 in enumerate(chan_sessions):
+            for s2 in chan_sessions[i + 1:]:
+                if s2.joined_at >= s1.left_at:
+                    break  # sorted by start — no later session can overlap s1
+                if s1.discord_id == s2.discord_id:
+                    continue
+                if s1.joined_at >= s2.left_at:
+                    continue
+                pair = frozenset((s1.discord_id, s2.discord_id))
+                if (guild_id, pair) in text_pairs:
+                    continue  # they already have text interaction — not voice-ONLY
+                entry = merged.setdefault(
+                    (guild_id, pair),
+                    {"a": s1.discord_id, "b": s2.discord_id, "sessions": 0, "channels": []},
+                )
+                entry["sessions"] += 1
+                if s1.channel_name and s1.channel_name not in entry["channels"]:
+                    entry["channels"].append(s1.channel_name)
+
+    return [
+        {
+            "guild_id": guild_id,
+            "a_id": entry["a"],
+            "b_id": entry["b"],
+            "shared_sessions": entry["sessions"],
+            "channel_names": entry["channels"],
+        }
+        for (guild_id, _pair), entry in merged.items()
+    ]

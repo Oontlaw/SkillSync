@@ -39,7 +39,7 @@ from ml import engine as ml_engine
 from ml import federated as ml_federated
 from ml import forecast as ml_forecast
 from ml import growth as ml_growth
-from interactions import recompute_pair_scores, resolve_pending_pings
+from interactions import recompute_pair_scores, recompute_user_metrics, resolve_pending_pings
 
 observer_bp = Blueprint("observer", __name__)
 
@@ -1637,8 +1637,9 @@ def resolve_pings_route():
 @require_api_key
 def recompute_pair_scores_route():
     """Batch-rebuild pair_scores (NPMI affinity + baseline-corrected
-    unaddressed_rate) from the trailing window of qualifying pings."""
+    unaddressed_rate) and user_behavior_metrics from the trailing window."""
     result = recompute_pair_scores()
+    result["users"] = recompute_user_metrics()["users"]
     return jsonify(result), 200
 
 
