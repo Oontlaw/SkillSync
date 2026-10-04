@@ -146,6 +146,31 @@ The Community Engine is **not a standalone moderation bot** — it is a data sou
 | Voice | Session start, duration | Audio content |
 | Roles | Role changes, member joins/leaves | N/A |
 
+### Profiling & Consent
+
+The pairwise interaction layer (interaction graph, responsiveness, member
+patterns) is profiling — it is governed by an explicit consent model:
+
+- **Opt-out**: a member is profiled by default (`consent_optin` NULL or true
+  counts as opted in — existing graphs stay intact). `/optout` removes a
+  member from all profiling; `/optin` puts them back. Consent is per server
+  and self-service.
+- **What opt-out means**: their pings are dropped at ingest (never stored in
+  `ping_events`/`message_refs`), they are excluded from pair scores, the
+  interaction graph, user behavior metrics, and voice-only bonds. Rows that
+  already existed fade out with retention.
+- **What is captured (metadata only, never text)**: directed 1:1 pings,
+  content-free message pointers, voice session durations, presence
+  transitions, moderation actions.
+- **Retention horizons** (purged every 6h and on bot start): messages 90d
+  (env `MESSAGE_RETENTION_DAYS`), pings 90d (`PING_RETENTION_DAYS`),
+  message refs 14d, voice sessions and join events 180d
+  (`VOICE_RETENTION_DAYS` / `JOIN_EVENT_RETENTION_DAYS`).
+- **Corrector v2**: the score-corrector model was rebuilt without target-
+  leaking features (version 2). Delete `ml/models/score_corrector.joblib`
+  to force an immediate retrain; otherwise the next training cycle replaces
+  it and honest CV metrics will be lower than the old leak-inflated ones.
+
 ### How It Works
 
 1. **Event listeners** in `bot_core/` capture Discord events in real time

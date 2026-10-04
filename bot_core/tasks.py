@@ -13,7 +13,10 @@ from bot_core.config import (
     BAN_WATCH_HOURS,
     HEARTBEAT_GUILD_ID,
     HEARTBEAT_INTERVAL_MINUTES,
+    JOIN_EVENT_RETENTION_DAYS,
     MESSAGE_RETENTION_DAYS,
+    PING_RETENTION_DAYS,
+    VOICE_RETENTION_DAYS,
     PING_WATCH_MINUTES,
     SKILLSYNC_API,
 )
@@ -458,7 +461,13 @@ async def message_cleanup_loop():
         print(f"[Cleanup] Retrain error (non-fatal): {e}")
     try:
         resp = await api_post(
-            "/observer/cleanup", {"retention_days": MESSAGE_RETENTION_DAYS}
+            "/observer/cleanup",
+            {
+                "retention_days": MESSAGE_RETENTION_DAYS,
+                "ping_retention_days": PING_RETENTION_DAYS,
+                "voice_retention_days": VOICE_RETENTION_DAYS,
+                "join_event_retention_days": JOIN_EVENT_RETENTION_DAYS,
+            },
         )
         if resp and resp.get("deleted"):
             print(

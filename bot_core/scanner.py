@@ -42,6 +42,10 @@ async def scan_guild(guild):
     log(f'SCANNING guild: {guild.name} (ID: {guild.id})')
     print(f'[SkillSync] Scanning guild: {guild.name} ({guild.id})')
 
+    # Reset online set for this guild FIRST — before any scan step can fail.
+    # If a partial scan aborts, stale members must not linger as "online".
+    online_members[str(guild.id)] = set()
+
     try:
         owner_id = str(guild.owner_id) if guild.owner_id else None
         owner_name = guild.owner.name if guild.owner and guild.owner.name else 'Unknown'
@@ -80,9 +84,6 @@ async def scan_guild(guild):
         # member_count is None until member chunking completes on connect —
         # comparing it directly crashed the startup scan for every guild.
         is_large_guild = (guild.member_count or 0) > 1000
-
-        # Reset online set for this guild so skipped members don't leak as stale online
-        online_members[str(guild.id)] = set()
 
         for member in guild.members:
             if is_large_guild and not member.bot and member.status == discord.Status.offline:

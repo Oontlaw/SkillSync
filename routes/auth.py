@@ -1,3 +1,4 @@
+import logging
 import os
 import secrets
 import time
@@ -7,6 +8,8 @@ from urllib.parse import urlencode
 from database import db, GuildInfo
 
 auth_bp = Blueprint('auth', __name__)
+
+logger = logging.getLogger(__name__)
 
 CLIENT_ID = os.getenv('DISCORD_CLIENT_ID')
 CLIENT_SECRET = os.getenv('DISCORD_CLIENT_SECRET')
@@ -32,16 +35,18 @@ def _remember_state(state):
 
 
 def _consume_state(state):
+    """Single-use, session-bound, TTL-limited. The state MUST match the
+    value stored in THIS browser session AND exist in the server-side
+    registry — a state minted for another session can never complete this
+    callback, and a consumed one can never be replayed."""
     if not state:
         return False
     saved_state = session.pop('oauth_state', None)
-    if saved_state and secrets.compare_digest(state, saved_state):
-        _pending_states.pop(state, None)
-        return True
-
+    if not saved_state or not secrets.compare_digest(state, saved_state):
+        return False
     created_at = _pending_states.pop(state, None)
     if not created_at:
-        return False
+        return False  # already consumed or expired out of the registry
     return time.time() - created_at <= OAUTH_STATE_TTL_SECONDS
 
 
@@ -50,7 +55,7 @@ def _redirect_uri():
     if uri:
         return uri
     uri = request.host_url.rstrip('/') + url_for('auth.callback')
-    print(f'[Auth] Generated Redirect URI: {uri}')
+    logger.info(f'[Auth] Generated Redirect URI: {uri}')
     return uri
 
 
@@ -95,7 +100,7 @@ def callback():
         resp.raise_for_status()
         token_data = resp.json()
     except Exception as e:
-        print(f'[Auth] Token exchange failed: {e}')
+        logger.error(f'[Auth] Token exchange failed: {e}')
         return 'Failed to exchange authorization code.', 400
     access_token = token_data['access_token']
 
@@ -104,7 +109,7 @@ def callback():
         user_resp.raise_for_status()
         user = user_resp.json()
     except Exception as e:
-        print(f'[Auth] User fetch failed: {e}')
+        logger.error(f'[Auth] User fetch failed: {e}')
         return 'Failed to fetch user info.', 400
 
     try:
@@ -112,7 +117,7 @@ def callback():
         guilds_resp.raise_for_status()
         guilds = guilds_resp.json()
     except Exception as e:
-        print(f'[Auth] Guilds fetch failed: {e}')
+        logger.error(f'[Auth] Guilds fetch failed: {e}')
         return 'Failed to fetch guilds.', 400
 
     # Get guilds where the bot is also present (from scanned GuildInfo table)

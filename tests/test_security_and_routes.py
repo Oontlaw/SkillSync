@@ -275,26 +275,27 @@ def test_workspace_task_update_awards_points(app, client, csrf_headers):
 
 
 def test_profiling_tables_ttl_purge(app, client):
-    """ping_events / voice_activity / ping_join_events older than the
-    retention horizon are purged; recent rows survive."""
+    """Per-table retention knobs: pings (default 90d), voice and join events
+    (default 180d) purge on their own horizons; recent rows survive."""
     from datetime import datetime, timedelta
 
     from database import PingJoinEvent, PingEvent, VoiceActivity
 
     now = datetime.utcnow()
-    old = now - timedelta(days=120)
+    mid = now - timedelta(days=120)   # past ping horizon, inside voice/join
+    ancient = now - timedelta(days=400)
     with app.app_context():
-        for ts in (old, now):
+        for ts in (mid, now):
             db.session.add(PingEvent(
                 guild_id='1', pinger_id='a', pingee_id='b', channel_id='c',
                 message_id=f'm-{ts}', ping_type='mention', created_at=ts,
             ))
-            db.session.add(VoiceActivity(
-                guild_id='1', discord_id='a', created_at=ts, joined_at=ts, left_at=ts,
-            ))
-            db.session.add(PingJoinEvent(
-                guild_id='1', moderator_id='a', created_at=ts,
-            ))
+        db.session.add(VoiceActivity(
+            guild_id='1', discord_id='a', created_at=ancient, joined_at=ancient, left_at=ancient,
+        ))
+        db.session.add(VoiceActivity(guild_id='1', discord_id='a', created_at=mid))
+        db.session.add(PingJoinEvent(guild_id='1', moderator_id='a', created_at=ancient))
+        db.session.add(PingJoinEvent(guild_id='1', moderator_id='a', created_at=mid))
         db.session.commit()
 
     resp = client.post(
@@ -303,13 +304,13 @@ def test_profiling_tables_ttl_purge(app, client):
     )
     assert resp.status_code == 200
     body = resp.get_json()
-    assert body['deleted_pings'] == 1
-    assert body['deleted_voice'] == 1
-    assert body['deleted_join_events'] == 1
+    assert body['deleted_pings'] == 1          # 120d > ping horizon (90)
+    assert body['deleted_voice'] == 1          # 400d > voice horizon (180)
+    assert body['deleted_join_events'] == 1    # 400d > join horizon (180)
     with app.app_context():
         assert PingEvent.query.count() == 1
-        assert VoiceActivity.query.count() == 1
-        assert PingJoinEvent.query.count() == 1
+        assert VoiceActivity.query.count() == 1   # the 120d row survives
+        assert PingJoinEvent.query.count() == 1   # the 120d row survives
 
 
 def test_consent_optout_gates_computation(app, client):
@@ -405,3 +406,30 @@ def test_consent_endpoint_upserts(app, client):
     with app.app_context():
         row = GuildMember.query.filter_by(guild_id='1', member_id='Z').first()
         assert row.consent_optin is True
+
+
+def test_oauth_state_rejects_missing_wrong_and_foreign(app, client):
+    """Callback requires state bound to THIS session: missing, wrong, and
+    foreign-session states all fail closed."""
+    assert client.get('/auth/callback').status_code == 403
+    assert client.get('/auth/callback?state=wrong&code=x').status_code == 403
+    # a state minted for ANOTHER session must not complete this one
+    from routes.auth import _remember_state
+
+    _remember_state('foreign-state')
+    assert client.get('/auth/callback?state=foreign-state&code=x').status_code == 403
+
+
+def test_oauth_state_is_single_use(app):
+    """A consumed state can never be replayed, even with the same session."""
+    from flask import session as flask_session
+
+    from routes.auth import _consume_state, _remember_state
+
+    with app.test_request_context('/'):
+        flask_session['oauth_state'] = 'good-state'
+        _remember_state('good-state')
+        assert _consume_state('good-state') is True
+        # replay: same session value, but the registry entry is gone
+        flask_session['oauth_state'] = 'good-state'
+        assert _consume_state('good-state') is False

@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import logging
 import time
 import uuid
 from collections import defaultdict
@@ -19,6 +20,7 @@ from database import (
     GuildInfo,
     GuildMember,
     GuildRole,
+    PredictionLog,
     MemberJoinLeave,
     MentionRecord,
     MessageRef,
@@ -42,6 +44,8 @@ from ml import growth as ml_growth
 from interactions import recompute_pair_scores, recompute_user_metrics, resolve_pending_pings
 
 observer_bp = Blueprint("observer", __name__)
+
+logger = logging.getLogger(__name__)
 
 # ── Retrain-on-correction flag (file-based, survives reloader forks) ──
 _MODELS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "ml", "models")
@@ -262,7 +266,7 @@ def log_action():
             ).delete()
         db.session.commit()
 
-    print(f"[Observer API] Action logged: {action_type} by {staff_name} on {target}")
+    logger.info(f"[Observer API] Action logged: {action_type} by {staff_name} on {target}")
     return jsonify({"message": "Action logged", "points_awarded": points}), 201
 
 
@@ -338,7 +342,7 @@ def log_flag():
         db.session.add(log)
         db.session.commit()
 
-        print(
+        logger.info(
             f"[Observer API] Flagged action: {action_type} by {staff_name} — {points} pts"
         )
 
@@ -382,7 +386,7 @@ def log_warn():
         db.session.add(log)
         db.session.commit()
 
-    print(
+    logger.info(
         f"[Observer API] Warn logged: {mod_name} warned {target_name} — reason: {reason}"
     )
     return jsonify({"message": "Warn logged"}), 201
@@ -452,8 +456,8 @@ def confirm_action():
         ).delete()
         db.session.commit()
         if deleted:
-            print(f"[Observer API] PendingBan deleted: {target_id} in {guild_id}")
-    print(
+            logger.info(f"[Observer API] PendingBan deleted: {target_id} in {guild_id}")
+    logger.info(
         f"[Observer API] Confirmed: {data.get('action_type')} by {data.get('staff_name')} on {data.get('target')}"
     )
     return jsonify({"message": "Action confirmed as valid"}), 200
@@ -487,7 +491,7 @@ def log_automod_trigger():
     )
     db.session.add(trigger)
     db.session.commit()
-    print(
+    logger.info(
         f"[Observer API] AutoMod trigger: {trigger.rule_name} -> {trigger.user_name} in #{trigger.channel_name}"
     )
     return jsonify({"message": "AutoMod trigger logged"}), 201
@@ -986,7 +990,7 @@ def receive_guild_scan():
 
     db.session.commit()
 
-    print(
+    logger.info(
         f"[Observer API] Guild scan stored: {guild.name} — {guild.staff_count} staff, {guild.member_count} members, {len(data.get('channels', []))} channels, {len(data.get('automod_rules', []))} automod rules"
     )
     return jsonify(
@@ -1185,7 +1189,7 @@ def receive_presence():
         db.session.add(member)
 
     db.session.commit()
-    print(f"[Presence API] {updated} updated, {created} created")
+    logger.info(f"[Presence API] {updated} updated, {created} created")
     return jsonify({"updated": updated, "created": created}), 200
 
 
@@ -1208,7 +1212,7 @@ def seed_online():
         ).all()
         if members:
             result[g.guild_id] = [int(m.member_id) for m in members]
-    print(f"[SeedOnline] Returned online members for {len(result)} guilds (last 30min)")
+    logger.info(f"[SeedOnline] Returned online members for {len(result)} guilds (last 30min)")
     return jsonify(result), 200
 
 
@@ -1234,7 +1238,7 @@ def receive_online_count():
             guild.online_count = count
             updated += 1
     db.session.commit()
-    print(f"[OnlineCount] Updated {updated} guilds")
+    logger.info(f"[OnlineCount] Updated {updated} guilds")
     return jsonify({"updated": updated}), 200
 
 
@@ -1472,7 +1476,8 @@ def cleanup_old_messages():
     data = request.json or {}
     retention_days = int(data.get("retention_days", 90))
     retention_days = max(7, min(365, retention_days))
-    cutoff = datetime.utcnow() - timedelta(days=retention_days)
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=retention_days)
 
     deleted_msgs = MessageRecord.query.filter(
         MessageRecord.created_at < cutoff
@@ -1489,12 +1494,22 @@ def cleanup_old_messages():
     ).delete()
     # profiling tables must not grow unbounded either; ping_events only feed
     # the 30-day scoring window, so the message retention horizon is safe
-    deleted_pings = PingEvent.query.filter(PingEvent.created_at < cutoff).delete()
+    # per-table retention horizons (pings feed the 30-day scoring window,
+    # so they can go sooner than messages; voice/join history lives longer)
+    ping_days = int(data.get("ping_retention_days", 90))
+    ping_days = max(30, min(365, ping_days))
+    voice_days = int(data.get("voice_retention_days", 180))
+    voice_days = max(30, min(730, voice_days))
+    join_days = int(data.get("join_event_retention_days", 180))
+    join_days = max(30, min(730, join_days))
+    deleted_pings = PingEvent.query.filter(
+        PingEvent.created_at < now - timedelta(days=ping_days)
+    ).delete()
     deleted_voice = VoiceActivity.query.filter(
-        VoiceActivity.created_at < cutoff
+        VoiceActivity.created_at < now - timedelta(days=voice_days)
     ).delete()
     deleted_join_events = PingJoinEvent.query.filter(
-        PingJoinEvent.created_at < cutoff
+        PingJoinEvent.created_at < now - timedelta(days=join_days)
     ).delete()
     db.session.commit()
 
@@ -1508,6 +1523,9 @@ def cleanup_old_messages():
             "deleted_join_events": deleted_join_events,
             "retention_days": retention_days,
             "message_ref_days": ref_days,
+            "ping_retention_days": ping_days,
+            "voice_retention_days": voice_days,
+            "join_event_retention_days": join_days,
         }
     )
 
@@ -1804,7 +1822,7 @@ def log_ping_join():
     db.session.add(event)
     db.session.commit()
 
-    print(
+    logger.info(
         f"[PingJoin API] {event.moderator_name} pinged @everyone → +{event.new_members} joins"
     )
     return jsonify({"message": "Ping-join event logged", "id": event.id}), 201
@@ -1851,7 +1869,7 @@ def log_voice_activity():
         created += 1
 
     db.session.commit()
-    print(f"[Voice API] Logged {created} voice sessions")
+    logger.info(f"[Voice API] Logged {created} voice sessions")
     return jsonify(
         {"message": f"{created} voice sessions logged", "created": created}
     ), 201
@@ -2084,12 +2102,51 @@ def ml_accuracy():
 @observer_bp.route("/observer/ml/anomalies/scan", methods=["POST"])
 @require_api_key
 def ml_scan_anomalies():
-    """Run ML-based anomaly detection — per-guild if guild_id provided, else all guilds.
-    Records are created by scan_all() with the correct guild_id."""
+    """Run ML-based anomaly detection — per-guild if guild_id provided, else
+    all guilds.
+
+    Persists scan results the model didn't store itself (idempotent per
+    active discord_id + anomaly_type — re-running a scan never duplicates a
+    row) and back-fills each linked PredictionLog with the stored record's
+    entity_id so outcome resolution can find it.
+    """
     data = request.json or {}
     guild_id = data.get("guild_id")
     anomalies = ml_anomaly.scan_all(guild_id=guild_id)
-    return jsonify({"scanned": len(anomalies), "guild_id": guild_id})
+    stored = 0
+    for a in anomalies:
+        discord_id = str(a.get("discord_id") or "")
+        if not discord_id:
+            continue
+        a_type = a.get("anomaly_type") or a.get("type") or "ml_anomaly"
+        record = BehavioralAnomaly.query.filter_by(
+            discord_id=discord_id, anomaly_type=a_type, cleared_at=None
+        ).first()
+        if record is None:
+            record = BehavioralAnomaly(
+                discord_id=discord_id,
+                guild_id=guild_id or a.get("guild_id"),
+                anomaly_type=a_type,
+                severity=a.get("severity", 0),
+                details=a.get("details")
+                or f"ML-detected behavioral anomaly (score: {a.get('anomaly_score')})",
+                source="discord",
+            )
+            db.session.add(record)
+            stored += 1
+        db.session.flush()  # record.id for the log back-fill
+        log_id = a.get("prediction_log_id")
+        if log_id is not None:
+            log_row = db.session.get(PredictionLog, log_id)
+            if log_row is not None:
+                try:
+                    meta = json.loads(log_row.metadata_json) if log_row.metadata_json else {}
+                except (TypeError, ValueError):
+                    meta = {}
+                meta["entity_id"] = record.id
+                log_row.metadata_json = json.dumps(meta)
+    db.session.commit()
+    return jsonify({"scanned": len(anomalies), "stored": stored, "guild_id": guild_id})
 
 
 @observer_bp.route("/observer/ml/burnout-scan", methods=["POST"])
@@ -2385,11 +2442,11 @@ def log_join_leave():
             )
             db.session.add(record)
         except Exception as e:
-            print(f"[Observer API] Error storing join-leave event: {e}")
+            logger.error(f"[Observer API] Error storing join-leave event: {e}")
             continue
 
     db.session.commit()
-    print(f"[Observer API] Stored {len(events)} join/leave events")
+    logger.info(f"[Observer API] Stored {len(events)} join/leave events")
     return jsonify({"message": f"Stored {len(events)} join/leave events"}), 201
 
 
