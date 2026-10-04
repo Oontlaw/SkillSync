@@ -68,6 +68,20 @@ RETURN_WINDOW_HOURS = 24  # directed ping-back window for return_rate
 CROSS_GUILD = "__all__"  # sentinel guild_id for read-time cross-server rows
 
 
+# ── Profiling consent (opt-out model) ──
+
+def opted_out_members(guild_ids=None):
+    """Set of (guild_id, member_id) pairs whose profiling consent is OFF.
+    NULL/absent consent_optin counts as opted IN (existing graphs stay
+    intact); only an explicit False removes a member from profiling."""
+    q = db.session.query(GuildMember.guild_id, GuildMember.member_id).filter(
+        GuildMember.consent_optin.is_(False)
+    )
+    if guild_ids:
+        q = q.filter(GuildMember.guild_id.in_(guild_ids))
+    return {(g, m) for g, m in q.all()}
+
+
 # ── Pure scoring helpers (unit-tested directly) ──
 
 def npmi(p_ab, p_a, p_b):
@@ -95,18 +109,24 @@ def corrected_unaddressed_rate(pair_rate, baseline):
 # ── Shared computation blocks (used by per-guild recompute AND cross-guild
 #    read-time aggregation — one math path, two keyings) ──
 
-def _active_days(window_start, pings, guild_ids=None):
+def _active_days(window_start, pings, guild_ids=None, opted_out=None):
     """Distinct active days per author: the message-ref stream (all messaging)
-    plus the days a user sent pings (a ping is activity by the pinger)."""
+    plus the days a user sent pings (a ping is activity by the pinger).
+    Opted-out authors contribute nothing."""
     active = defaultdict(set)
-    q = db.session.query(MessageRef.author_id, func.date(MessageRef.created_at)).filter(
-        MessageRef.created_at >= window_start
-    )
+    q = db.session.query(
+        MessageRef.guild_id, MessageRef.author_id, func.date(MessageRef.created_at)
+    ).filter(MessageRef.created_at >= window_start)
     if guild_ids:
         q = q.filter(MessageRef.guild_id.in_(guild_ids))
-    for author_id, day in q.distinct().all():
+    skip = opted_out or set()
+    for guild_id, author_id, day in q.distinct().all():
+        if (guild_id, author_id) in skip:
+            continue
         active[author_id].add(str(day))
     for ping in pings:
+        if (ping.guild_id, ping.pinger_id) in skip:
+            continue
         active[ping.pinger_id].add(ping.created_at.date().isoformat())
     return active
 
@@ -435,14 +455,23 @@ def recompute_pair_scores(now=None):
     """Rebuild pair_scores from the trailing AFFINITY_WINDOW_DAYS of pings.
 
     Pairs below MIN_PAIR_SAMPLE get sample_size only, with NULL scores —
-    insufficient_data, never a computed number.
+    insufficient_data, never a computed number. Members who opted out of
+    profiling never appear in any row (their pings are dropped here AND at
+    ingest, so pre-consent history fades out with retention).
     """
     now = now or datetime.utcnow()
     window_start = now - timedelta(days=AFFINITY_WINDOW_DAYS)
     total_days = AFFINITY_WINDOW_DAYS
 
     pings = PingEvent.query.filter(PingEvent.created_at >= window_start).all()
-    active_days = _active_days(window_start, pings)
+    opted_out = opted_out_members()
+    pings = [
+        p
+        for p in pings
+        if (p.guild_id, p.pinger_id) not in opted_out
+        and (p.guild_id, p.pingee_id) not in opted_out
+    ]
+    active_days = _active_days(window_start, pings, opted_out=opted_out)
     baseline_stats = _baseline_stats(pings)
     name_map, global_names = _name_maps(
         {p.guild_id for p in pings},
@@ -494,7 +523,14 @@ def cross_guild_pair_rows(guild_ids, now=None):
         PingEvent.created_at >= window_start,
         PingEvent.guild_id.in_(guild_ids),
     ).all()
-    active_days = _active_days(window_start, pings, guild_ids=guild_ids)
+    opted_out = opted_out_members(guild_ids)
+    pings = [
+        p
+        for p in pings
+        if (p.guild_id, p.pinger_id) not in opted_out
+        and (p.guild_id, p.pingee_id) not in opted_out
+    ]
+    active_days = _active_days(window_start, pings, guild_ids=guild_ids, opted_out=opted_out)
     baseline_stats = _baseline_stats(pings)
     name_map, global_names = _name_maps(
         set(guild_ids),
@@ -636,6 +672,8 @@ def recompute_user_metrics(now=None):
         )
 
     row_keys = set(msgs) | set(absorption) | set(broadcasts)
+    opted_out = opted_out_members()
+    row_keys = {k for k in row_keys if k not in opted_out}
     name_map, global_names = _name_maps(
         {g for g, _ in row_keys}, {m for _, m in row_keys}
     )
@@ -705,7 +743,10 @@ def voice_only_pairs(guild_ids, window_start):
     )
     if guild_ids:
         q = q.filter(VoiceActivity.guild_id.in_(guild_ids))
-    sessions = q.all()
+    opted_out = opted_out_members(guild_ids)
+    sessions = [
+        s for s in q.all() if (s.guild_id, s.discord_id) not in opted_out
+    ]
 
     by_channel = defaultdict(list)
     for s in sessions:

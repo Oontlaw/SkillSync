@@ -447,6 +447,11 @@ class GuildMember(db.Model):
     status = db.Column(db.String(20), default="offline")
     activity_name = db.Column(db.String(100), nullable=True)
     activity_type = db.Column(db.String(20), nullable=True)
+    # profiling consent — opt-out model (default True, existing graphs stay
+    # intact); opted-out members produce no new profiling rows
+    consent_optin = db.Column(db.Boolean, default=True, nullable=True)
+    consent_updated_at = db.Column(db.DateTime, nullable=True)
+    consent_source = db.Column(db.String(50), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 

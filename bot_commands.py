@@ -473,6 +473,54 @@ class Moderation(commands.Cog):
         embed.set_footer(text=f"Requested by {ctx.author.name}")
         await ctx.send(embed=embed)
 
+    # ── profiling consent (self-service) ──
+
+    @commands.command(
+        name="optout",
+        help="Opt yourself OUT of interaction profiling in this server "
+        "(your pings stop being counted; existing data fades out with retention).",
+    )
+    async def optout(self, ctx):
+        if ctx.guild is None:
+            await ctx.send("Run this inside a server — consent is per server.")
+            return
+        await self._set_consent(ctx, optin=False)
+
+    @commands.command(
+        name="optin",
+        help="Opt back IN to interaction profiling in this server.",
+    )
+    async def optin(self, ctx):
+        if ctx.guild is None:
+            await ctx.send("Run this inside a server — consent is per server.")
+            return
+        await self._set_consent(ctx, optin=True)
+
+    async def _set_consent(self, ctx, optin: bool):
+        resp = await api_post(
+            "/observer/consent",
+            {
+                "guild_id": str(ctx.guild.id),
+                "discord_id": str(ctx.author.id),
+                "name": ctx.author.display_name,
+                "optin": optin,
+                "source": "bot-command",
+            },
+        )
+        if resp is not None and resp.status_code == 200:
+            state = "back IN — thank you" if optin else "OUT"
+            await ctx.send(
+                f"{ctx.author.mention} You are now opted **{state}** of "
+                f"interaction profiling in **{ctx.guild.name}**."
+                + ("" if optin else " Existing rows fade out with retention.")
+            )
+        else:
+            await ctx.send(
+                f"{ctx.author.mention} Could not update your consent right now "
+                f"(dashboard unreachable). Try again later."
+            )
+        log(f"consent set optin={optin} for {ctx.author.id} in {ctx.guild.id}")
+
 
 async def setup(bot):
     await bot.add_cog(Moderation(bot))

@@ -1524,12 +1524,39 @@ def log_ping_events():
 
     Idempotent per (message_id, pingee_id) so bot-side flush retries can't
     double-count a ping. Broadcast pings never reach this endpoint.
+    Profiling consent: pings touching an opted-out member are dropped here —
+    they never become profiled data.
     """
     data = request.json
     if not data:
         return jsonify({"error": "No JSON body"}), 400
     pings = data if isinstance(data, list) else [data]
     inserted = 0
+    consent_skipped = 0
+
+    # consent gate: one query covering every guild/member touched by the batch
+    batch_guilds = {
+        sanitize_str(p.get("guild_id"), 50) for p in pings if p.get("guild_id")
+    }
+    batch_members = set()
+    for p in pings:
+        batch_members.add(sanitize_str(p.get("pinger_id"), 50))
+        batch_members.add(sanitize_str(p.get("pingee_id"), 50))
+    batch_members.discard(None)
+    opted_out = set()
+    if batch_guilds and batch_members:
+        opted_out = set(
+            GuildMember.query.with_entities(
+                GuildMember.guild_id, GuildMember.member_id
+            )
+            .filter(
+                GuildMember.guild_id.in_(batch_guilds),
+                GuildMember.member_id.in_(batch_members),
+                GuildMember.consent_optin.is_(False),
+            )
+            .all()
+        )
+
     for p in pings:
         ok, _err = validate_payload(
             p, ["pinger_id", "pingee_id", "guild_id", "message_id"]
@@ -1538,14 +1565,19 @@ def log_ping_events():
             continue
         pingee_id = sanitize_str(p["pingee_id"], 50)
         message_id = sanitize_str(p["message_id"], 50)
+        guild_id = sanitize_str(p.get("guild_id"), 50)
+        pinger_id = sanitize_str(p["pinger_id"], 50)
+        if (guild_id, pinger_id) in opted_out or (guild_id, pingee_id) in opted_out:
+            consent_skipped += 1
+            continue
         if PingEvent.query.filter_by(
             message_id=message_id, pingee_id=pingee_id
         ).first():
             continue
         db.session.add(
             PingEvent(
-                guild_id=sanitize_str(p.get("guild_id"), 50),
-                pinger_id=sanitize_str(p["pinger_id"], 50),
+                guild_id=guild_id,
+                pinger_id=pinger_id,
                 pinger_name=sanitize_str(p.get("pinger_name"), 100),
                 pingee_id=pingee_id,
                 pingee_name=sanitize_str(p.get("pingee_name"), 100),
@@ -1558,7 +1590,16 @@ def log_ping_events():
         )
         inserted += 1
     db.session.commit()
-    return jsonify({"inserted": inserted, "received": len(pings)}), 201
+    return (
+        jsonify(
+            {
+                "inserted": inserted,
+                "received": len(pings),
+                "consent_skipped": consent_skipped,
+            }
+        ),
+        201,
+    )
 
 
 @observer_bp.route("/observer/message-refs", methods=["POST"])
@@ -1574,6 +1615,29 @@ def log_message_refs():
         return jsonify({"error": "No JSON body"}), 400
     refs = data if isinstance(data, list) else [data]
     inserted = 0
+    consent_skipped = 0
+
+    # consent gate: refs by opted-out authors are never stored
+    batch_guilds = {
+        sanitize_str(r.get("guild_id"), 50) for r in refs if r.get("guild_id")
+    }
+    batch_authors = {
+        sanitize_str(r.get("author_id"), 50) for r in refs if r.get("author_id")
+    }
+    opted_out = set()
+    if batch_guilds and batch_authors:
+        opted_out = set(
+            GuildMember.query.with_entities(
+                GuildMember.guild_id, GuildMember.member_id
+            )
+            .filter(
+                GuildMember.guild_id.in_(batch_guilds),
+                GuildMember.member_id.in_(batch_authors),
+                GuildMember.consent_optin.is_(False),
+            )
+            .all()
+        )
+
     for r in refs:
         ok, _err = validate_payload(
             r, ["guild_id", "channel_id", "message_id", "author_id"]
@@ -1581,20 +1645,76 @@ def log_message_refs():
         if not ok:
             continue
         message_id = sanitize_str(r["message_id"], 50)
+        guild_id = sanitize_str(r.get("guild_id"), 50)
+        author_id = sanitize_str(r["author_id"], 50)
+        if (guild_id, author_id) in opted_out:
+            consent_skipped += 1
+            continue
         if MessageRef.query.filter_by(message_id=message_id).first():
             continue
         db.session.add(
             MessageRef(
-                guild_id=sanitize_str(r["guild_id"], 50),
-                channel_id=sanitize_str(r["channel_id"], 50),
+                guild_id=guild_id,
+                channel_id=sanitize_str(r.get("channel_id"), 50),
                 message_id=message_id,
-                author_id=sanitize_str(r["author_id"], 50),
+                author_id=author_id,
                 reply_to_message_id=sanitize_str(r.get("reply_to_message_id"), 50),
             )
         )
         inserted += 1
     db.session.commit()
-    return jsonify({"inserted": inserted, "received": len(refs)}), 201
+    return (
+        jsonify(
+            {
+                "inserted": inserted,
+                "received": len(refs),
+                "consent_skipped": consent_skipped,
+            }
+        ),
+        201,
+    )
+
+
+@observer_bp.route("/observer/consent", methods=["POST"])
+@require_api_key
+def update_consent():
+    """Self-service profiling consent from the bot's /optin and /optout.
+
+    Opt-out model: an absent row or NULL consent_optin means opted IN; only
+    an explicit False removes a member from profiling capture and computation.
+    """
+    data = request.json or {}
+    # optin is validated by PRESENCE, not truthiness — False is the whole
+    # point of /optout and validate_payload rejects falsy values
+    ok, _err = validate_payload(data, ["guild_id", "discord_id"])
+    if not ok or "optin" not in data:
+        return jsonify({"error": "Missing required fields"}), 400
+    guild_id = sanitize_str(data["guild_id"], 50)
+    discord_id = sanitize_str(data["discord_id"], 50)
+    optin = bool(data["optin"])
+    member = GuildMember.query.filter_by(
+        guild_id=guild_id, member_id=discord_id
+    ).first()
+    if member is None:
+        member = GuildMember(
+            guild_id=guild_id,
+            member_id=discord_id,
+            name=sanitize_str(data.get("name"), 100) or discord_id,
+            is_online=False,
+            status="offline",
+        )
+        db.session.add(member)
+    member.consent_optin = optin
+    member.consent_updated_at = datetime.utcnow()
+    member.consent_source = sanitize_str(data.get("source"), 50) or "bot-command"
+    db.session.commit()
+    return jsonify(
+        {
+            "discord_id": discord_id,
+            "guild_id": guild_id,
+            "consent_optin": optin,
+        }
+    ), 200
 
 
 @observer_bp.route("/observer/member-name", methods=["POST"])

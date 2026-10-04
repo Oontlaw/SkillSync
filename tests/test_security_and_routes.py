@@ -3,6 +3,7 @@ from database import (
     GuildInfo,
     GuildMember,
     MessageRecord,
+    MessageRef,
     Organisation,
     OrgMember,
     ScoreLog,
@@ -309,3 +310,98 @@ def test_profiling_tables_ttl_purge(app, client):
         assert PingEvent.query.count() == 1
         assert VoiceActivity.query.count() == 1
         assert PingJoinEvent.query.count() == 1
+
+
+def test_consent_optout_gates_computation(app, client):
+    """Opted-out members vanish from pair_scores, user metrics, and
+    voice-only bonds; NULL consent counts as opted IN."""
+    from datetime import datetime, timedelta
+
+    from database import GuildMember, PairScore, PingEvent, UserBehaviorMetric, db
+    from interactions import recompute_pair_scores, recompute_user_metrics
+
+    now = datetime.utcnow()
+    with app.app_context():
+        # A: opted out, B: their partner, C/D: control pair (no consent row)
+        db.session.add(GuildMember(guild_id='1', member_id='A', name='A', consent_optin=False))
+        db.session.add(GuildMember(guild_id='1', member_id='B', name='B'))
+        for i in range(4):
+            db.session.add(PingEvent(
+                guild_id='1', pinger_id='A', pingee_id='B', channel_id='c',
+                message_id=f'ab{i}', ping_type='mention', created_at=now - timedelta(days=i),
+            ))
+            db.session.add(PingEvent(
+                guild_id='1', pinger_id='C', pingee_id='D', channel_id='c',
+                message_id=f'cd{i}', ping_type='mention', created_at=now - timedelta(days=i),
+            ))
+        for i in range(4):  # C needs message activity to earn a user-metric row
+            db.session.add(MessageRef(
+                guild_id='1', channel_id='c', message_id=f'cr{i}',
+                author_id='C', created_at=now - timedelta(days=i),
+            ))
+        db.session.add(UserBehaviorMetric(
+            guild_id='1', discord_id='A', name='A', computed_at=now,
+        ))
+        db.session.commit()
+        recompute_pair_scores()
+        recompute_user_metrics()
+        assert PairScore.query.filter_by(guild_id='1').count() == 2  # only C<->D
+        assert not any(
+            {r.pinger_id, r.pingee_id} & {'A', 'B'}
+            for r in PairScore.query.filter_by(guild_id='1').all()
+        )
+        assert UserBehaviorMetric.query.filter_by(discord_id='A').count() == 0
+        assert UserBehaviorMetric.query.filter_by(discord_id='C').count() == 1
+
+
+def test_consent_optout_gates_ingest(app, client):
+    """Opted-out members produce ZERO new profiling rows at ingest."""
+    from database import GuildMember, MessageRef, PingEvent, db
+
+    with app.app_context():
+        db.session.add(GuildMember(guild_id='1', member_id='X', name='X', consent_optin=False))
+        db.session.commit()
+
+    auth = {'Authorization': 'Bearer test-api-key'}
+    resp = client.post('/api/observer/ping-events', json=[
+        {'guild_id': '1', 'pinger_id': 'X', 'pingee_id': 'Y',
+         'channel_id': 'c', 'channel_name': 'c', 'message_id': 'p1'},
+        {'guild_id': '1', 'pinger_id': 'Y', 'pingee_id': 'Z',
+         'channel_id': 'c', 'channel_name': 'c', 'message_id': 'p2'},
+    ], headers=auth)
+    assert resp.status_code == 201
+    assert resp.get_json()['inserted'] == 1
+    assert resp.get_json()['consent_skipped'] == 1
+
+    resp = client.post('/api/observer/message-refs', json=[
+        {'guild_id': '1', 'channel_id': 'c', 'message_id': 'r1', 'author_id': 'X'},
+    ], headers=auth)
+    assert resp.get_json()['inserted'] == 0
+
+    with app.app_context():
+        assert PingEvent.query.count() == 1
+        assert PingEvent.query.first().pinger_id == 'Y'
+        assert MessageRef.query.count() == 0
+
+
+def test_consent_endpoint_upserts(app, client):
+    """/observer/consent creates or updates the consent row."""
+    from database import GuildMember, db
+
+    auth = {'Authorization': 'Bearer test-api-key'}
+    resp = client.post('/api/observer/consent', json={
+        'guild_id': '1', 'discord_id': 'Z', 'name': 'Zed', 'optin': False,
+    }, headers=auth)
+    assert resp.status_code == 200
+    with app.app_context():
+        row = GuildMember.query.filter_by(guild_id='1', member_id='Z').first()
+        assert row is not None and row.consent_optin is False
+        assert row.consent_source == 'bot-command'
+
+    resp = client.post('/api/observer/consent', json={
+        'guild_id': '1', 'discord_id': 'Z', 'optin': True,
+    }, headers=auth)
+    assert resp.status_code == 200
+    with app.app_context():
+        row = GuildMember.query.filter_by(guild_id='1', member_id='Z').first()
+        assert row.consent_optin is True
