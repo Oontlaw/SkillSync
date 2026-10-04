@@ -1,5 +1,7 @@
 import ipaddress
+import logging
 import os
+import socket
 import urllib.parse
 from datetime import datetime, timedelta
 
@@ -37,13 +39,57 @@ def _validate_jira_url(url: str) -> tuple[bool, str]:
             if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
                 return False, f"Private or reserved IP address not allowed: {ip}"
         except ValueError:
-            # hostname is a domain name, not an IP — check for obviously local names
-            local_names = {"localhost", "localhos", "127.0.0.1", "::1"}
+            # hostname is a domain name, not an IP — resolve it and check
+            # EVERY address (DNS rebinding returns a public name pointing
+            # at a private IP; name checks alone would let it through)
+            local_names = {"localhost", "localhos"}
             if hostname.lower() in local_names or hostname.endswith(".local"):
                 return False, f"Local hostname not allowed: {hostname}"
+            try:
+                infos = socket.getaddrinfo(hostname, 443, proto=socket.IPPROTO_TCP)
+            except socket.gaierror as e:
+                return False, f"DNS resolution failed: {e}"
+            for info in infos:
+                addr = ipaddress.ip_address(info[4][0])
+                if (
+                    addr.is_private
+                    or addr.is_loopback
+                    or addr.is_link_local
+                    or addr.is_reserved
+                ):
+                    return False, f"Hostname resolves to private/reserved IP: {addr}"
     except Exception as e:
         return False, f"URL parse error: {e}"
     return True, "ok"
+
+
+MAX_RESPONSE_BYTES = 5 * 1024 * 1024
+MAX_REDIRECT_HOPS = 3
+logger = logging.getLogger(__name__)
+
+
+def _safe_get(url, **kwargs):
+    """SSRF-hardened GET: validate the URL (and every redirect hop), never
+    let requests follow redirects itself, and refuse oversized bodies.
+    Returns the final Response or None on any SSRF-relevant rejection."""
+    for _hop in range(MAX_REDIRECT_HOPS + 1):
+        ok, reason = _validate_jira_url(url)
+        if not ok:
+            logger.warning("[Jira] Blocked outbound request (%s): %s", reason, url)
+            return None
+        resp = requests.get(url, allow_redirects=False, timeout=15, **kwargs)
+        if resp.is_redirect or resp.is_permanent_redirect:
+            nxt = resp.headers.get("Location")
+            if not nxt:
+                return resp
+            url = urllib.parse.urljoin(url, nxt)
+            continue
+        if len(resp.content or b"") > MAX_RESPONSE_BYTES:
+            logger.warning("[Jira] Response too large (%d bytes) from %s", len(resp.content), url)
+            return None
+        return resp
+    logger.warning("[Jira] Too many redirects: %s", url)
+    return None
 
 
 JIRA_URL = os.getenv("JIRA_URL", "")
@@ -95,7 +141,7 @@ def poll_issues(days_back=7):
     jql = f'{JIRA_JQL} AND updated >= "{since}"'
     url = f"{JIRA_URL.rstrip('/')}/rest/api/3/search/jql"
     try:
-        resp = requests.get(
+        resp = _safe_get(
             url,
             auth=_jira_auth(),
             params={
@@ -103,7 +149,6 @@ def poll_issues(days_back=7):
                 "fields": "summary,status,assignee,priority,updated,duedate,description",
                 "maxResults": 50,
             },
-            timeout=15,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -254,7 +299,7 @@ def poll_and_sync_for_org(org: Organisation) -> dict:
         from database import decrypt_token
 
         auth = (org.jira_email, decrypt_token(org.jira_api_token))
-        resp = requests.get(
+        resp = _safe_get(
             url,
             auth=auth,
             params={
@@ -262,7 +307,6 @@ def poll_and_sync_for_org(org: Organisation) -> dict:
                 "fields": "summary,status,assignee,priority,updated,duedate,description",
                 "maxResults": 50,
             },
-            timeout=15,
         )
         resp.raise_for_status()
         data = resp.json()
