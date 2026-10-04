@@ -22,6 +22,7 @@ from bot_core.state import (
     set_bot_start_time,
 )
 from bot_core.tasks import (
+    behavior_metrics_loop,
     check_overdue_tasks,
     check_ping_joins,
     check_reversed_actions,
@@ -68,6 +69,8 @@ async def handle_ready(bot):
         flush_all_buffers.start()
     if not message_cleanup_loop.is_running():
         message_cleanup_loop.start()
+    if not behavior_metrics_loop.is_running():
+        behavior_metrics_loop.start()
     if not check_ping_joins.is_running():
         check_ping_joins.start()
     if not ping_resolution_loop.is_running():

@@ -452,6 +452,19 @@ async def _check_reversed_actions_body():
             print("[Observer] Weekly retrain timed out")
 
 
+@tasks.loop(hours=24)
+async def behavior_metrics_loop():
+    """Compute the daily per-user behavior-metric rollup (yesterday)."""
+    try:
+        resp = await api_post("/observer/behavior-metrics/compute", {})
+        if resp:
+            print(
+                f"[BehaviorMetrics] {resp.get('users', 0)} user rows for {resp.get('date')}"
+            )
+    except Exception as e:
+        print(f"[BehaviorMetrics] Compute error: {e}")
+
+
 @tasks.loop(hours=6)
 async def message_cleanup_loop():
     """Retrain ML on all data, then delete old messages."""

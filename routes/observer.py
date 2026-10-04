@@ -5,7 +5,7 @@ import logging
 import time
 import uuid
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from functools import wraps
 
 from flask import Blueprint, jsonify, request
@@ -42,6 +42,7 @@ from ml import federated as ml_federated
 from ml import forecast as ml_forecast
 from ml import growth as ml_growth
 from interactions import recompute_pair_scores, recompute_user_metrics, resolve_pending_pings
+from behavior_metrics import compute_behavior_metrics
 
 observer_bp = Blueprint("observer", __name__)
 
@@ -1781,6 +1782,25 @@ def resolve_pings_route():
     """
     resolved = resolve_pending_pings()
     return jsonify({"resolved": resolved}), 200
+
+
+@observer_bp.route("/observer/behavior-metrics/compute", methods=["POST"])
+@require_api_key
+def compute_behavior_metrics_route():
+    """Daily per-user behavior-metric rollup for yesterday (or ?date=).
+
+    Consent-gated and idempotent per (guild, user, date) — safe to re-run.
+    """
+    data = request.json or {}
+    day = None
+    if data.get("date"):
+        try:
+            y, m, d = (int(x) for x in str(data["date"]).split("-"))
+            day = date(y, m, d)
+        except ValueError:
+            return jsonify({"error": "Invalid date, expected YYYY-MM-DD"}), 400
+    result = compute_behavior_metrics(day=day)
+    return jsonify(result), 200
 
 
 @observer_bp.route("/observer/recompute-pair-scores", methods=["POST"])

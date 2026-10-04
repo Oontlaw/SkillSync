@@ -879,3 +879,41 @@ class UserBehaviorMetric(db.Model):
             f"<UserBehaviorMetric {self.discord_id} trend={self.trend} "
             f"rhythm={self.rhythm_shift}>"
         )
+
+
+class BehaviorMetricDaily(db.Model):
+    """Per-user per-day behavior metrics, computed from existing metadata
+    (message refs, ping events, tasks). All consent-gated: opted-out members
+    never get rows. Window metrics (threads, rhythm, funnel) ride in `extra`
+    JSON; per-day counters are first-class columns. Written only by the
+    daily compute batch — idempotent per (guild_id, user_id, date)."""
+
+    __tablename__ = "behavior_metrics_daily"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "guild_id", "user_id", "date", name="uq_behavior_daily_guild_user_date"
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
+    user_id = db.Column(db.String(50), nullable=False, index=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    messages = db.Column(db.Integer, nullable=False, default=0)
+    pings_sent = db.Column(db.Integer, nullable=False, default=0)
+    questions_asked = db.Column(db.Integer, nullable=False, default=0)
+    answers_given = db.Column(db.Integer, nullable=False, default=0)
+    latency_p50_minutes = db.Column(db.Float, nullable=True)
+    latency_p90_minutes = db.Column(db.Float, nullable=True)
+    streak_days = db.Column(db.Integer, nullable=False, default=0)
+    cadence_cv = db.Column(db.Float, nullable=True)
+    channel_diversity = db.Column(db.Float, nullable=True)
+    voice_hours = db.Column(db.Float, nullable=False, default=0.0)
+    extra = db.Column(db.Text, nullable=True)  # JSON: threads, rhythm, funnel
+    computed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return (
+            f"<BehaviorMetricDaily {self.user_id} {self.date} "
+            f"msgs={self.messages}>"
+        )
