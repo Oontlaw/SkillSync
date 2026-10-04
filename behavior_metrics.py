@@ -139,8 +139,9 @@ def compute_behavior_metrics(day=None, now=None):
             received_by_user[(guild_id, pingee)].append((addressed, created, first_resp))
 
     # ── voice seconds per (guild, user) on the target day
-    voice_rows = dict(
-        db.session.query(
+    voice_rows = {
+        (g, u): secs
+        for g, u, secs in db.session.query(
             VoiceActivity.guild_id,
             VoiceActivity.discord_id,
             func.coalesce(func.sum(VoiceActivity.duration_seconds), 0.0),
@@ -151,7 +152,7 @@ def compute_behavior_metrics(day=None, now=None):
         )
         .group_by(VoiceActivity.guild_id, VoiceActivity.discord_id)
         .all()
-    )
+    }
 
     # ── onboarding: first-ever activity timestamps per user
     first_message = {
