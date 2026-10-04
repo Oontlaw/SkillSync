@@ -2385,7 +2385,7 @@ def log_join_leave():
             )
             db.session.add(record)
         except Exception as e:
-            log(f"Error storing join-leave event: {e}")
+            print(f"[Observer API] Error storing join-leave event: {e}")
             continue
 
     db.session.commit()

@@ -135,18 +135,23 @@ def resolve_corrector_outcomes(days_back=30):
 
 def _build_training_data(days=365):
     """Build feature matrix X and targets from AdminCorrection records.
-    Features (4-dim):
-      0: abs(original_change)         — magnitude of original score change
-      1: correction_delta              — admin's delta (corrected - original), signed
-      2: worker_past_corrections       — how many times this worker was corrected before
-      3: worker_total_score            — current computed score
+
+    Features (2-dim, LEAK-FREE):
+      0: abs(original_change)     — magnitude of the original score change
+      1: worker_past_corrections  — how many times this worker was corrected
+                                    before this one (strictly prior rows)
+
+    The previously-used correction_delta feature (corrected - original) was
+    REMOVED: the regression target is corrected_change, so delta encoded the
+    answer exactly (corrected = original + delta) and inflated LOO-CV R².
+    total_score was also dropped — the live ScoreLog sum already contains
+    this row's corrected value, a subtler leak.
 
     Targets:
       y_reg: corrected_score_change (regression)
       y_cls: direction label (0=decrease, 1=unchanged, 2=increase)
     """
-    from database import AdminCorrection, ScoreLog, Worker, db
-    from scoring import _compute_score
+    from database import AdminCorrection, db
 
     cutoff_365 = datetime.utcnow() - timedelta(days=days)
 
@@ -166,14 +171,11 @@ def _build_training_data(days=365):
         wid = c.worker_id
         delta = c.corrected_score_change - c.original_score_change
         direction = 0 if delta < 0 else (2 if delta > 0 else 1)
-        total_score = _compute_score(wid)
 
         X.append(
             [
                 abs(c.original_score_change),
-                delta,
                 corr_count[wid],
-                total_score,
             ]
         )
         y_reg.append(c.corrected_score_change)
@@ -239,7 +241,9 @@ def train(days=365):
         cv_acc = train_acc
 
     os.makedirs(MODELS_DIR, exist_ok=True)
-    joblib.dump({"regressor": reg, "classifier": cls}, CORRECTOR_MODEL_PATH)
+    joblib.dump(
+        {"version": 2, "regressor": reg, "classifier": cls}, CORRECTOR_MODEL_PATH
+    )
     joblib.dump(scaler, SCALER_PATH)
 
     return {
@@ -254,13 +258,17 @@ def train(days=365):
 def predict(original_change, worker_id=None, worker_stats=None):
     """Predict the correct score change given context.
     If worker_id is provided, stats are fetched from DB.
-    worker_stats can pre-supply a feature vector (8-dim).
+    worker_stats can pre-supply a feature vector (2-dim, matching the
+    leak-free feature builder).
     Returns dict with predicted_change, direction, confidence.
     """
     if not os.path.exists(CORRECTOR_MODEL_PATH):
         return None
 
     model_data = joblib.load(CORRECTOR_MODEL_PATH)
+    if model_data.get("version") != 2:
+        # stale pre-de-leak model (4-dim features) — unusable, needs retrain
+        return None
     scaler = joblib.load(SCALER_PATH)
     reg = model_data["regressor"]
     cls = model_data["classifier"]
@@ -269,17 +277,17 @@ def predict(original_change, worker_id=None, worker_stats=None):
         vec = np.array(worker_stats).reshape(1, -1)
     elif worker_id is not None:
         from database import AdminCorrection, db
-        from scoring import _compute_score
 
         past_corrections = AdminCorrection.query.filter_by(worker_id=worker_id).count()
-        total_score = _compute_score(worker_id)
-        vec = np.array(
-            [[abs(original_change), 0, past_corrections, total_score]]
-        ).reshape(1, -1)
+        vec = np.array([[abs(original_change), past_corrections]]).reshape(1, -1)
     else:
-        vec = np.array([[abs(original_change), 0, 0, 0]]).reshape(1, -1)
+        vec = np.array([[abs(original_change), 0]]).reshape(1, -1)
 
-    vec_scaled = scaler.transform(vec)
+    try:
+        vec_scaled = scaler.transform(vec)
+    except ValueError:
+        # feature-dim mismatch against a stale model — force retrain path
+        return None
     pred_change = float(reg.predict(vec_scaled)[0])
     pred_dir = int(cls.predict(vec_scaled)[0])
     dir_proba = float(max(cls.predict_proba(vec_scaled)[0]))
