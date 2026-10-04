@@ -12,6 +12,7 @@ from flask import (
     session,
     url_for,
 )
+import sqlalchemy as sa
 from sqlalchemy import func, or_
 from sqlalchemy.orm import selectinload
 
@@ -52,6 +53,7 @@ from interactions import (
     cross_guild_pair_rows,
     voice_only_pairs,
 )
+from routes.security import accessible_worker_ids
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -163,13 +165,14 @@ def index(template_name="dashboard.html"):
     else:
         guild_filter_ids = accessible_ids
 
-    # Guild-scoped filter for ScoreLog (include legacy rows with NULL guild_id)
+    # Guild-scoped filter for ScoreLog (include legacy rows with NULL guild_id).
+    # Zero access matches NOTHING — never fall back to global data.
     if accessible_ids:
         scorelog_filter = db.or_(
             ScoreLog.guild_id.in_(guild_filter_ids), ScoreLog.guild_id == None
         )
     else:
-        scorelog_filter = None
+        scorelog_filter = sa.false()
 
     # Per-guild scores for leaderboard (use eager loading for workers and guild info)
     per_guild_scores_query = db.session.query(
@@ -257,12 +260,13 @@ def index(template_name="dashboard.html"):
             if g:
                 log.guild_name = g.name
 
-    # Common guild filter for message/voice queries
+    # Common guild filter for message/voice queries — zero access matches
+    # nothing (false()), it must never widen to a global query
     guild_filter = (
-        MessageRecord.guild_id.in_(guild_filter_ids) if guild_filter_ids else None
+        MessageRecord.guild_id.in_(guild_filter_ids) if guild_filter_ids else sa.false()
     )
     voice_guild_filter = (
-        VoiceActivity.guild_id.in_(guild_filter_ids) if guild_filter_ids else None
+        VoiceActivity.guild_id.in_(guild_filter_ids) if guild_filter_ids else sa.false()
     )
 
     # Behavioral analytics
@@ -742,6 +746,12 @@ def worker_detail(worker_id):
     redirect_resp = require_auth()
     if redirect_resp:
         return redirect_resp
+
+    # tenant isolation: the worker must be reachable through one of the
+    # session's guilds (discord_id → GuildMember membership); otherwise this
+    # is another server's data — redirect home, never render it
+    if worker_id not in set(accessible_worker_ids()):
+        return redirect(url_for("dashboard.index"))
 
     worker = Worker.query.get_or_404(worker_id)
     worker.score = (

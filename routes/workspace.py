@@ -283,6 +283,34 @@ def workspace_dashboard():
         else 0
     )
 
+    # recent active anomalies for THIS org's members only (name-keyed by
+    # worker so the panel never leaks another org's rows)
+    recent_anomalies = []
+    if discord_ids:
+        dmap = {i.discord_id: i.worker_id for i in identities if i.discord_id}
+        wnames = {
+            w.id: w.name
+            for w in Worker.query.filter(Worker.id.in_(linked_ids)).all()
+        }
+        for a in (
+            BehavioralAnomaly.query.filter(
+                BehavioralAnomaly.discord_id.in_(discord_ids),
+                BehavioralAnomaly.cleared_at == None,
+            )
+            .order_by(BehavioralAnomaly.detected_at.desc())
+            .limit(5)
+            .all()
+        ):
+            recent_anomalies.append(
+                {
+                    "worker_name": wnames.get(dmap.get(a.discord_id), "Unknown"),
+                    "type": a.anomaly_type,
+                    "details": a.details or "",
+                    "severity": a.severity,
+                    "created_at": a.detected_at,
+                }
+            )
+
     # Task stats
     tasks_completed = (
         Task.query.filter(
@@ -382,6 +410,7 @@ def workspace_dashboard():
         total_tasks=total_tasks,
         total_members=total_members,
         anomaly_count=anomaly_count,
+        recent_anomalies=recent_anomalies,
         tasks_completed=tasks_completed,
         tasks_pending=tasks_pending,
         tasks_missed=tasks_missed,
@@ -727,7 +756,13 @@ def workspace_task_update(task_id):
         task.points_awarded = pts
         from scoring import award_points
 
-        award_points(task.worker_id, pts, reason, source="work_engine")
+        award_points(
+            task.worker_id,
+            "task_completed_late" if pts == 5.0 else "task_completed_on_time",
+            source="work_engine",
+            custom_points=pts,
+            note=reason,
+        )
 
     elif new_status == "missed" and old_status != "missed":
         pts = -15.0
@@ -736,9 +771,10 @@ def workspace_task_update(task_id):
 
         award_points(
             task.worker_id,
-            pts,
-            f"Task missed: {task.title}",
+            "task_missed",
             source="work_engine",
+            custom_points=pts,
+            note=f"Task missed: {task.title}",
         )
 
     db.session.commit()

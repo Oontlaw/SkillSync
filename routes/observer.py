@@ -1487,6 +1487,15 @@ def cleanup_old_messages():
     deleted_refs = MessageRef.query.filter(
         MessageRef.created_at < ref_cutoff
     ).delete()
+    # profiling tables must not grow unbounded either; ping_events only feed
+    # the 30-day scoring window, so the message retention horizon is safe
+    deleted_pings = PingEvent.query.filter(PingEvent.created_at < cutoff).delete()
+    deleted_voice = VoiceActivity.query.filter(
+        VoiceActivity.created_at < cutoff
+    ).delete()
+    deleted_join_events = PingJoinEvent.query.filter(
+        PingJoinEvent.created_at < cutoff
+    ).delete()
     db.session.commit()
 
     return jsonify(
@@ -1494,6 +1503,9 @@ def cleanup_old_messages():
             "deleted": deleted_msgs,
             "deleted_mentions": deleted_mentions,
             "deleted_refs": deleted_refs,
+            "deleted_pings": deleted_pings,
+            "deleted_voice": deleted_voice,
+            "deleted_join_events": deleted_join_events,
             "retention_days": retention_days,
             "message_ref_days": ref_days,
         }

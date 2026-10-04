@@ -44,11 +44,9 @@
                     class="ws-nav-link {% if request.endpoint == 'workspace.workspace_team_health' %}active{% endif %}"
                     >Team Health</a
                 >
-                <a
-                    href="{{ url_for('workspace.workspace_interaction_graph') }}"
-                    class="ws-nav-link {% if request.endpoint in ('workspace.workspace_interaction_graph','workspace.workspace_responsiveness') %}active{% endif %}"
-                    >Interactions</a
-                >
+                {# TODO: interaction/responsiveness views deliberately live on
+                   the Discord bot dashboard side (moved 2026-09-27, user
+                   direction) — no workspace nav item for them. #}
                 {% endif %}
                 <a
                     href="{{ url_for('workspace.workspace_identities') }}"

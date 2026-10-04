@@ -49,6 +49,37 @@ Dashboard{% endblock %} {% block content %}
             </div>
         </div>
 
+        {% if recent_anomalies %}
+        <div class="ws-card mb-24">
+            <div class="ws-card-h">
+                <span class="ws-card-t">Recent Anomalies</span>
+                <span style="font-size: 10px; color: var(--text-muted)"
+                    >Active, this org only</span
+                >
+            </div>
+            <table style="width: 100%; border-collapse: collapse; font-size: 13px">
+                <thead>
+                    <tr style="text-align: left; color: var(--text-muted)">
+                        <th style="padding: 8px 10px; border-bottom: 1px solid var(--border-soft)">Worker</th>
+                        <th style="padding: 8px 10px; border-bottom: 1px solid var(--border-soft)">Type</th>
+                        <th style="padding: 8px 10px; border-bottom: 1px solid var(--border-soft)">Details</th>
+                        <th style="padding: 8px 10px; border-bottom: 1px solid var(--border-soft)">Severity</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for a in recent_anomalies %}
+                    <tr>
+                        <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft); font-weight: 600">{{ a.worker_name }}</td>
+                        <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">{{ a.type }}</td>
+                        <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">{{ a.details }}</td>
+                        <td style="padding: 7px 10px; border-bottom: 1px solid var(--border-soft)">{{ '%.0f'|format(a.severity or 0) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
         <!-- Two-column: Chart + Top Workers -->
         <div class="ws-grid-2 mb-24">
             <!-- Score Trend -->
