@@ -20,7 +20,7 @@ def upgrade():
     # opt-out model: existing members keep their graphs (NULL/absent = opted in)
     op.add_column(
         'guild_members',
-        sa.Column('consent_optin', sa.Boolean(), nullable=True, server_default=sa.text('1')),
+        sa.Column('consent_optin', sa.Boolean(), nullable=True, server_default=sa.text('true')),
     )
     op.add_column(
         'guild_members',

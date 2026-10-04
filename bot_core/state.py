@@ -1,4 +1,3 @@
-from collections import deque
 from datetime import datetime, timezone
 
 from bot_core.api_client import api_post
@@ -22,22 +21,7 @@ content_trust = {}
 
 # ── Voice session tracking: { user_id: session_data } ──
 voice_sessions = {}
-
-class BoundedBuffer(deque):
-    """deque(maxlen) that counts dropped-oldest events. Crash protection:
-    if the dashboard is down and flushes fail, the bot must not grow
-    unbounded memory — oldest buffered events are dropped and counted."""
-
-    def __init__(self, maxlen):
-        super().__init__(maxlen=maxlen)
-        self.dropped = 0
-
-    def append(self, item):
-        if len(self) >= self.maxlen:
-            self.dropped += 1
-        super().append(item)
-
-voice_buffer = BoundedBuffer(maxlen=MAX_BUFFER_SIZE)
+voice_buffer = []
 
 # ── Heartbeat state ──
 heartbeat_channel_id = None
@@ -92,23 +76,23 @@ def seed_online_set(guild_id: str, member_ids: list):
 
 
 # ── Behavioral message buffer ──
-message_buffer = BoundedBuffer(maxlen=MAX_BUFFER_SIZE)
+message_buffer = []
 
 # ── Presence change buffer ──
-presence_buffer = BoundedBuffer(maxlen=MAX_BUFFER_SIZE)
+presence_buffer = []
 
 # ── Member join buffer ──
-join_buffer = BoundedBuffer(maxlen=MAX_BUFFER_SIZE)
+join_buffer = []
 
 # ── Member join/leave buffer ──
-join_leave_buffer = BoundedBuffer(maxlen=MAX_BUFFER_SIZE)
+join_leave_buffer = []
 
 # ── Member presence buffer ──
-member_presence_buffer = BoundedBuffer(maxlen=MAX_BUFFER_SIZE)
+member_presence_buffer = []
 
 # ── Mention tracking buffer ──
 pending_mentions = {}
-mention_buffer = BoundedBuffer(maxlen=MAX_BUFFER_SIZE)
+mention_buffer = []
 
 # ── ML retrain counter (weekly schedule) ──
 ml_retrain_counter = 0
@@ -309,8 +293,8 @@ async def flush_join_leave_buffer():
 
 
 # ── Pairwise interaction buffers ──
-ping_buffer = BoundedBuffer(maxlen=MAX_BUFFER_SIZE)
-message_ref_buffer = BoundedBuffer(maxlen=MAX_BUFFER_SIZE)
+ping_buffer = []
+message_ref_buffer = []
 
 
 async def flush_ping_buffer():
