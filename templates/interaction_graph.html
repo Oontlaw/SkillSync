@@ -425,15 +425,29 @@ endblock %} {% block content %}
                         return (centers[comp[d.id]] || { y: height / 2 }).y;
                     }).strength(0.07));
 
+                // community palette: deterministic hue per community label
+                var commLabels = Array.from(new Set(visible.map(function (d) { return d.community; }))).sort();
+                var commColors = ["#0e7490", "#b45309", "#6d28d9", "#be185d", "#4d7c0f", "#b91c1c", "#1d4ed8", "#a21caf", "#ca8a04", "#0f766e", "#7c2d12", "#334155"];
+                var commColor = {};
+                commLabels.forEach(function (lbl, i) { commColor[lbl] = commColors[i % commColors.length]; });
+
                 var nodeSel = gNodes.selectAll("circle").data(visible, function (d) { return d.id; }).join("circle")
                     .attr("r", radius)
                     .attr("fill", function (d) { return d.online ? C.nodeOnline : C.nodeOffline; })
                     .attr("fill-opacity", 0.92)
-                    .attr("stroke", function (d) { return d.id === pinnedId ? C.negative : C.nodeStroke; })
-                    .attr("stroke-width", function (d) { return d.id === pinnedId ? 3 : 1.5; })
+                    .attr("stroke", function (d) {
+                        if (d.id === pinnedId) return C.negative;
+                        return commLabels.length > 1 ? (commColor[d.community] || C.nodeStroke) : C.nodeStroke;
+                    })
+                    .attr("stroke-width", function (d) { return d.id === pinnedId ? 3 : (commLabels.length > 1 ? 2.5 : 1.5); })
                     .attr("cursor", "pointer");
                 nodeSel.append("title").text(function (d) {
-                    return d.name + " · " + (d.activity || 0) + " messages · " + (degree[d.id] || 0) + " connections";
+                    var t = d.name + " · " + (d.activity || 0) + " messages · " + (degree[d.id] || 0) + " connections";
+                    if (commLabels.length > 1)
+                        t += " · community " + (commLabels.indexOf(d.community) + 1);
+                    if (d.betweenness > 0.15)
+                        t += " · bridge " + (Math.round(d.betweenness * 100)) + "%";
+                    return t;
                 });
 
                 var labelSet = new Set(
@@ -509,6 +523,9 @@ endblock %} {% block content %}
             var line = "Last computed " + fmtTime(data.generated_at) +
                 " · auto-refreshes every " + Math.round(REFRESH_MS / 1000) +
                 " s · " + drawnCount + " edge" + (drawnCount === 1 ? "" : "s") + " drawn";
+            if (data.community_count != null && data.community_count > 1) {
+                line += " · " + data.community_count + " communities (ring colors)";
+            }
             if (data.forming_pairs != null && data.forming_pairs > 0) {
                 line += " · " + data.forming_pairs + " pair" +
                     (data.forming_pairs === 1 ? "" : "s") + " forming (an edge draws at " +

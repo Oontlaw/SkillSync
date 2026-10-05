@@ -45,6 +45,7 @@ from database import (
 from ml import burnout as ml_burnout
 from ml import engine as ml_engine
 from ml import forecast as ml_forecast
+from graph_algorithms import betweenness_centrality, label_propagation
 from interactions import (
     CROSS_GUILD,
     FADING_PRIOR_MIN,
@@ -1766,6 +1767,18 @@ def interaction_graph_data():
         and r["pinger_id"] < r["pingee_id"]
     )
 
+    # graph community detection + bridge scores — deterministic label
+    # propagation (weighted by interaction volume) and Brandes betweenness
+    # over the scored edges; pure arithmetic, no ML
+    node_ids = [n["id"] for n in nodes]
+    graph_edges = [(l["source"], l["target"], max(l["sample"] or 1, 1)) for l in links]
+    communities = label_propagation(node_ids, graph_edges)
+    bridges = betweenness_centrality(node_ids, graph_edges)
+    for n in nodes:
+        n["community"] = communities.get(n["id"], n["id"])
+        n["betweenness"] = bridges.get(n["id"], 0.0)
+    community_count = len({n["community"] for n in nodes})
+
     return jsonify(
         {
             "guild_id": guild_id,
@@ -1773,6 +1786,7 @@ def interaction_graph_data():
             "links": links,
             "forming_pairs": forming,
             "min_sample": MIN_PAIR_SAMPLE,
+            "community_count": community_count,
             "generated_at": datetime.utcnow().isoformat(),
         }
     )
