@@ -221,9 +221,9 @@ if __name__ == "__main__":
     print_status("Process cleanup", True)
     print()
 
-    # ── 1. Flask Dashboard ──
-    print("[1/3] Starting Flask dashboard (run_dashboard.py)...")
-    flask_pid = launch("run_dashboard.py", "flask.log", ".flask.pid")
+    # ── 1. Flask Dashboard (via watchdog — auto-restarts on crash/freeze) ──
+    print("[1/3] Starting Flask dashboard via watchdog (flask_watchdog.py)...")
+    flask_pid = launch("flask_watchdog.py", "flask.log", ".flask.pid")
     print(f"      PID {flask_pid}")
     print("      Waiting for Flask on :5000...")
     if wait_http("http://127.0.0.1:5000/health", timeout=45):

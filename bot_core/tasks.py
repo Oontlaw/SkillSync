@@ -1,5 +1,6 @@
 import asyncio
 import os
+import subprocess
 import threading
 import time as _time
 from datetime import datetime, timedelta, timezone
@@ -450,6 +451,26 @@ async def _check_reversed_actions_body():
             await asyncio.wait_for(api_post("/observer/ml/retrain", {"trigger": "weekly"}), timeout=30)
         except asyncio.TimeoutError:
             print("[Observer] Weekly retrain timed out")
+
+
+@tasks.loop(hours=24)
+async def backup_loop():
+    """Nightly Postgres backup via scripts/backup_db.py (pg_dump + 14d prune)."""
+    def _run():
+        import sys as _sys
+        script = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts", "backup_db.py")
+        result = subprocess.run(
+            [_sys.executable, "-u", script],
+            capture_output=True, text=True, timeout=900,
+        )
+        return (result.stdout or "") + (result.stderr or "")
+
+    try:
+        out = await asyncio.get_event_loop().run_in_executor(None, _run)
+        line = out.strip().splitlines()[-1] if out.strip() else "no output"
+        print(f"[Backup] {line}")
+    except Exception as e:
+        print(f"[Backup] Error: {e}")
 
 
 @tasks.loop(hours=24)

@@ -41,6 +41,7 @@ from ml import engine as ml_engine
 from ml import federated as ml_federated
 from ml import forecast as ml_forecast
 from ml import growth as ml_growth
+from ml import unaddressed as ml_unaddressed
 from interactions import recompute_pair_scores, recompute_user_metrics, resolve_pending_pings
 from behavior_metrics import compute_behavior_metrics
 
@@ -1782,6 +1783,22 @@ def resolve_pings_route():
     """
     resolved = resolve_pending_pings()
     return jsonify({"resolved": resolved}), 200
+
+
+@observer_bp.route("/observer/ml/unaddressed/train", methods=["POST"])
+@require_api_key
+def train_unaddressed_risk():
+    """Train the unaddressed-ping risk model (class-weighted LogisticRegression
+    over strictly pre-ping features). Reports honest stratified-CV PR-AUC."""
+    result = ml_unaddressed.train()
+    return jsonify(result), 200
+
+
+@observer_bp.route("/observer/ml/unaddressed/status", methods=["GET"])
+@require_api_key
+def unaddressed_risk_status():
+    """Metadata about the currently persisted risk model."""
+    return jsonify(ml_unaddressed.get_stats()), 200
 
 
 @observer_bp.route("/observer/behavior-metrics/compute", methods=["POST"])
