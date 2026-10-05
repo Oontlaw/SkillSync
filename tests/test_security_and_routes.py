@@ -504,3 +504,85 @@ def test_team_health_behavior_summary(app, client):
     resp = client.get('/workspace/team-health')
     assert resp.status_code == 200
     assert b'Behavior Patterns' in resp.data
+
+
+def test_optout_purges_profiling_rows(app, client):
+    """Opting out erases the member's profiling rows in that guild; other
+    members' rows stay untouched."""
+    from datetime import datetime, timedelta
+
+    from database import (
+        BehaviorMetricDaily,
+        MessageRef,
+        PingEvent,
+        UserBehaviorMetric,
+        VoiceActivity,
+    )
+
+    now = datetime.utcnow()
+    with app.app_context():
+        for member in ("X", "Y"):
+            db.session.add(PingEvent(
+                guild_id='1', pinger_id=member, pingee_id='other',
+                channel_id='c', channel_name='c',
+                message_id=f'pp-{member}', ping_type='mention', created_at=now,
+            ))
+            db.session.add(MessageRef(
+                guild_id='1', channel_id='c', message_id=f'mr-{member}',
+                author_id=member, created_at=now,
+            ))
+            db.session.add(VoiceActivity(
+                guild_id='1', discord_id=member, channel_name='vc',
+                joined_at=now, left_at=now, created_at=now,
+            ))
+            db.session.add(UserBehaviorMetric(
+                guild_id='1', discord_id=member, name=member, computed_at=now,
+            ))
+            db.session.add(BehaviorMetricDaily(
+                guild_id='1', user_id=member,
+                date=now.date() - timedelta(days=1), messages=1,
+                computed_at=now,
+            ))
+        db.session.commit()
+
+    auth = {'Authorization': 'Bearer test-api-key'}
+    resp = client.post('/api/observer/consent', json={
+        'guild_id': '1', 'discord_id': 'X', 'optin': False,
+    }, headers=auth)
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body['purged']['pings'] == 1
+    assert body['purged']['message_refs'] == 1
+
+    with app.app_context():
+        # X's rows gone
+        assert PingEvent.query.filter_by(pinger_id='X').count() == 0
+        assert MessageRef.query.filter_by(author_id='X').count() == 0
+        assert VoiceActivity.query.filter_by(discord_id='X').count() == 0
+        assert UserBehaviorMetric.query.filter_by(discord_id='X').count() == 0
+        assert BehaviorMetricDaily.query.filter_by(user_id='X').count() == 0
+        # Y's rows intact
+        assert PingEvent.query.filter_by(pinger_id='Y').count() == 1
+        assert MessageRef.query.filter_by(author_id='Y').count() == 1
+
+
+def test_optin_does_not_purge(app, client):
+    """Turning consent ON never deletes anything."""
+    from datetime import datetime
+
+    from database import MessageRef
+
+    with app.app_context():
+        db.session.add(MessageRef(
+            guild_id='1', channel_id='c', message_id='keepme',
+            author_id='Z', created_at=datetime.utcnow(),
+        ))
+        db.session.commit()
+    auth = {'Authorization': 'Bearer test-api-key'}
+    resp = client.post('/api/observer/consent', json={
+        'guild_id': '1', 'discord_id': 'Z', 'optin': True,
+    }, headers=auth)
+    assert resp.status_code == 200
+    assert resp.get_json()['purged'] == {}
+    with app.app_context():
+        assert MessageRef.query.filter_by(message_id='keepme').count() == 1

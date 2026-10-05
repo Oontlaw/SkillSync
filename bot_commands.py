@@ -504,6 +504,7 @@ class Moderation(commands.Cog):
                 "discord_id": str(ctx.author.id),
                 "name": ctx.author.display_name,
                 "optin": optin,
+                "purge": not optin,
                 "source": "bot-command",
             },
         )
@@ -512,7 +513,7 @@ class Moderation(commands.Cog):
             await ctx.send(
                 f"{ctx.author.mention} You are now opted **{state}** of "
                 f"interaction profiling in **{ctx.guild.name}**."
-                + ("" if optin else " Existing rows fade out with retention.")
+                + ("" if optin else " Your profiling rows in this server were deleted.")
             )
         else:
             await ctx.send(

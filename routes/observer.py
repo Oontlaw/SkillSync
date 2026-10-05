@@ -20,7 +20,9 @@ from database import (
     GuildInfo,
     GuildMember,
     GuildRole,
+    BehaviorMetricDaily,
     PredictionLog,
+    UserBehaviorMetric,
     MemberJoinLeave,
     MentionRecord,
     MessageRef,
@@ -1720,12 +1722,40 @@ def update_consent():
     member.consent_optin = optin
     member.consent_updated_at = datetime.utcnow()
     member.consent_source = sanitize_str(data.get("source"), 50) or "bot-command"
+    purged = {}
+    if not optin and data.get("purge", True):
+        # opting out erases the member's profiling rows in this guild
+        purged["pings"] = PingEvent.query.filter(
+            PingEvent.guild_id == guild_id,
+            (PingEvent.pinger_id == discord_id) | (PingEvent.pingee_id == discord_id),
+        ).delete(synchronize_session=False)
+        purged["message_refs"] = MessageRef.query.filter(
+            MessageRef.guild_id == guild_id,
+            MessageRef.author_id == discord_id,
+        ).delete(synchronize_session=False)
+        purged["voice"] = VoiceActivity.query.filter(
+            VoiceActivity.guild_id == guild_id,
+            VoiceActivity.discord_id == discord_id,
+        ).delete(synchronize_session=False)
+        purged["user_metrics"] = UserBehaviorMetric.query.filter(
+            UserBehaviorMetric.guild_id == guild_id,
+            UserBehaviorMetric.discord_id == discord_id,
+        ).delete(synchronize_session=False)
+        purged["daily_metrics"] = BehaviorMetricDaily.query.filter(
+            BehaviorMetricDaily.guild_id == guild_id,
+            BehaviorMetricDaily.user_id == discord_id,
+        ).delete(synchronize_session=False)
+        purged["broadcasts"] = PingJoinEvent.query.filter(
+            PingJoinEvent.guild_id == guild_id,
+            PingJoinEvent.moderator_id == discord_id,
+        ).delete(synchronize_session=False)
     db.session.commit()
     return jsonify(
         {
             "discord_id": discord_id,
             "guild_id": guild_id,
             "consent_optin": optin,
+            "purged": purged,
         }
     ), 200
 

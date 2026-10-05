@@ -157,8 +157,8 @@ patterns) is profiling — it is governed by an explicit consent model:
   and self-service.
 - **What opt-out means**: their pings are dropped at ingest (never stored in
   `ping_events`/`message_refs`), they are excluded from pair scores, the
-  interaction graph, user behavior metrics, and voice-only bonds. Rows that
-  already existed fade out with retention.
+  interaction graph, user behavior metrics, and voice-only bonds. Existing
+  profiling rows for that server are deleted at the moment of opt-out.
 - **What is captured (metadata only, never text)**: directed 1:1 pings,
   content-free message pointers, voice session durations, presence
   transitions, moderation actions.
