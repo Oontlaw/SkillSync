@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from database import (
     AdminCorrection,
+    BehaviorMetricDaily,
     AutoModRule,
     AutoModTrigger,
     BehavioralAnomaly,
@@ -52,8 +53,9 @@ from interactions import (
     _message_trend,
     cross_guild_pair_rows,
     voice_only_pairs,
+    opted_out_members,
 )
-from routes.security import accessible_worker_ids
+from routes.security import accessible_guild_ids, accessible_worker_ids
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -1048,6 +1050,54 @@ def worker_detail(worker_id):
             .all()
         )
 
+    # Daily behavior-metric rollup (consent-gated capture; guild-scoped to
+    # the guilds this viewer can access — never another server's rows)
+    behavior_daily = []
+    profiling_off = False
+    if worker.discord_id:
+        acc_ids = accessible_guild_ids()
+        if acc_ids:
+            opted = opted_out_members(acc_ids)
+            member_guilds = [
+                g for g in acc_ids if (g, worker.discord_id) not in opted
+            ]
+            profiling_off = len(member_guilds) == 0
+            if member_guilds:
+                rows = (
+                    BehaviorMetricDaily.query.filter(
+                        BehaviorMetricDaily.user_id == worker.discord_id,
+                        BehaviorMetricDaily.guild_id.in_(member_guilds),
+                    )
+                    .order_by(BehaviorMetricDaily.date.desc())
+                    .limit(14)
+                    .all()
+                )
+                import json as _json
+
+                for r in rows:
+                    extra = {}
+                    try:
+                        extra = _json.loads(r.extra) if r.extra else {}
+                    except (TypeError, ValueError):
+                        extra = {}
+                    funnel = extra.get("funnel", {})
+                    behavior_daily.append(
+                        {
+                            "date": r.date,
+                            "guild_id": r.guild_id,
+                            "messages": r.messages,
+                            "pings_sent": r.pings_sent,
+                            "questions": r.questions_asked,
+                            "answers": r.answers_given,
+                            "latency_p50": r.latency_p50_minutes,
+                            "latency_p90": r.latency_p90_minutes,
+                            "streak": r.streak_days,
+                            "diversity": r.channel_diversity,
+                            "threads": extra.get("threads_started"),
+                            "days_to_task": funnel.get("days_to_first_task"),
+                        }
+                    )
+
     return render_template(
         "worker.html",
         user=session.get("user"),
@@ -1064,6 +1114,8 @@ def worker_detail(worker_id):
         activity_consistency=activity_consistency,
         mod_quality=mod_quality,
         role_changes=role_changes,
+        behavior_daily=behavior_daily,
+        profiling_off=profiling_off,
     )
 
 

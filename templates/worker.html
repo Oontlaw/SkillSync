@@ -262,6 +262,94 @@ endblock %} {% block content %}
 
 <section class="ws-section">
     <div class="section-header" style="margin-bottom: 16px">
+        <div class="section-eyebrow">Behavior Mapping</div>
+        <h2 class="ws-title" style="font-size: 18px">Behavior Patterns</h2>
+        <p class="ws-subtitle">Daily metadata rollup — no content, consent-gated.</p>
+    </div>
+    {% if profiling_off %}
+    <div
+        style="
+            background: var(--surface-primary);
+            border: 1px solid var(--border-primary);
+            border-radius: 12px;
+            padding: 18px;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 13px;
+        "
+    >
+        Profiling off — this member opted out of behavior tracking.
+    </div>
+    {% elif behavior_daily %}
+    <div
+        style="
+            background: var(--surface-primary);
+            border: 1px solid var(--border-primary);
+            border-radius: 12px;
+            overflow-x: auto;
+        "
+    >
+        <table style="width: 100%; border-collapse: collapse; font-size: 12.5px">
+            <thead>
+                <tr style="text-align: left; color: var(--text-secondary)">
+                    <th style="padding: 9px 12px; border-bottom: 1px solid var(--border-primary)">Date</th>
+                    <th style="padding: 9px 12px; border-bottom: 1px solid var(--border-primary)">Msgs</th>
+                    <th style="padding: 9px 12px; border-bottom: 1px solid var(--border-primary)">Pings</th>
+                    <th style="padding: 9px 12px; border-bottom: 1px solid var(--border-primary)">Asked</th>
+                    <th style="padding: 9px 12px; border-bottom: 1px solid var(--border-primary)">Answered</th>
+                    <th style="padding: 9px 12px; border-bottom: 1px solid var(--border-primary)">Latency p50/p90</th>
+                    <th style="padding: 9px 12px; border-bottom: 1px solid var(--border-primary)">Streak</th>
+                    <th style="padding: 9px 12px; border-bottom: 1px solid var(--border-primary)">Diversity</th>
+                    <th style="padding: 9px 12px; border-bottom: 1px solid var(--border-primary)">Threads</th>
+                    <th style="padding: 9px 12px; border-bottom: 1px solid var(--border-primary)">Days→task</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for d in behavior_daily %}
+                <tr>
+                    <td style="padding: 7px 12px; border-bottom: 1px solid var(--border-primary); font-weight: 600">{{ d.date }}</td>
+                    <td style="padding: 7px 12px; border-bottom: 1px solid var(--border-primary)">{{ d.messages }}</td>
+                    <td style="padding: 7px 12px; border-bottom: 1px solid var(--border-primary)">{{ d.pings_sent }}</td>
+                    <td style="padding: 7px 12px; border-bottom: 1px solid var(--border-primary)">{{ d.questions }}</td>
+                    <td style="padding: 7px 12px; border-bottom: 1px solid var(--border-primary); color: var(--blue)">{{ d.answers }}</td>
+                    <td style="padding: 7px 12px; border-bottom: 1px solid var(--border-primary)">
+                        {% if d.latency_p50 is not none %}{{ '%.0f'|format(d.latency_p50) }} / {{ '%.0f'|format(d.latency_p90) }} min{% else %}<span style="color: var(--text-secondary)">—</span>{% endif %}
+                    </td>
+                    <td style="padding: 7px 12px; border-bottom: 1px solid var(--border-primary)">{{ d.streak }}</td>
+                    <td style="padding: 7px 12px; border-bottom: 1px solid var(--border-primary)">
+                        {% if d.diversity is not none %}{{ '%.2f'|format(d.diversity) }}{% else %}—{% endif %}
+                    </td>
+                    <td style="padding: 7px 12px; border-bottom: 1px solid var(--border-primary)">
+                        {% if d.threads is not none %}{{ d.threads }}{% else %}—{% endif %}
+                    </td>
+                    <td style="padding: 7px 12px; border-bottom: 1px solid var(--border-primary)">
+                        {% if d.days_to_task is not none %}{{ d.days_to_task }}{% else %}<span style="color: var(--text-secondary)">—</span>{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div
+        style="
+            background: var(--surface-primary);
+            border: 1px solid var(--border-primary);
+            border-radius: 12px;
+            padding: 18px;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 13px;
+        "
+    >
+        No daily behavior rows yet — the rollup computes once per day for
+        members active in the trailing window.
+    </div>
+    {% endif %}
+</section>
+
+<section class="ws-section">
+    <div class="section-header" style="margin-bottom: 16px">
         <div class="section-eyebrow">Performance</div>
         <h2 class="ws-title" style="font-size: 20px">Performance Hub</h2>
         <p class="ws-subtitle">Mentions, mod quality, and score history.</p>

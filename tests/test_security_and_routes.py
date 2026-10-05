@@ -433,3 +433,74 @@ def test_oauth_state_is_single_use(app):
         # replay: same session value, but the registry entry is gone
         flask_session['oauth_state'] = 'good-state'
         assert _consume_state('good-state') is False
+
+
+def test_worker_behavior_patterns_block(app, client):
+    """Worker page shows the daily Behavior Patterns table (and stays
+    guild-scoped); opted-out members see 'Profiling off' instead."""
+    from datetime import datetime, timedelta
+
+    from database import BehaviorMetricDaily
+
+    with app.app_context():
+        worker = add_guild_worker('1', '100', 'Beh Worker')
+        db.session.add(BehaviorMetricDaily(
+            guild_id='1', user_id='100',
+            date=datetime.utcnow().date() - timedelta(days=1),
+            messages=3, answers_given=2, streak_days=4,
+            computed_at=datetime.utcnow(),
+        ))
+        db.session.commit()
+        worker_id = worker.id
+    login_discord(client, ['1'])
+    resp = client.get(f'/worker/{worker_id}')
+    assert resp.status_code == 200
+    assert b'Behavior Patterns' in resp.data
+    assert b'Behavior Mapping' in resp.data
+
+
+def test_worker_profiling_off_banner(app, client):
+    """An opted-out member's worker page shows 'Profiling off', not zeros."""
+    from database import GuildMember
+
+    with app.app_context():
+        worker = add_guild_worker('1', '100', 'Quiet Worker')
+        db.session.add(GuildMember(guild_id='1', member_id='100', name='Quiet Worker', consent_optin=False))
+        db.session.commit()
+        worker_id = worker.id
+    login_discord(client, ['1'])
+    resp = client.get(f'/worker/{worker_id}')
+    assert resp.status_code == 200
+    assert b'Profiling off' in resp.data
+
+
+def test_team_health_behavior_summary(app, client):
+    """Team health renders the 7-day behavior aggregates card."""
+    from datetime import datetime, timedelta
+
+    from database import BehaviorMetricDaily
+
+    with app.app_context():
+        worker = Worker(name='BW', email='bw@example.com', discord_id='777')
+        db.session.add(worker)
+        db.session.flush()
+        org = Organisation(name='BO', slug='bo', api_key='bk')
+        db.session.add(org)
+        db.session.flush()
+        member = OrgMember(org_id=org.id, email='bw@o.test', name='BW Admin', role='admin')
+        member.set_password('pw')
+        db.session.add(member)
+        db.session.add(WorkerIdentity(org_id=org.id, worker_id=worker.id, discord_id='777'))
+        db.session.add(BehaviorMetricDaily(
+            guild_id='1', user_id='777',
+            date=datetime.utcnow().date() - timedelta(days=1),
+            messages=6, answers_given=3, streak_days=5,
+            channel_diversity=0.8, computed_at=datetime.utcnow(),
+        ))
+        db.session.commit()
+        member_id = member.id
+    with app.app_context():
+        login_workspace(client, db.session.get(OrgMember, member_id))
+    resp = client.get('/workspace/team-health')
+    assert resp.status_code == 200
+    assert b'Behavior Patterns' in resp.data

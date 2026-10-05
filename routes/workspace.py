@@ -1,5 +1,6 @@
 import os
 import secrets
+import json
 from datetime import datetime, timedelta
 from functools import wraps
 
@@ -19,6 +20,7 @@ from sqlalchemy import cast, func
 
 from database import (
     AdminCorrection,
+    BehaviorMetricDaily,
     BehavioralAnomaly,
     BurnoutRisk,
     LoginAttempt,
@@ -1342,6 +1344,51 @@ def workspace_team_health():
         )
     )
 
+    # Behavior-pattern team aggregates (last 7 days of the daily rollup,
+    # org members only; opted-out members have no rows by construction)
+    behavior_summary = None
+    discord_ids_all = [i.discord_id for i in identities if i.discord_id]
+    if discord_ids_all:
+        rows = (
+            BehaviorMetricDaily.query.filter(
+                BehaviorMetricDaily.user_id.in_(discord_ids_all),
+                BehaviorMetricDaily.date >= datetime.utcnow().date() - timedelta(days=7),
+            )
+            .all()
+        )
+        if rows:
+            n = len(rows)
+            rhythm_scores = []
+            for r in rows:
+                try:
+                    ex = json.loads(r.extra) if r.extra else {}
+                except (TypeError, ValueError):
+                    ex = {}
+                sim = ex.get("rhythm_similarity_recent_vs_prior")
+                if sim is not None:
+                    rhythm_scores.append(sim)
+            lat_rows = [r for r in rows if r.latency_p50_minutes is not None]
+            div_rows = [r for r in rows if r.channel_diversity is not None]
+            behavior_summary = {
+                "members_tracked": len({r.user_id for r in rows}),
+                "rows": n,
+                "avg_messages": round(sum(r.messages for r in rows) / n, 1),
+                "avg_answers": round(sum(r.answers_given for r in rows) / n, 1),
+                "avg_latency_p50": (
+                    round(sum(r.latency_p50_minutes for r in lat_rows) / len(lat_rows), 1)
+                    if lat_rows
+                    else None
+                ),
+                "max_streak": max(r.streak_days for r in rows),
+                "avg_diversity": (
+                    round(sum(r.channel_diversity for r in div_rows) / len(div_rows), 2)
+                    if div_rows
+                    else None
+                ),
+                "rhythm_outliers": sum(1 for x in rhythm_scores if x < 0.5),
+                "rhythm_scored": len(rhythm_scores),
+            }
+
     return render_template(
         "workspace_team_health.html",
         team=team,
@@ -1352,6 +1399,7 @@ def workspace_team_health():
             "yellow": yellow_count,
             "red": red_count,
         },
+        behavior_summary=behavior_summary,
     )
 
 

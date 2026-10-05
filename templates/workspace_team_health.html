@@ -28,6 +28,51 @@
       </div>
     </div>
 
+    <!-- Behavior Patterns (daily rollup aggregates) -->
+    {% if behavior_summary %}
+    <div class="ws-card mb-24">
+      <div class="ws-card-b">
+        <div style="font-weight:700;font-size:14px;margin-bottom:4px">Behavior Patterns — last 7 days</div>
+        <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px">
+          Team metadata rollup ({{ behavior_summary.members_tracked }} members tracked,
+          {{ behavior_summary.rows }} member-days). Members who opted out are never counted.
+        </div>
+        <div class="ws-grid-3" style="gap:12px">
+          <div style="background:var(--surface);border:1px solid var(--border-soft);padding:12px;border-radius:8px;text-align:center">
+            <div style="font-size:22px;font-weight:800;color:var(--accent)">{{ behavior_summary.avg_messages }}</div>
+            <div style="font-size:11px;color:var(--text-muted)">avg msgs / member-day</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--border-soft);padding:12px;border-radius:8px;text-align:center">
+            <div style="font-size:22px;font-weight:800;color:var(--accent)">{{ behavior_summary.avg_answers }}</div>
+            <div style="font-size:11px;color:var(--text-muted)">avg pings answered / day</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--border-soft);padding:12px;border-radius:8px;text-align:center">
+            <div style="font-size:22px;font-weight:800;color:var(--accent)">{{ behavior_summary.max_streak }}</div>
+            <div style="font-size:11px;color:var(--text-muted)">longest active streak</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--border-soft);padding:12px;border-radius:8px;text-align:center">
+            <div style="font-size:22px;font-weight:800;color:var(--accent)">
+              {% if behavior_summary.avg_latency_p50 is not none %}{{ behavior_summary.avg_latency_p50 }} min{% else %}—{% endif %}
+            </div>
+            <div style="font-size:11px;color:var(--text-muted)">median response latency</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--border-soft);padding:12px;border-radius:8px;text-align:center">
+            <div style="font-size:22px;font-weight:800;color:var(--accent)">
+              {% if behavior_summary.avg_diversity is not none %}{{ behavior_summary.avg_diversity }}{% else %}—{% endif %}
+            </div>
+            <div style="font-size:11px;color:var(--text-muted)">avg channel diversity (0–1)</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--border-soft);padding:12px;border-radius:8px;text-align:center">
+            <div style="font-size:22px;font-weight:800;color:var(--accent)">
+              {{ behavior_summary.rhythm_outliers }}{% if behavior_summary.rhythm_scored %}<span style="font-size:12px;color:var(--text-muted)"> / {{ behavior_summary.rhythm_scored }}</span>{% endif %}
+            </div>
+            <div style="font-size:11px;color:var(--text-muted)">rhythm outliers (schedule shift)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
     <!-- Team Cards -->
     {% if team %}
     <div style="display:flex;flex-direction:column;gap:8px">
