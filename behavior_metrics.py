@@ -1,26 +1,9 @@
-"""Daily per-user behavior metrics — computed statistics over metadata the
-system already captures. No message content, no ML, no scikit-learn.
+"""Daily per-user behavior metrics over captured metadata.
 
-compute_behavior_metrics(date): builds one BehaviorMetricDaily row per
-(guild, user) active in the trailing window, for the given day. Consent is
-enforced via interactions.opted_out_members() — opted-out members produce
-zero rows. The batch is idempotent: rows for the target date are deleted
-and rebuilt (same lifecycle as pair_scores).
-
-Metrics:
-  per-day counters  — messages, pings_sent, questions_asked (pings flagged
-                      requires_response), answers_given (received pings the
-                      user addressed)
-  latency_p50/p90   — minutes from received-ping to first response
-  streak_days       — consecutive active days ending on the target date
-  cadence_cv        — coefficient of variation of daily message counts
-                      (trailing 14 days)
-  channel_diversity — normalized Shannon entropy of channel distribution
-                      (trailing 7 days)
-  voice_hours       — voice seconds on the target day
-  extra JSON        — thread engagement (30d), rhythm 7x24 histogram (28d)
-                      with cosine similarity vs the prior baseline, and the
-                      onboarding funnel (first message / ping / task)
+compute_behavior_metrics(day) writes one BehaviorMetricDaily row per active
+(guild, user) for that day, consent-gated and idempotent (rows for the date
+are deleted and rebuilt). Per-day counters are columns; window metrics
+(threads, 7x24 rhythm histogram, onboarding funnel) go in the extra JSON.
 """
 import json
 import math
@@ -48,8 +31,7 @@ DIVERSITY_WINDOW_DAYS = 7
 
 
 def _shannon_entropy(counts):
-    """Normalized Shannon entropy of a count distribution, 0..1 (1 = evenly
-    spread). None when there is nothing to distribute."""
+    """Normalized Shannon entropy of a distribution, 0..1."""
     total = sum(counts)
     if total <= 0 or len(counts) <= 1:
         return None
@@ -60,8 +42,7 @@ def _shannon_entropy(counts):
 
 
 def _cosine_similarity(h1, h2):
-    """Cosine similarity between two flat histograms. None when either is
-    all zeros."""
+    """Cosine similarity of two histograms, or None if either is empty."""
     n1 = math.sqrt(sum(x * x for x in h1))
     n2 = math.sqrt(sum(x * x for x in h2))
     if n1 == 0 or n2 == 0:
@@ -70,7 +51,7 @@ def _cosine_similarity(h1, h2):
 
 
 def _percentile(sorted_values, pct):
-    """Linear-interpolated percentile of a sorted list. None when empty."""
+    """Interpolated percentile of a sorted list."""
     if not sorted_values:
         return None
     k = (len(sorted_values) - 1) * (pct / 100.0)
@@ -82,18 +63,15 @@ def _percentile(sorted_values, pct):
 
 
 def compute_behavior_metrics(day=None, now=None):
-    """Compute the daily behavior-metric rollup for `day` (default: yesterday).
-
-    Returns {"users": <rows written>, "date": iso}. Consent-gated: members
-    who opted out of profiling never appear.
-    """
+    """Roll up daily metrics for `day` (default yesterday). Returns
+    {"users": rows, "date": iso}."""
     now = now or datetime.utcnow()
     target_date = day or (now - timedelta(days=1)).date()
     day_start = datetime(target_date.year, target_date.month, target_date.day)
     day_end = day_start + timedelta(days=1)
     window_start = now - timedelta(days=RHYTHM_WINDOW_DAYS)
 
-    # ── message refs: everything message-derived, grouped per (guild, author)
+    # message refs grouped per (guild, author)
     ref_rows = (
         db.session.query(
             MessageRef.guild_id,
@@ -115,7 +93,7 @@ def compute_behavior_metrics(day=None, now=None):
         refs_by_user[(guild_id, author_id)].append((channel_id, created_at))
         author_of_ref[(guild_id, message_id)] = author_id
 
-    # ── ping events
+    # ping events
     ping_rows = (
         db.session.query(
             PingEvent.guild_id,
@@ -138,7 +116,7 @@ def compute_behavior_metrics(day=None, now=None):
         if addressed is not None:
             received_by_user[(guild_id, pingee)].append((addressed, created, first_resp))
 
-    # ── voice seconds per (guild, user) on the target day
+    # voice seconds on the target day
     voice_rows = {
         (g, u): secs
         for g, u, secs in db.session.query(
@@ -154,7 +132,7 @@ def compute_behavior_metrics(day=None, now=None):
         .all()
     }
 
-    # ── onboarding: first-ever activity timestamps per user
+    # onboarding: first-ever activity timestamps
     first_message = {
         (g, a): t
         for g, a, t in db.session.query(
@@ -177,8 +155,7 @@ def compute_behavior_metrics(day=None, now=None):
         .all()
     )
 
-    # ── thread engagement over the window: who starts threads (their
-    # messages get replied to) vs who replies in others' threads
+    # thread engagement: whose messages draw replies vs who replies to others
     replies_to = defaultdict(set)   # author -> set of authors who replied to them
     replied_by = defaultdict(set)   # author -> set of authors they replied to
     for guild_id, author_id, _ch, _mid, reply_to, _created in ref_rows:
@@ -224,7 +201,7 @@ def compute_behavior_metrics(day=None, now=None):
             streak += 1
             cursor -= timedelta(days=1)
 
-        # cadence: coefficient of variation over the trailing 14 days
+        # coefficient of variation over the trailing 14 days
         cadence_counts = [
             sum(1 for (_ch, c) in refs if (now - timedelta(days=i)).date() == c.date())
             for i in range(CADENCE_WINDOW_DAYS)
@@ -243,7 +220,7 @@ def compute_behavior_metrics(day=None, now=None):
                 chan_counts[ch or "unknown"] += 1
         diversity = _shannon_entropy(list(chan_counts.values()))
 
-        # rhythm 7x24 (dow-major) + cosine similarity vs own prior baseline
+        # 7x24 rhythm histogram + cosine similarity vs prior baseline
         rhythm = [0.0] * (7 * 24)
         recent_hist = [0.0] * (7 * 24)
         prior_hist = [0.0] * (7 * 24)
@@ -303,7 +280,7 @@ def compute_behavior_metrics(day=None, now=None):
             }
         )
 
-    # idempotent rebuild for the target date
+    # rebuild for the target date
     db.session.query(BehaviorMetricDaily).filter(
         BehaviorMetricDaily.date == target_date
     ).delete()

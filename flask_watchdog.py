@@ -11,8 +11,7 @@ What it does:
     - HEALTH_FAILS consecutive failures (or a dead child) => kill + restart.
     - Logs to flask_watchdog.log; stops cleanly on Ctrl+C.
 
-The bot has bot_watchdog.py; this closes the gap that let the dashboard die
-silently (2026-10-02/04 incidents).
+The bot has bot_watchdog.py; this covers the dashboard the same way.
 """
 
 import os

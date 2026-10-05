@@ -1542,10 +1542,8 @@ def cleanup_old_messages():
 def log_ping_events():
     """Batch-ingest directed 1:1 pings from the bot.
 
-    Idempotent per (message_id, pingee_id) so bot-side flush retries can't
-    double-count a ping. Broadcast pings never reach this endpoint.
-    Profiling consent: pings touching an opted-out member are dropped here —
-    they never become profiled data.
+    Idempotent per (message_id, pingee_id). Pings touching an opted-out
+    member are dropped here.
     """
     data = request.json
     if not data:
@@ -1554,7 +1552,7 @@ def log_ping_events():
     inserted = 0
     consent_skipped = 0
 
-    # consent gate: one query covering every guild/member touched by the batch
+    # consent gate: one query for the whole batch
     batch_guilds = {
         sanitize_str(p.get("guild_id"), 50) for p in pings if p.get("guild_id")
     }
@@ -1627,8 +1625,8 @@ def log_ping_events():
 def log_message_refs():
     """Batch-ingest content-free message pointers (IDs only, never content).
 
-    Used by the ping resolver for reply-to matching, mention-back windows,
-    and same-channel checks. Idempotent per message_id.
+    Used by the ping resolver for reply-to matching and same-channel
+    checks. Idempotent per message_id.
     """
     data = request.json
     if not data:
@@ -1637,7 +1635,7 @@ def log_message_refs():
     inserted = 0
     consent_skipped = 0
 
-    # consent gate: refs by opted-out authors are never stored
+    # consent gate
     batch_guilds = {
         sanitize_str(r.get("guild_id"), 50) for r in refs if r.get("guild_id")
     }
@@ -1698,14 +1696,9 @@ def log_message_refs():
 @observer_bp.route("/observer/consent", methods=["POST"])
 @require_api_key
 def update_consent():
-    """Self-service profiling consent from the bot's /optin and /optout.
-
-    Opt-out model: an absent row or NULL consent_optin means opted IN; only
-    an explicit False removes a member from profiling capture and computation.
-    """
+    """Profiling consent from the bot's /optin and /optout commands."""
     data = request.json or {}
-    # optin is validated by PRESENCE, not truthiness — False is the whole
-    # point of /optout and validate_payload rejects falsy values
+    # validate_payload rejects falsy values, so optin is checked by presence
     ok, _err = validate_payload(data, ["guild_id", "discord_id"])
     if not ok or "optin" not in data:
         return jsonify({"error": "Missing required fields"}), 400
@@ -1788,8 +1781,7 @@ def resolve_pings_route():
 @observer_bp.route("/observer/ml/unaddressed/train", methods=["POST"])
 @require_api_key
 def train_unaddressed_risk():
-    """Train the unaddressed-ping risk model (class-weighted LogisticRegression
-    over strictly pre-ping features). Reports honest stratified-CV PR-AUC."""
+    """Train the unaddressed-ping risk model."""
     result = ml_unaddressed.train()
     return jsonify(result), 200
 
@@ -1797,17 +1789,14 @@ def train_unaddressed_risk():
 @observer_bp.route("/observer/ml/unaddressed/status", methods=["GET"])
 @require_api_key
 def unaddressed_risk_status():
-    """Metadata about the currently persisted risk model."""
+    """Status of the persisted risk model."""
     return jsonify(ml_unaddressed.get_stats()), 200
 
 
 @observer_bp.route("/observer/behavior-metrics/compute", methods=["POST"])
 @require_api_key
 def compute_behavior_metrics_route():
-    """Daily per-user behavior-metric rollup for yesterday (or ?date=).
-
-    Consent-gated and idempotent per (guild, user, date) — safe to re-run.
-    """
+    """Daily behavior-metric rollup for yesterday (or ?date=)."""
     data = request.json or {}
     day = None
     if data.get("date"):
@@ -2139,13 +2128,9 @@ def ml_accuracy():
 @observer_bp.route("/observer/ml/anomalies/scan", methods=["POST"])
 @require_api_key
 def ml_scan_anomalies():
-    """Run ML-based anomaly detection — per-guild if guild_id provided, else
-    all guilds.
-
-    Persists scan results the model didn't store itself (idempotent per
-    active discord_id + anomaly_type — re-running a scan never duplicates a
-    row) and back-fills each linked PredictionLog with the stored record's
-    entity_id so outcome resolution can find it.
+    """Run ML anomaly detection per-guild (or all guilds). Persists results
+    the model didn't store (idempotent per discord_id + type) and back-fills
+    linked PredictionLog rows with the stored entity_id.
     """
     data = request.json or {}
     guild_id = data.get("guild_id")

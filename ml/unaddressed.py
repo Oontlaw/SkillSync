@@ -1,18 +1,12 @@
-"""Unaddressed-ping risk model — the first supervised model over the
-interaction layer.
+"""Unaddressed-ping risk model.
 
-Predicts, at send time, whether a directed 1:1 ping will end up
-unaddressed-after-return. STRICTLY leakage-safe: every feature is computed
-from pings that happened BEFORE the ping being scored (chronological
-cumulative counters) plus fields knowable in the message itself. The label
-is the resolved `addressed` state.
+Predicts at send time whether a directed 1:1 ping will end up
+unaddressed-after-return. Features are cumulative counters over strictly
+earlier pings plus fields from the message itself; the label is the resolved
+`addressed` state.
 
-Class reality (2026-10-05): ~52 unaddressed of ~10.4K resolved pings —
-severe imbalance, so the model is class-weighted and reported with
-average precision (PR-AUC), never raw accuracy.
-
-Model: LogisticRegression (linear, inspectable, honest at this sample
-size). Persisted with a version marker; get_stats() exposes what's live.
+Unaddressed pings are rare (under 1% of resolved pings), so the model is
+class-weighted and evaluated by average precision rather than accuracy.
 """
 
 import json
@@ -96,9 +90,7 @@ def _build_training_data(days=TRAIN_WINDOW_DAYS):
 
 
 def train(days=TRAIN_WINDOW_DAYS):
-    """Train the risk model; reports honest PR-AUC via stratified 5-fold CV.
-    (LOO would mean 10K refits — stratified folds are the honest compromise
-    at this size.)"""
+    """Train and report PR-AUC via stratified 5-fold CV."""
     X, y, n_pos = _build_training_data(days=days)
     if len(y) < 50 or n_pos < MIN_POSITIVES:
         return {

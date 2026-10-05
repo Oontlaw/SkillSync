@@ -1,19 +1,13 @@
-"""Graph algorithms for the interaction network — deterministic, pure
-arithmetic, no ML and no third-party graph library (networkx is deliberately
-not a dependency).
+"""Community detection and centrality for the interaction graph.
 
-label_propagation(): community detection over the pair graph. Nodes start
-with their own label; each pass (nodes in sorted order, so runs are
-reproducible) adopts the highest-weight neighbor label, ties broken toward
-the smallest label. Converges fast on small social graphs; max_iters caps
-oscillation.
+label_propagation() finds communities: nodes start with their own label and
+each pass adopts the highest-weight neighbor label (ties go to the smallest
+label). Nodes are visited in sorted order so runs are reproducible.
 
-betweenness_centrality(): Brandes' algorithm (BFS single-source shortest
-paths from every node, dependency accumulation), normalized for undirected
-graphs. The bridge score — who connects otherwise-separate clusters.
+betweenness_centrality() is Brandes' BFS algorithm, normalized for
+undirected graphs — the "who connects separate clusters" score.
 
-Both functions take plain node-id sets and (a, b, weight) edge tuples so
-they're unit-testable without any DB.
+Both take plain node ids and (a, b, weight) edge tuples.
 """
 from collections import defaultdict, deque
 

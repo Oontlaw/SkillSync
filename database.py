@@ -447,8 +447,7 @@ class GuildMember(db.Model):
     status = db.Column(db.String(20), default="offline")
     activity_name = db.Column(db.String(100), nullable=True)
     activity_type = db.Column(db.String(20), nullable=True)
-    # profiling consent — opt-out model (default True, existing graphs stay
-    # intact); opted-out members produce no new profiling rows
+    # profiling consent: missing/NULL counts as opted in
     consent_optin = db.Column(db.Boolean, default=True, nullable=True)
     consent_updated_at = db.Column(db.DateTime, nullable=True)
     consent_source = db.Column(db.String(50), nullable=True)
@@ -843,12 +842,9 @@ class MessageRef(db.Model):
 
 
 class UserBehaviorMetric(db.Model):
-    """Per-user behavior patterns, batch-computed with the pair scores.
-
-    All metadata-derived: message volume trend (7d vs prior 23d), activity
-    rhythm drift (hourly-profile distance), voice hours, week-one absorption
-    for new joiners, and @everyone broadcast frequency for staff. Never
-    content. Refreshed every 30 min by the same batch as pair_scores.
+    """Per-user behavior patterns, refreshed with the pair score batch:
+    message trend, rhythm drift, voice hours, week-one absorption, broadcast
+    frequency. Metadata only.
     """
 
     __tablename__ = "user_behavior_metrics"
@@ -882,11 +878,9 @@ class UserBehaviorMetric(db.Model):
 
 
 class BehaviorMetricDaily(db.Model):
-    """Per-user per-day behavior metrics, computed from existing metadata
-    (message refs, ping events, tasks). All consent-gated: opted-out members
-    never get rows. Window metrics (threads, rhythm, funnel) ride in `extra`
-    JSON; per-day counters are first-class columns. Written only by the
-    daily compute batch — idempotent per (guild_id, user_id, date)."""
+    """Per-user per-day behavior metrics from message refs, ping events and
+    tasks. Consent-gated; window metrics live in the extra JSON. Written by
+    the daily compute batch, idempotent per (guild_id, user_id, date)."""
 
     __tablename__ = "behavior_metrics_daily"
     __table_args__ = (

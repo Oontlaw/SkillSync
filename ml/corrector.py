@@ -136,16 +136,14 @@ def resolve_corrector_outcomes(days_back=30):
 def _build_training_data(days=365):
     """Build feature matrix X and targets from AdminCorrection records.
 
-    Features (2-dim, LEAK-FREE):
-      0: abs(original_change)     — magnitude of the original score change
-      1: worker_past_corrections  — how many times this worker was corrected
-                                    before this one (strictly prior rows)
+    Features (2-dim):
+      0: abs(original_change)
+      1: worker_past_corrections (strictly prior corrections)
 
-    The previously-used correction_delta feature (corrected - original) was
-    REMOVED: the regression target is corrected_change, so delta encoded the
-    answer exactly (corrected = original + delta) and inflated LOO-CV R².
-    total_score was also dropped — the live ScoreLog sum already contains
-    this row's corrected value, a subtler leak.
+    Do not add features derived from the target: correction_delta encoded
+    corrected_change exactly (corrected = original + delta) and total_score
+    includes this row's own corrected value. Both made LOO-CV meaningless
+    once and will do again.
 
     Targets:
       y_reg: corrected_score_change (regression)
@@ -258,8 +256,7 @@ def train(days=365):
 def predict(original_change, worker_id=None, worker_stats=None):
     """Predict the correct score change given context.
     If worker_id is provided, stats are fetched from DB.
-    worker_stats can pre-supply a feature vector (2-dim, matching the
-    leak-free feature builder).
+    worker_stats can pre-supply a 2-dim feature vector.
     Returns dict with predicted_change, direction, confidence.
     """
     if not os.path.exists(CORRECTOR_MODEL_PATH):
@@ -267,8 +264,7 @@ def predict(original_change, worker_id=None, worker_stats=None):
 
     model_data = joblib.load(CORRECTOR_MODEL_PATH)
     if model_data.get("version") != 2:
-        # stale pre-de-leak model (4-dim features) — unusable, needs retrain
-        return None
+        return None  # stale 4-dim model, needs retrain
     scaler = joblib.load(SCALER_PATH)
     reg = model_data["regressor"]
     cls = model_data["classifier"]
@@ -286,8 +282,7 @@ def predict(original_change, worker_id=None, worker_stats=None):
     try:
         vec_scaled = scaler.transform(vec)
     except ValueError:
-        # feature-dim mismatch against a stale model — force retrain path
-        return None
+        return None  # feature-dim mismatch, needs retrain
     pred_change = float(reg.predict(vec_scaled)[0])
     pred_dir = int(cls.predict(vec_scaled)[0])
     dir_proba = float(max(cls.predict_proba(vec_scaled)[0]))

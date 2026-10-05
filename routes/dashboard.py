@@ -750,9 +750,7 @@ def worker_detail(worker_id):
     if redirect_resp:
         return redirect_resp
 
-    # tenant isolation: the worker must be reachable through one of the
-    # session's guilds (discord_id → GuildMember membership); otherwise this
-    # is another server's data — redirect home, never render it
+    # worker must belong to one of the session's guilds
     if worker_id not in set(accessible_worker_ids()):
         return redirect(url_for("dashboard.index"))
 
@@ -1051,8 +1049,7 @@ def worker_detail(worker_id):
             .all()
         )
 
-    # Daily behavior-metric rollup (consent-gated capture; guild-scoped to
-    # the guilds this viewer can access — never another server's rows)
+    # daily behavior rollup, scoped to the viewer's guilds
     behavior_daily = []
     profiling_off = False
     if worker.discord_id:
@@ -1767,9 +1764,7 @@ def interaction_graph_data():
         and r["pinger_id"] < r["pingee_id"]
     )
 
-    # graph community detection + bridge scores — deterministic label
-    # propagation (weighted by interaction volume) and Brandes betweenness
-    # over the scored edges; pure arithmetic, no ML
+    # community detection + bridge scores over the scored edges
     node_ids = [n["id"] for n in nodes]
     graph_edges = [(l["source"], l["target"], max(l["sample"] or 1, 1)) for l in links]
     communities = label_propagation(node_ids, graph_edges)

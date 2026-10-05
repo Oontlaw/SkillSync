@@ -1,40 +1,29 @@
-"""Pairwise interaction statistics — computed statistics, not learned models.
+"""Pairwise interaction statistics.
 
-resolve_pending_pings(): resolves ping_events.addressed per the
-addressed-window logic — after the pingee's return to activity, the ping
-counts as addressed if the pingee (1) replies to the ping's message,
-(2) mentions the pinger back within W minutes of returning, or (3) posts in
-the same channel within their next K messages after returning. Otherwise,
-once W minutes of activity pass without any condition, the ping is marked
-False — i.e. unaddressed_after_return. General activity elsewhere never
-resolves a ping.
+resolve_pending_pings() resolves ping_events.addressed: after the pingee
+returns to activity, the ping counts as addressed if the pingee replies to
+the ping's message, mentions the pinger back within W minutes of returning,
+or posts in the ping's channel within their next K messages. Otherwise it
+becomes unaddressed_after_return. General activity elsewhere never resolves
+a ping.
 
-recompute_pair_scores(): batch-rebuilds pair_scores from ping_events.
-Since 2026-09-27 (user directive) affinity and unaddressed rates cover EVERY
-directed 1:1 ping — reply or mention, question or not — so the graph reflects
-how people actually chat, not just explicit asks. requires_response is still
-recorded per ping for future re-tightening. affinity_score is NPMI
-(normalized pointwise mutual information) over daily activity buckets — never
-raw interaction counts. unaddressed_rate is the pair's unaddressed rate minus
-the pinger's own baseline unaddressed rate across all pingees (a deviation,
-not an absolute rate; no intent is ever claimed). Each pair also gets
-sudden-drop telemetry: pings in the last 7 days vs the prior 23 days and the
-last-ping timestamp, so the admin view can flag pairs that used to interact
-heavily and went quiet.
+recompute_pair_scores() batch-rebuilds pair_scores over the trailing window
+of directed 1:1 pings (reply or mention, question or not; requires_response
+is still recorded per ping). affinity_score is NPMI over daily activity
+buckets. unaddressed_rate is the pair's rate minus the pinger's own baseline
+rate across all pingees, so it reads as a deviation rather than an absolute
+rate. recent_pings/prior_pings/last_ping_at power the sudden drop-off view.
 
-cross_guild_pair_rows(): read-time cross-server aggregation with the SAME
-math — pings merged across guilds so a person's relationships follow them
-instead of fragmenting per server. Nothing persisted; rows are plain dicts.
+cross_guild_pair_rows() merges pings across guilds at read time with the
+same math; nothing is persisted.
 
-recompute_user_metrics(): batch-rebuilds user_behavior_metrics — per-user
-message trend (7d vs prior 23d), hourly-rhythm drift, voice hours, active
-days, week-1 ping absorption for new joiners, and @everyone broadcast
-frequency for staff. Same delete-all + reinsert batch as pair_scores.
+recompute_user_metrics() batch-rebuilds user_behavior_metrics: message
+trend (7d vs prior 23d), hourly-rhythm drift, voice hours, active days,
+week-1 ping absorption for new joiners, broadcast counts for staff.
+Runs on the same delete-all + reinsert cycle as pair_scores.
 
-voice_only_pairs(): pairs sharing voice sessions but with zero scored text
-interaction — surfaced separately from the graph, never scored.
-
-No scikit-learn here by design (spec non-goal) — pure arithmetic.
+voice_only_pairs() returns pairs that share voice sessions but have no
+scored text interaction.
 """
 import math
 import statistics
@@ -63,17 +52,16 @@ STALE_PING_DAYS = 14  # pings older than this with no pingee return resolve as u
 RECENT_WINDOW_DAYS = 7  # drift: "recent" slice of the scoring window
 FADING_PRIOR_MIN = 5  # drift: pair counted "fading" if it had at least this many pings
 FADING_RECENT_MAX = 1  # drift: ...in the prior slice but at most this many recently
-CONVERSATION_GAP_MINUTES = 30  # pair pings separated by more than this = new conversation
-RETURN_WINDOW_HOURS = 24  # directed ping-back window for return_rate
+CONVERSATION_GAP_MINUTES = 30  # gap that starts a new conversation
+RETURN_WINDOW_HOURS = 24  # ping-back window for return_rate
 CROSS_GUILD = "__all__"  # sentinel guild_id for read-time cross-server rows
 
 
 # ── Profiling consent (opt-out model) ──
 
 def opted_out_members(guild_ids=None):
-    """Set of (guild_id, member_id) pairs whose profiling consent is OFF.
-    NULL/absent consent_optin counts as opted IN (existing graphs stay
-    intact); only an explicit False removes a member from profiling."""
+    """(guild_id, member_id) pairs with consent_optin=False. Missing rows or
+    NULL count as opted in."""
     q = db.session.query(GuildMember.guild_id, GuildMember.member_id).filter(
         GuildMember.consent_optin.is_(False)
     )
@@ -244,18 +232,15 @@ def _pair_rows(
     voice = _shared_voice_sessions(voice_guild_ids, a_id, b_id, window_start)
     ordered = sorted(plist, key=lambda p: p.created_at)
 
-    # conversation structure: a gap > 30 min between consecutive pings starts
-    # a new conversation — separates two long talks from 83 drive-bys at the
-    # same sample_size
+    # conversation count: gap > 30 min between consecutive pings starts a
+    # new one, so two long talks != 83 drive-bys at the same sample size
     conversations = 1 if ordered else 0
     for prev, cur in zip(ordered, ordered[1:]):
         if cur.created_at - prev.created_at > timedelta(minutes=CONVERSATION_GAP_MINUTES):
             conversations += 1
 
-    # directed response: per pinger, the fraction of their pings to this
-    # partner that drew a ping BACK from the partner within 24h. Complements
-    # unaddressed_rate (which accepts same-channel posts) by isolating
-    # directed response. None when the pinger has no outgoing pings.
+    # fraction of this pinger's pings that drew a ping back within 24h
+    # (directed response; unaddressed_rate also accepts same-channel posts)
     def _return_rate(side_pinger):
         mine = [p.created_at for p in plist if p.pinger_id == side_pinger]
         if not mine:
@@ -454,10 +439,9 @@ def resolve_pending_pings(now=None):
 def recompute_pair_scores(now=None):
     """Rebuild pair_scores from the trailing AFFINITY_WINDOW_DAYS of pings.
 
-    Pairs below MIN_PAIR_SAMPLE get sample_size only, with NULL scores —
-    insufficient_data, never a computed number. Members who opted out of
-    profiling never appear in any row (their pings are dropped here AND at
-    ingest, so pre-consent history fades out with retention).
+    Pairs below MIN_PAIR_SAMPLE get sample_size only, with NULL scores.
+    Opted-out members never appear (their pings are dropped at ingest and
+    filtered here).
     """
     now = now or datetime.utcnow()
     window_start = now - timedelta(days=AFFINITY_WINDOW_DAYS)
@@ -561,8 +545,7 @@ def cross_guild_pair_rows(guild_ids, now=None):
 # ── Per-user behavior metrics ──
 
 def _message_trend(recent, prior):
-    """7d vs prior-23d volume trend. Same fading thresholds as pair drift
-    (FADING_PRIOR_MIN); None below 3 total messages — too sparse to call."""
+    """7d vs prior-23d volume trend. None below 3 total messages."""
     if recent + prior < 3:
         return None
     if prior >= FADING_PRIOR_MIN and recent == 0:
@@ -573,9 +556,8 @@ def _message_trend(recent, prior):
 
 
 def _rhythm_shift(recent_times, prior_times):
-    """Cosine distance (0..1) between the 24-bin hourly histograms of the
-    recent and prior message streams — how far someone's daily rhythm moved.
-    None below 5 recent messages or when the prior histogram is empty."""
+    """Cosine distance between 24-bin hourly histograms of the recent and
+    prior message streams. None below 5 recent messages or empty prior."""
     if len(recent_times) < 5:
         return None
 
@@ -597,12 +579,8 @@ def _rhythm_shift(recent_times, prior_times):
 def recompute_user_metrics(now=None):
     """Batch-rebuild user_behavior_metrics for the trailing 30-day window.
 
-    Row set = everyone with message refs in the window, plus brand-new
-    joiners (week-1 absorption needs rows for members with no messages yet),
-    plus broadcast moderators (staff with zero recent messages still post
-    @everyone). All metadata-derived — never content. Same batch lifecycle
-    as pair_scores: delete-all + reinsert, driven by the same 30-min bot
-    loop POST.
+    Rows cover everyone with message refs in the window, new joiners (week-1
+    absorption) and broadcast moderators, even those with no recent messages.
     """
     now = now or datetime.utcnow()
     window_start = now - timedelta(days=AFFINITY_WINDOW_DAYS)
@@ -640,7 +618,7 @@ def recompute_user_metrics(now=None):
         .all()
     }
 
-    # first-ever message ref per (guild, member) — full history, not the window
+    # first-ever ref per (guild, member), outside the window
     first_seen = {
         (g, m): t
         for g, m, t in db.session.query(
@@ -650,8 +628,7 @@ def recompute_user_metrics(now=None):
         ).group_by(MessageRef.guild_id, MessageRef.author_id).all()
     }
 
-    # week-1 absorption: joiners who arrived inside the window, and who
-    # pinged them during their first 7 days
+    # week-1 absorption: pings received by joiners in their first 7 days
     joiners = GuildMember.query.filter(
         GuildMember.joined_at.isnot(None),
         GuildMember.joined_at >= window_start,
@@ -733,9 +710,8 @@ def recompute_user_metrics(now=None):
 # ── Voice-only bonds ──
 
 def voice_only_pairs(guild_ids, window_start):
-    """Pairs sharing same-channel voice sessions inside the window but with
-    ZERO scored text interaction (no pair_scores row in any direction) — the
-    bonds the ping graph structurally cannot see. Returns plain dicts."""
+    """Pairs sharing voice sessions in the window with no pair_scores row.
+    Returns plain dicts."""
     q = VoiceActivity.query.filter(
         VoiceActivity.joined_at.isnot(None),
         VoiceActivity.left_at.isnot(None),
@@ -774,7 +750,7 @@ def voice_only_pairs(guild_ids, window_start):
                     continue
                 pair = frozenset((s1.discord_id, s2.discord_id))
                 if (guild_id, pair) in text_pairs:
-                    continue  # they already have text interaction — not voice-ONLY
+                    continue  # already have text interaction
                 entry = merged.setdefault(
                     (guild_id, pair),
                     {"a": s1.discord_id, "b": s2.discord_id, "sessions": 0, "channels": []},
