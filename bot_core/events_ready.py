@@ -118,7 +118,7 @@ async def handle_ready(bot):
         try:
             await bot.change_presence(
                 activity=discord.Game(
-                    name=f"{first_prefixes[0].strip()} | Watches over you in your sleep"
+                    name=f"{first_prefixes[0].strip()} | sab dekh raha hu"
                 )
             )
         except Exception as e:
