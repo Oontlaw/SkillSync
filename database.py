@@ -283,9 +283,10 @@ class MessageRecord(db.Model):
 
 
 class UserBehaviorBaseline(db.Model):
-    """Long-term behavioral baseline per user — accumulates forever.
-    Updated weekly via engine.train_all(). Never deleted.
-    Used by anomaly detection to compare short-term vs long-term behavior."""
+    """Compatibility baseline fields refreshed from durable user state.
+
+    Updated during model training and erased when a member opts out.
+    """
 
     __tablename__ = "user_behavior_baselines"
 
@@ -911,3 +912,188 @@ class BehaviorMetricDaily(db.Model):
             f"<BehaviorMetricDaily {self.user_id} {self.date} "
             f"msgs={self.messages}>"
         )
+
+
+class UserBehaviorState(db.Model):
+    """Incremental, content-free lifetime statistics per guild member."""
+
+    __tablename__ = "user_behavior_state"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "guild_id", "discord_id", name="uq_user_behavior_state_guild_member"
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
+    discord_id = db.Column(db.String(50), nullable=False, index=True)
+    n_days = db.Column(db.Integer, nullable=False, default=0)
+    mean_daily_messages = db.Column(db.Float, nullable=False, default=0.0)
+    m2_daily_messages = db.Column(db.Float, nullable=False, default=0.0)
+    hourly_profile = db.Column(db.JSON, nullable=True)
+    ewma_message_length = db.Column(db.Float, nullable=True)
+    ewma_off_hours_ratio = db.Column(db.Float, nullable=True)
+    lifetime_messages = db.Column(db.Integer, nullable=False, default=0)
+    lifetime_pings = db.Column(db.Integer, nullable=False, default=0)
+    lifetime_voice_hours = db.Column(db.Float, nullable=False, default=0.0)
+    first_seen_at = db.Column(db.DateTime, nullable=True)
+    last_updated_date = db.Column(db.Date, nullable=True)
+    schema_version = db.Column(db.Integer, nullable=False, default=1)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
+class GuildMetricsDaily(db.Model):
+    """Consent-filtered guild totals, rebuilt from numeric member contributions."""
+
+    __tablename__ = "guild_metrics_daily"
+    __table_args__ = (
+        db.UniqueConstraint("guild_id", "date", name="uq_guild_metrics_daily_date"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    active_users = db.Column(db.Integer, nullable=False, default=0)
+    messages = db.Column(db.Integer, nullable=False, default=0)
+    pings = db.Column(db.Integer, nullable=False, default=0)
+    voice_hours = db.Column(db.Float, nullable=False, default=0.0)
+    joins = db.Column(db.Integer, nullable=False, default=0)
+    leaves = db.Column(db.Integer, nullable=False, default=0)
+    extra = db.Column(db.JSON, nullable=True)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
+class GuildMetricsContributionDaily(db.Model):
+    """Numeric per-member source rows for consent-safe guild metric rebuilding."""
+
+    __tablename__ = "guild_metrics_contributions_daily"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "guild_id", "user_id", "date", name="uq_guild_metrics_contrib_day"
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
+    user_id = db.Column(db.String(50), nullable=False, index=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    messages = db.Column(db.Integer, nullable=False, default=0)
+    pings = db.Column(db.Integer, nullable=False, default=0)
+    voice_hours = db.Column(db.Float, nullable=False, default=0.0)
+    joins = db.Column(db.Integer, nullable=False, default=0)
+    leaves = db.Column(db.Integer, nullable=False, default=0)
+    active = db.Column(db.Boolean, nullable=False, default=False)
+
+
+class PairScoresHistory(db.Model):
+    """Idempotent monthly directional pair snapshots."""
+
+    __tablename__ = "pair_scores_history"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "guild_id",
+            "pinger_id",
+            "pingee_id",
+            "month",
+            name="uq_pair_scores_history_month",
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
+    pinger_id = db.Column(db.String(50), nullable=False, index=True)
+    pingee_id = db.Column(db.String(50), nullable=False, index=True)
+    month = db.Column(db.Date, nullable=False, index=True)
+    affinity_score = db.Column(db.Float, nullable=True)
+    unaddressed_rate = db.Column(db.Float, nullable=True)
+    sample_size = db.Column(db.Integer, nullable=False, default=0)
+    return_rate = db.Column(db.Float, nullable=True)
+    median_response_minutes = db.Column(db.Float, nullable=True)
+    conversations = db.Column(db.Integer, nullable=False, default=0)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
+class PairLifetime(db.Model):
+    """Lifetime pair counters and exponentially decayed ping edge weights."""
+
+    __tablename__ = "pair_lifetime"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "guild_id", "pinger_id", "pingee_id", name="uq_pair_lifetime_direction"
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
+    pinger_id = db.Column(db.String(50), nullable=False, index=True)
+    pingee_id = db.Column(db.String(50), nullable=False, index=True)
+    decayed_edge_weight = db.Column(db.Float, nullable=False, default=0.0)
+    lifetime_ping_count = db.Column(db.Integer, nullable=False, default=0)
+    first_interaction_at = db.Column(db.DateTime, nullable=True)
+    last_interaction_at = db.Column(db.DateTime, nullable=True)
+    peak_affinity = db.Column(db.Float, nullable=True)
+    peak_month = db.Column(db.Date, nullable=True)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
+class BehaviorMetricsRollup(db.Model):
+    """Per-member weekly/monthly numeric aggregates of daily behavior metrics."""
+
+    __tablename__ = "behavior_metrics_rollup"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "guild_id",
+            "user_id",
+            "period_type",
+            "period_start",
+            name="uq_behavior_metrics_rollup_period",
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    guild_id = db.Column(db.String(50), nullable=False, index=True)
+    user_id = db.Column(db.String(50), nullable=False, index=True)
+    period_type = db.Column(db.String(10), nullable=False)
+    period_start = db.Column(db.Date, nullable=False, index=True)
+    active_days = db.Column(db.Integer, nullable=False, default=0)
+    messages = db.Column(db.Integer, nullable=False, default=0)
+    pings_sent = db.Column(db.Integer, nullable=False, default=0)
+    questions_asked = db.Column(db.Integer, nullable=False, default=0)
+    answers_given = db.Column(db.Integer, nullable=False, default=0)
+    voice_hours = db.Column(db.Float, nullable=False, default=0.0)
+    extra = db.Column(db.JSON, nullable=True)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
+class ModelRegistry(db.Model):
+    """Version metadata for persisted ML artifacts."""
+
+    __tablename__ = "model_registry"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "model_name", "version", "guild_id", name="uq_model_registry_version"
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    model_name = db.Column(db.String(100), nullable=False, index=True)
+    version = db.Column(db.Integer, nullable=False)
+    guild_id = db.Column(db.String(50), nullable=True, index=True)
+    trained_at = db.Column(db.DateTime, nullable=False)
+    train_start = db.Column(db.DateTime, nullable=True)
+    train_end = db.Column(db.DateTime, nullable=True)
+    n_samples = db.Column(db.Integer, nullable=False, default=0)
+    metrics = db.Column(db.JSON, nullable=True)
+    artifact_path = db.Column(db.Text, nullable=False)
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
