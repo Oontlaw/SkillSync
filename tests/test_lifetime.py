@@ -32,6 +32,7 @@ from lifetime.state import (
     catch_up_guild_metrics_daily,
     catch_up_rollups,
     catch_up_user_state,
+    days_since_active,
     update_user_state,
 )
 
@@ -636,3 +637,42 @@ def test_grace_minus_one_never_erases(app):
         db.session.commit()
         assert erase_departed_members(grace_days=-1)["erased"] == 0
         assert UserBehaviorState.query.count() == 1
+
+
+def test_optout_with_purge_false_keeps_raw_rows(app, client):
+    with app.app_context():
+        now = datetime.utcnow()
+        db.session.add_all(
+            [
+                GuildMember(guild_id="g1", member_id="u1", name="u1"),
+                _state_row("u1"),
+                _message("g1", "u1", now - timedelta(hours=1), 10),
+                PingEvent(
+                    guild_id="g1", pinger_id="u1", pingee_id="u2", channel_id="c1",
+                    message_id="p1", ping_type="mention", addressed=True,
+                    created_at=now,
+                ),
+            ]
+        )
+        db.session.commit()
+
+    response = client.post(
+        "/api/observer/consent",
+        json={"guild_id": "g1", "discord_id": "u1", "optin": False, "purge": False},
+        headers={"Authorization": "Bearer test-api-key"},
+    )
+    assert response.status_code == 200
+    with app.app_context():
+        assert UserBehaviorState.query.filter_by(discord_id="u1").count() == 0
+        assert MessageRecord.query.filter_by(discord_id="u1").count() == 1
+        assert PingEvent.query.filter_by(pinger_id="u1").count() == 1
+
+
+def test_days_since_active_uses_last_updated_date(app):
+    with app.app_context():
+        state = _state_row("u1")
+        state.last_updated_date = date(2026, 10, 1)
+        db.session.add(state)
+        db.session.commit()
+        assert days_since_active(state, date(2026, 10, 11)) == 10
+        assert days_since_active(None, date(2026, 10, 11)) is None

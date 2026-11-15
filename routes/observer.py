@@ -1734,26 +1734,28 @@ def update_consent():
     member.consent_source = sanitize_str(data.get("source"), 50) or "bot-command"
     purged = {}
     if not optin:
-        # opting out erases the member's profiling rows in this guild
+        # opting out always erases the member's derived state in this guild
         purged.update(erase_member_derived_state(guild_id, discord_id))
         purged["user_metrics"] = purged.pop("user_behavior_metrics")
         purged["daily_metrics"] = purged.pop("behavior_metrics_daily")
-        purged["pings"] = PingEvent.query.filter(
-            PingEvent.guild_id == guild_id,
-            (PingEvent.pinger_id == discord_id) | (PingEvent.pingee_id == discord_id),
-        ).delete(synchronize_session=False)
-        purged["message_refs"] = MessageRef.query.filter(
-            MessageRef.guild_id == guild_id,
-            MessageRef.author_id == discord_id,
-        ).delete(synchronize_session=False)
-        purged["voice"] = VoiceActivity.query.filter(
-            VoiceActivity.guild_id == guild_id,
-            VoiceActivity.discord_id == discord_id,
-        ).delete(synchronize_session=False)
-        purged["broadcasts"] = PingJoinEvent.query.filter(
-            PingJoinEvent.guild_id == guild_id,
-            PingJoinEvent.moderator_id == discord_id,
-        ).delete(synchronize_session=False)
+        if data.get("purge", True):
+            purged["pings"] = PingEvent.query.filter(
+                PingEvent.guild_id == guild_id,
+                (PingEvent.pinger_id == discord_id)
+                | (PingEvent.pingee_id == discord_id),
+            ).delete(synchronize_session=False)
+            purged["message_refs"] = MessageRef.query.filter(
+                MessageRef.guild_id == guild_id,
+                MessageRef.author_id == discord_id,
+            ).delete(synchronize_session=False)
+            purged["voice"] = VoiceActivity.query.filter(
+                VoiceActivity.guild_id == guild_id,
+                VoiceActivity.discord_id == discord_id,
+            ).delete(synchronize_session=False)
+            purged["broadcasts"] = PingJoinEvent.query.filter(
+                PingJoinEvent.guild_id == guild_id,
+                PingJoinEvent.moderator_id == discord_id,
+            ).delete(synchronize_session=False)
     db.session.commit()
     return jsonify(
         {

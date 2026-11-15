@@ -317,6 +317,18 @@ def catch_up_user_state(through_day=None, max_days=None):
     return {"folded": len(folded), "skipped_no_source": skipped, "dates": folded}
 
 
+def days_since_active(state, today=None):
+    """Calendar days since a member's last folded active day.
+
+    `n_days` and `mean_daily_messages` count ACTIVE days only, so inactivity
+    must be read from `last_updated_date` (this helper) — never a low mean.
+    """
+    if state is None or state.last_updated_date is None:
+        return None
+    today = _as_date(today or date.today())
+    return (today - _as_date(state.last_updated_date)).days
+
+
 def _rebuild_guild_daily(guild_id, day):
     rows = GuildMetricsContributionDaily.query.filter_by(
         guild_id=guild_id, date=day
