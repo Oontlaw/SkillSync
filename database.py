@@ -1015,6 +1015,7 @@ class PairScoresHistory(db.Model):
     return_rate = db.Column(db.Float, nullable=True)
     median_response_minutes = db.Column(db.Float, nullable=True)
     conversations = db.Column(db.Integer, nullable=False, default=0)
+    finalized = db.Column(db.Boolean, nullable=False, default=False)
     updated_at = db.Column(
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
@@ -1097,3 +1098,4 @@ class ModelRegistry(db.Model):
     metrics = db.Column(db.JSON, nullable=True)
     artifact_path = db.Column(db.Text, nullable=False)
     is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    pruned_at = db.Column(db.DateTime, nullable=True)
