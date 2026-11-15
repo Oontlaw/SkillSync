@@ -1,5 +1,12 @@
-"""Incremental, consent-filtered lifetime state and durable metric rollups."""
+"""Incremental, consent-filtered lifetime state and durable metric rollups.
 
+`UserBehaviorState.n_days` and `mean_daily_messages` are computed over ACTIVE
+days only (a day is folded only when source rows exist for that member). They
+are therefore not calendar-day averages; read inactivity from
+`last_updated_date` (see `days_since_active`), never from a low mean.
+"""
+
+import logging
 import math
 import os
 from collections import defaultdict
@@ -22,6 +29,9 @@ from database import (
 from interactions import opted_out_members
 
 EWMA_HALF_LIFE_DAYS = float(os.getenv("LIFETIME_EWMA_HALF_LIFE_DAYS", "30"))
+CATCH_UP_MAX_DAYS = int(os.getenv("LIFETIME_CATCH_UP_MAX_DAYS", "30"))
+
+logger = logging.getLogger(__name__)
 
 
 def _day_bounds(day):
@@ -39,6 +49,47 @@ def _dates(values):
         if isinstance(value, date):
             result.add(value)
     return result
+
+
+def _as_date(value):
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, str):
+        return date.fromisoformat(value)
+    return value
+
+
+def _source_dates():
+    """Every date still represented by daily metrics or retained raw rows."""
+    dates = _dates(db.session.query(BehaviorMetricDaily.date).distinct().all())
+    for timestamp in (
+        MessageRecord.created_at,
+        PingEvent.created_at,
+        VoiceActivity.created_at,
+    ):
+        dates.update(
+            _dates(db.session.query(func.date(timestamp)).distinct().all())
+        )
+    return dates
+
+
+def _catch_up_plan(through_day, marker, max_days):
+    """Ascending source dates in `(marker, through_day]`, plus skipped count.
+
+    `marker` is the last date already processed (None when nothing is). The
+    window is bounded by the oldest surviving source date so no day is counted
+    as skipped just because it predates all data.
+    """
+    source = _source_dates()
+    if not source:
+        return [], 0
+    oldest = min(source)
+    start = oldest if marker is None else max(_as_date(marker) + timedelta(days=1), oldest)
+    if start > through_day:
+        return [], 0
+    candidates = [day for day in sorted(source) if start <= day <= through_day]
+    skipped = (through_day - start).days + 1 - len(candidates)
+    return candidates, skipped
 
 
 def update_user_state(day, half_life_days=EWMA_HALF_LIFE_DAYS):
@@ -235,21 +286,35 @@ def update_user_state(day, half_life_days=EWMA_HALF_LIFE_DAYS):
 
 def backfill_user_state():
     """Idempotently fold every date still represented by daily or retained raw data."""
-    dates = set()
-    dates.update(
-        _dates(db.session.query(BehaviorMetricDaily.date).distinct().all())
-    )
-    for model, timestamp in (
-        (MessageRecord, MessageRecord.created_at),
-        (PingEvent, PingEvent.created_at),
-        (VoiceActivity, VoiceActivity.created_at),
-    ):
-        dates.update(
-            _dates(
-                db.session.query(func.date(timestamp)).distinct().all()
-            )
+    return sum(update_user_state(day) for day in sorted(_source_dates()))
+
+
+def catch_up_user_state(through_day=None, max_days=None):
+    """Fold every missed date up to `through_day`, oldest first.
+
+    Starts the day after the oldest `last_updated_date` (bounded by the oldest
+    surviving source date) so no member is double-counted, and folds at most
+    `max_days` days per call so a single request stays bounded. Dates whose
+    source rows are already gone are skipped and reported, never folded as 0.
+    """
+    through_day = _as_date(through_day or (date.today() - timedelta(days=1)))
+    if max_days is None:
+        max_days = CATCH_UP_MAX_DAYS
+    marker = db.session.query(func.min(UserBehaviorState.last_updated_date)).scalar()
+    candidates, skipped = _catch_up_plan(through_day, marker, max_days)
+    if skipped:
+        logger.warning(
+            "lifetime catch-up skipped %d day(s) with no surviving source data up to %s",
+            skipped,
+            through_day,
         )
-    return sum(update_user_state(day) for day in sorted(dates))
+    folded = []
+    for day in candidates:
+        if len(folded) >= max_days:
+            break
+        if update_user_state(day):
+            folded.append(day.isoformat())
+    return {"folded": len(folded), "skipped_no_source": skipped, "dates": folded}
 
 
 def _rebuild_guild_daily(guild_id, day):
@@ -387,6 +452,28 @@ def rebuild_guild_metrics_daily(guild_id, day):
     return changed
 
 
+def catch_up_guild_metrics_daily(through_day=None, max_days=None):
+    """Rebuild guild aggregates for dates missed since the last computed day."""
+    through_day = _as_date(through_day or (date.today() - timedelta(days=1)))
+    if max_days is None:
+        max_days = CATCH_UP_MAX_DAYS
+    marker = db.session.query(func.max(GuildMetricsDaily.date)).scalar()
+    candidates, skipped = _catch_up_plan(through_day, marker, max_days)
+    if skipped:
+        logger.warning(
+            "guild-metrics catch-up skipped %d day(s) with no surviving source data up to %s",
+            skipped,
+            through_day,
+        )
+    folded = []
+    for day in candidates:
+        if len(folded) >= max_days:
+            break
+        compute_guild_metrics_daily(day)
+        folded.append(day.isoformat())
+    return {"folded": len(folded), "skipped_no_source": skipped, "dates": folded}
+
+
 def _period_bounds(day, period_type):
     if period_type == "weekly":
         start = day - timedelta(days=day.weekday())
@@ -471,3 +558,40 @@ def backfill_behavior_metrics_rollups():
         total += _rebuild_rollup(period_start, period_type)
     db.session.commit()
     return total
+
+
+def catch_up_rollups(through_day=None, max_days=None):
+    """Rebuild the weekly/monthly rollups missed since the last built period.
+
+    The period containing `through_day` is always refreshed (it is still open),
+    plus every period holding a surviving source date after the newest rollup
+    already on record. At most `max_days` periods are rebuilt per call.
+    """
+    through_day = _as_date(through_day or (date.today() - timedelta(days=1)))
+    if max_days is None:
+        max_days = CATCH_UP_MAX_DAYS
+    source = _source_dates()
+    periods = set()
+    for period_type in ("weekly", "monthly"):
+        periods.add((period_type, _period_bounds(through_day, period_type)[0]))
+        if not source:
+            continue
+        oldest = min(source)
+        marker = (
+            db.session.query(func.max(BehaviorMetricsRollup.period_start))
+            .filter_by(period_type=period_type)
+            .scalar()
+        )
+        start = oldest if marker is None else max(_as_date(marker), oldest)
+        for day in source:
+            if start <= day <= through_day:
+                periods.add((period_type, _period_bounds(day, period_type)[0]))
+    ordered = sorted(periods, key=lambda item: (item[1], item[0]))
+    done = []
+    for period_type, period_start in ordered:
+        if len(done) >= max_days:
+            break
+        _rebuild_rollup(period_start, period_type)
+        done.append(f"{period_type}:{period_start.isoformat()}")
+    db.session.commit()
+    return {"folded": len(done), "skipped_no_source": 0, "periods": done}

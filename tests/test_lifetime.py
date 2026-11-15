@@ -21,7 +21,13 @@ from database import (
     db,
 )
 from lifetime.pairs import EDGE_HALF_LIFE_MONTHS, snapshot_pair_month
-from lifetime.state import backfill_user_state, update_user_state
+from lifetime.state import (
+    backfill_user_state,
+    catch_up_guild_metrics_daily,
+    catch_up_rollups,
+    catch_up_user_state,
+    update_user_state,
+)
 
 
 def _message(guild_id, user_id, created_at, length):
@@ -300,3 +306,121 @@ def test_train_all_registers_versioned_artifact(app, monkeypatch, tmp_path):
         assert rows[1].n_samples == 7
         assert os.path.isfile(rows[1].artifact_path)
         assert rows[1].artifact_path != str(artifact)
+
+
+def test_catch_up_folds_missed_days_in_order_and_is_idempotent(app):
+    with app.app_context():
+        days = [date(2026, 10, 1) + timedelta(days=index) for index in range(5)]
+        counts = [2, 4, 6, 8, 10]
+        db.session.add_all(
+            BehaviorMetricDaily(guild_id="g1", user_id="u1", date=day, messages=count)
+            for day, count in zip(days, counts)
+        )
+        db.session.commit()
+
+        first = catch_up_user_state(through_day=days[-1])
+        assert first["folded"] == 5
+        assert first["skipped_no_source"] == 0
+        assert first["dates"] == [day.isoformat() for day in days]
+        state = UserBehaviorState.query.filter_by(guild_id="g1", discord_id="u1").one()
+        assert state.n_days == 5
+        assert state.lifetime_messages == sum(counts)
+        assert state.last_updated_date == days[-1]
+
+        second = catch_up_user_state(through_day=days[-1])
+        assert second["folded"] == 0
+        assert second["dates"] == []
+
+        # a fresh member folded by the batch path lands in the same place
+        db.session.add_all(
+            BehaviorMetricDaily(guild_id="g1", user_id="u2", date=day, messages=count)
+            for day, count in zip(days, counts)
+        )
+        db.session.commit()
+        backfill_user_state()
+        batch = UserBehaviorState.query.filter_by(guild_id="g1", discord_id="u2").one()
+        assert (
+            state.n_days,
+            state.mean_daily_messages,
+            state.m2_daily_messages,
+            state.lifetime_messages,
+            state.last_updated_date,
+        ) == (
+            batch.n_days,
+            batch.mean_daily_messages,
+            batch.m2_daily_messages,
+            batch.lifetime_messages,
+            batch.last_updated_date,
+        )
+
+
+def test_catch_up_cap_continues_on_next_call(app):
+    with app.app_context():
+        days = [date(2026, 9, 1) + timedelta(days=index) for index in range(7)]
+        db.session.add_all(
+            BehaviorMetricDaily(guild_id="g1", user_id="u1", date=day, messages=1)
+            for day in days
+        )
+        db.session.commit()
+
+        first = catch_up_user_state(through_day=days[-1], max_days=3)
+        assert first["folded"] == 3
+        assert first["dates"] == [day.isoformat() for day in days[:3]]
+        assert UserBehaviorState.query.one().n_days == 3
+
+        second = catch_up_user_state(through_day=days[-1], max_days=3)
+        assert second["folded"] == 3
+        assert second["dates"] == [day.isoformat() for day in days[3:6]]
+
+        third = catch_up_user_state(through_day=days[-1], max_days=3)
+        assert third["folded"] == 1
+        assert third["dates"] == [days[6].isoformat()]
+        assert UserBehaviorState.query.one().n_days == 7
+
+
+def test_catch_up_reports_days_with_no_source_data(app):
+    with app.app_context():
+        day0 = date(2026, 8, 1)
+        for offset in (0, 1, 3):
+            db.session.add(
+                BehaviorMetricDaily(
+                    guild_id="g1", user_id="u1", date=day0 + timedelta(days=offset),
+                    messages=1,
+                )
+            )
+        db.session.commit()
+        result = catch_up_user_state(through_day=day0 + timedelta(days=3))
+        assert result["folded"] == 3
+        assert result["skipped_no_source"] == 1  # day0 + 2 has no rows
+
+
+def test_catch_up_guild_metrics_and_rollups(app):
+    with app.app_context():
+        days = [date(2026, 10, 1) + timedelta(days=index) for index in range(5)]
+        db.session.add_all(
+            BehaviorMetricDaily(guild_id="g1", user_id="u1", date=day, messages=2)
+            for day in days
+        )
+        db.session.commit()
+
+        guild = catch_up_guild_metrics_daily(through_day=days[-1])
+        assert guild["folded"] == 5
+        assert GuildMetricsDaily.query.count() == 5
+        assert catch_up_guild_metrics_daily(through_day=days[-1])["folded"] == 0
+
+        rollups = catch_up_rollups(through_day=days[-1])
+        assert rollups["folded"] == 3  # two weeks + one month
+        assert (
+            sum(
+                row.messages
+                for row in BehaviorMetricsRollup.query.filter_by(period_type="weekly")
+            )
+            == 10
+        )
+        assert (
+            sum(
+                row.messages
+                for row in BehaviorMetricsRollup.query.filter_by(period_type="monthly")
+            )
+            == 10
+        )

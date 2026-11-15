@@ -51,9 +51,10 @@ from lifetime.privacy import erase_member_derived_state
 from lifetime.state import (
     backfill_behavior_metrics_rollups,
     backfill_user_state,
+    catch_up_guild_metrics_daily,
+    catch_up_rollups,
+    catch_up_user_state,
     compute_guild_metrics_daily,
-    rebuild_behavior_metrics_rollups,
-    update_user_state,
 )
 
 observer_bp = Blueprint("observer", __name__)
@@ -1843,12 +1844,15 @@ def compute_behavior_metrics_route():
     day = date.fromisoformat(result["date"])
     if not UserBehaviorState.query.first():
         result["state_backfilled"] = backfill_user_state()
-    result["state_updated"] = update_user_state(day)
+    state_catch_up = catch_up_user_state(through_day=day)
+    result["state_updated"] = state_catch_up["folded"]
+    result["state_catch_up"] = state_catch_up
     result["guild_metrics"] = compute_guild_metrics_daily(day)
+    result["guild_metrics_catch_up"] = catch_up_guild_metrics_daily(through_day=day)
     if not BehaviorMetricsRollup.query.first():
         result["rollups_backfilled"] = backfill_behavior_metrics_rollups()
     else:
-        result["rollups"] = rebuild_behavior_metrics_rollups(day)
+        result["rollups"] = catch_up_rollups(through_day=day)
     return jsonify(result), 200
 
 
