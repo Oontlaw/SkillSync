@@ -4,7 +4,16 @@ import math
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 
-from database import PairLifetime, PairScoresHistory, PingEvent, MessageRef, db
+from sqlalchemy import func
+
+from database import (
+    BehaviorMetricDaily,
+    MessageRef,
+    PairLifetime,
+    PairScoresHistory,
+    PingEvent,
+    db,
+)
 from interactions import _baseline_stats, _group_pairs, _pair_rows, opted_out_members
 
 EDGE_HALF_LIFE_MONTHS = 6.0
@@ -32,6 +41,19 @@ def _month_window(month, now=None):
 
 def _active_days(guild_id, start, end, pings, opted_out):
     active = defaultdict(set)
+    daily_query = BehaviorMetricDaily.query.filter(
+        BehaviorMetricDaily.guild_id == guild_id,
+        BehaviorMetricDaily.date >= start.date(),
+    )
+    if end.time() == time.min:
+        daily_query = daily_query.filter(BehaviorMetricDaily.date < end.date())
+    else:
+        daily_query = daily_query.filter(BehaviorMetricDaily.date <= end.date())
+    for row in daily_query.all():
+        if (guild_id, row.user_id) not in opted_out and (
+            row.messages or row.pings_sent
+        ):
+            active[row.user_id].add(row.date.isoformat())
     for (author_id, day) in db.session.query(
         MessageRef.author_id, db.func.date(MessageRef.created_at)
     ).filter(
@@ -85,6 +107,7 @@ def _snapshot_month(month, now=None, replace_existing=True):
                 total_days=month_days,
                 baseline_stats=baseline,
                 voice_guild_ids=[guild_id],
+                include_voice=False,
             )
             for row in pair_rows:
                 directional = [
@@ -146,10 +169,10 @@ def snapshot_pair_month(month=None, now=None):
 def backfill_pair_history(now=None):
     """Backfill months still represented by raw pings, preserving closed snapshots."""
     now = now or datetime.utcnow()
-    months = {
-        _month_start(ping.created_at)
-        for ping in PingEvent.query.with_entities(PingEvent.created_at).all()
-    }
+    months = set()
+    for (value,) in db.session.query(func.date(PingEvent.created_at)).distinct():
+        event_date = date.fromisoformat(value) if isinstance(value, str) else value
+        months.add(_month_start(event_date))
     months.add(_month_start(now.date()))
     updated = 0
     for month in sorted(months):

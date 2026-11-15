@@ -489,10 +489,20 @@ async def behavior_metrics_loop():
 @tasks.loop(hours=6)
 async def message_cleanup_loop():
     """Retrain ML on all data, then delete old messages."""
-    try:
-        await api_post("/observer/ml/retrain", {"trigger": "pre_cleanup"})
-    except Exception as e:
-        print(f"[Cleanup] Retrain error (non-fatal): {e}")
+    # Persist every retention-dependent derived signal before deleting its source rows.
+    for endpoint, payload in (
+        ("/observer/behavior-metrics/compute", {}),
+        ("/observer/recompute-pair-scores", {}),
+        ("/observer/ml/retrain", {"trigger": "pre_cleanup"}),
+    ):
+        try:
+            response = await api_post(endpoint, payload)
+            if response is None:
+                log(f"[Cleanup] Skipping raw cleanup: pre-cleanup job failed ({endpoint})")
+                return
+        except Exception as e:
+            log(f"[Cleanup] Skipping raw cleanup: pre-cleanup job failed ({endpoint}): {e}")
+            return
     try:
         resp = await api_post(
             "/observer/cleanup",

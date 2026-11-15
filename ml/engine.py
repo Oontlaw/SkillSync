@@ -8,10 +8,13 @@ Integration points:
 
 import json
 import os
-from datetime import datetime
+import re
+import shutil
+from datetime import datetime, timedelta
 
 import numpy as np
 
+from database import ModelRegistry, db
 from ml import anomaly, burnout, corrector, federated, forecast, growth
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
@@ -74,6 +77,107 @@ def get_all_accuracy_metrics(days=7):
     return metrics
 
 
+def _register_model_artifact(
+    model_name,
+    artifact_path,
+    result,
+    *,
+    train_days,
+    guild_id=None,
+    n_samples=None,
+    extra_artifact_paths=(),
+):
+    """Version a successfully trained artifact and atomically activate it."""
+    if not os.path.isfile(artifact_path):
+        raise FileNotFoundError(f"Trained model artifact not found: {artifact_path}")
+    guild_id = str(guild_id) if guild_id is not None else None
+    query = ModelRegistry.query.filter_by(model_name=model_name)
+    query = query.filter(
+        ModelRegistry.guild_id.is_(None)
+        if guild_id is None
+        else ModelRegistry.guild_id == guild_id
+    )
+    latest = query.order_by(ModelRegistry.version.desc()).first()
+    version = latest.version + 1 if latest else 1
+    scope = re.sub(r"[^A-Za-z0-9._-]", "_", guild_id or "global")
+    version_dir = os.path.join(
+        MODELS_DIR, "versions", model_name, scope, f"v{version}"
+    )
+    os.makedirs(version_dir, exist_ok=True)
+    versioned_path = os.path.join(version_dir, os.path.basename(artifact_path))
+    shutil.copy2(artifact_path, versioned_path)
+    for path in extra_artifact_paths:
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"Related model artifact not found: {path}")
+        shutil.copy2(path, os.path.join(version_dir, os.path.basename(path)))
+
+    query.update({"is_active": False}, synchronize_session=False)
+    if n_samples is None:
+        n_samples = next(
+            (
+                result[key]
+                for key in ("samples", "users", "workers", "corrections_used", "total_messages")
+                if isinstance(result.get(key), (int, float))
+            ),
+            0,
+        )
+    metrics = {
+        key: value
+        for key, value in result.items()
+        if key not in {"model_path", "artifact_path"}
+    }
+    db.session.add(
+        ModelRegistry(
+            model_name=model_name,
+            version=version,
+            guild_id=guild_id,
+            trained_at=datetime.utcnow(),
+            train_start=datetime.utcnow() - timedelta(days=train_days),
+            train_end=datetime.utcnow(),
+            n_samples=int(n_samples or 0),
+            metrics=json.loads(json.dumps(metrics, default=str)),
+            artifact_path=versioned_path,
+            is_active=True,
+        )
+    )
+    db.session.commit()
+    return versioned_path
+
+
+def _register_if_trained(model_name, result, artifact_path, *, days, **kwargs):
+    if result.get("status") != "trained":
+        return None
+    return _register_model_artifact(
+        model_name, artifact_path, result, train_days=days, **kwargs
+    )
+
+
+def train_growth_all(days=90):
+    """Train and register join/leave models for every guild."""
+    from database import GuildInfo
+
+    results = []
+    for guild in GuildInfo.query.all():
+        try:
+            result = growth.train(guild.guild_id, days=days)
+            if result.get("status") == "trained":
+                for target in ("join", "leave"):
+                    _register_model_artifact(
+                        f"growth_{target}",
+                        growth.model_path("growth", guild.guild_id, target),
+                        result[target],
+                        train_days=days,
+                        guild_id=guild.guild_id,
+                        n_samples=result[target].get("samples"),
+                    )
+            results.append({"guild_id": guild.guild_id, "name": guild.name, **result})
+        except Exception as e:
+            results.append(
+                {"guild_id": guild.guild_id, "status": "error", "error": str(e)}
+            )
+    return results
+
+
 def train_all(days=30, min_msgs=10):
     """Train all ML models and return results."""
     results = {}
@@ -100,12 +204,27 @@ def train_all(days=30, min_msgs=10):
     # 1. Anomaly detection
     try:
         results["anomaly"] = anomaly.train(min_msgs=min_msgs, days=days)
+        _register_if_trained(
+            "anomaly",
+            results["anomaly"],
+            results["anomaly"].get("model_path", anomaly.ANOMALY_MODEL_PATH),
+            days=days,
+            n_samples=results["anomaly"].get("users"),
+        )
     except Exception as e:
         results["anomaly"] = {"status": "error", "error": str(e)}
 
     # 2. Score Corrector (admin correction feedback loop)
     try:
         results["corrector"] = corrector.train(days=days)
+        _register_if_trained(
+            "corrector",
+            results["corrector"],
+            corrector.CORRECTOR_MODEL_PATH,
+            days=days,
+            n_samples=results["corrector"].get("corrections_used"),
+            extra_artifact_paths=(corrector.SCALER_PATH,),
+        )
     except Exception as e:
         results["corrector"] = {"status": "error", "error": str(e)}
 
@@ -123,7 +242,16 @@ def train_all(days=30, min_msgs=10):
         forecast_results = []
         for g in guilds:
             try:
-                forecast_results.append(forecast.train(g.guild_id, days=days))
+                result = forecast.train(g.guild_id, days=days)
+                _register_if_trained(
+                    "forecast",
+                    result,
+                    forecast.model_path("forecast", g.guild_id),
+                    days=days,
+                    guild_id=g.guild_id,
+                    n_samples=result.get("samples"),
+                )
+                forecast_results.append(result)
             except Exception as e:
                 forecast_results.append(
                     {"guild_id": g.guild_id, "status": "error", "error": str(e)}
@@ -138,22 +266,33 @@ def train_all(days=30, min_msgs=10):
     # 5. Federated learning
     try:
         results["federated"] = federated.train_federated(days=days)
+        if results["federated"].get("round"):
+            _register_model_artifact(
+                "federated",
+                federated.GLOBAL_MODEL_PATH,
+                results["federated"],
+                train_days=days,
+                n_samples=results["federated"].get("total_messages"),
+            )
+            for client in results["federated"].get("clients_detail", []):
+                guild_id = str(client["guild_id"])
+                client_path = os.path.join(
+                    federated.CLIENTS_DIR, f"client_{guild_id}.joblib"
+                )
+                _register_model_artifact(
+                    "federated_client",
+                    client_path,
+                    client,
+                    train_days=days,
+                    guild_id=guild_id,
+                    n_samples=client.get("train_count"),
+                )
     except Exception as e:
         results["federated"] = {"status": "error", "error": str(e)}
 
     # 6. Growth models per guild
-    from database import GuildInfo
-
     try:
-        guilds = GuildInfo.query.all()
-        growth_results = []
-        for g in guilds:
-            try:
-                growth_results.append(growth.train(g.guild_id, days=days))
-            except Exception as e:
-                growth_results.append(
-                    {"guild_id": g.guild_id, "status": "error", "error": str(e)}
-                )
+        growth_results = train_growth_all(days=days)
         results["growth"] = {"guilds": len(growth_results), "results": growth_results}
     except Exception as e:
         results["growth"] = {"status": "error", "error": str(e)}
@@ -169,6 +308,12 @@ def train_all(days=30, min_msgs=10):
         for org in orgs:
             try:
                 wr = work_anomaly.train(org_id=org.id, days=days)
+                _register_if_trained(
+                    f"work_anomaly_org_{org.id}",
+                    wr,
+                    os.path.join(MODELS_DIR, f"work_anomaly_{org.id}.joblib"),
+                    days=days,
+                )
                 work_results.append({"org_id": org.id, "result": wr})
             except Exception as e:
                 work_results.append(

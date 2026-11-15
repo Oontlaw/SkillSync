@@ -214,6 +214,7 @@ def _pair_rows(
     voice_guild_ids=None,
     name_map=None,
     global_names=None,
+    include_voice=True,
 ):
     """Build the two directional row dicts for ONE unordered pair.
 
@@ -229,7 +230,11 @@ def _pair_rows(
     last_ping_at = max(p.created_at for p in plist)
 
     channel_count = len({p.channel_id for p in plist})
-    voice = _shared_voice_sessions(voice_guild_ids, a_id, b_id, window_start)
+    voice = (
+        _shared_voice_sessions(voice_guild_ids, a_id, b_id, window_start)
+        if include_voice
+        else 0
+    )
     ordered = sorted(plist, key=lambda p: p.created_at)
 
     # conversation count: gap > 30 min between consecutive pings starts a

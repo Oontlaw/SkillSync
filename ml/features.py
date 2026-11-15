@@ -474,115 +474,79 @@ def community_prior_for_worker(worker_id):
 
 
 def update_user_baselines(days_long=90, days_short=7, min_msgs=5):
-    """Compute and upsert UserBehaviorBaseline for all users with data.
-    Called by engine.train_all() before model training.
-    This is the core of long-term memory — data accumulates forever."""
+    """Refresh lifetime baselines from durable state and short-term raw activity."""
     from scipy.spatial.distance import cosine as cosine_distance
 
-    from database import UserBehaviorBaseline
+    from database import UserBehaviorBaseline, UserBehaviorState
+    from interactions import opted_out_members
 
     now = datetime.utcnow()
-    cutoff_long = now - timedelta(days=days_long)
     cutoff_short = now - timedelta(days=days_short)
-
-    # Get all users with enough data
-    users = (
-        db.session.query(MessageRecord.discord_id, MessageRecord.guild_id)
-        .filter(MessageRecord.created_at >= cutoff_long)
-        .group_by(MessageRecord.discord_id, MessageRecord.guild_id)
-        .having(db.func.count(MessageRecord.id) >= min_msgs)
-        .all()
-    )
+    opted_out = opted_out_members()
+    states = UserBehaviorState.query.filter(
+        UserBehaviorState.lifetime_messages >= min_msgs
+    ).all()
 
     updated = 0
-    for discord_id, guild_id in users:
-        # --- Long-term (90d) profile ---
-        long_rows = (
+    for state in states:
+        discord_id = state.discord_id
+        guild_id = state.guild_id
+        if (guild_id, discord_id) in opted_out or not state.hourly_profile:
+            continue
+        short_rows = (
             MessageRecord.query.filter(
                 MessageRecord.discord_id == discord_id,
                 MessageRecord.guild_id == guild_id,
-                MessageRecord.created_at >= cutoff_long,
+                MessageRecord.created_at >= cutoff_short,
                 MessageRecord.hour_of_day != None,
             )
             .with_entities(
                 MessageRecord.hour_of_day,
-                MessageRecord.message_length,
                 MessageRecord.created_at,
             )
             .all()
         )
-
-        if not long_rows:
-            continue
-
-        # Hourly profile (normalized)
-        hourly_counts = np.zeros(24)
-        for hour, _, _ in long_rows:
-            hourly_counts[hour] += 1
-        total = hourly_counts.sum()
-        hourly_profile = (hourly_counts / max(total, 1)).tolist()
-
-        # Daily stats
-        day_counts = defaultdict(int)
-        for _, _, created in long_rows:
-            day_counts[created.date()] += 1
-        daily_vals = (
-            np.array(list(day_counts.values())) if day_counts else np.array([0])
-        )
-        mean_daily = float(daily_vals.mean())
-        std_daily = float(daily_vals.std()) if len(daily_vals) > 1 else 0.0
-
-        # Message length
-        lengths = np.array([r[1] for r in long_rows if r[1]])
-        mean_length = float(lengths.mean()) if len(lengths) > 0 else 0.0
-
-        # Off-hours ratio (outside 9-17)
-        off_hours = sum(1 for h, _, _ in long_rows if h < 9 or h > 16)
-        off_hours_ratio_90d = off_hours / max(len(long_rows), 1)
-
-        # --- Short-term (7d) stats ---
-        short_rows = [r for r in long_rows if r[2] >= cutoff_short]
         if short_rows:
             short_day_counts = defaultdict(int)
-            for _, _, created in short_rows:
+            for _, created in short_rows:
                 short_day_counts[created.date()] += 1
             short_vals = np.array(list(short_day_counts.values()))
             mean_daily_7d = float(short_vals.mean()) if len(short_vals) > 0 else 0.0
-            off_hours_7d = sum(1 for h, _, _ in short_rows if h < 9 or h > 16)
+            off_hours_7d = sum(1 for h, _ in short_rows if h < 9 or h >= 17)
             off_hours_ratio_7d = off_hours_7d / max(len(short_rows), 1)
+            short_hourly = np.zeros(24)
+            for hour, _ in short_rows:
+                short_hourly[hour] += 1
+            short_profile = short_hourly / short_hourly.sum()
         else:
             mean_daily_7d = 0.0
             off_hours_ratio_7d = 0.0
+            short_profile = None
 
-        # --- Drift signals ---
+        mean_daily = state.mean_daily_messages
+        std_daily = (
+            float(np.sqrt(max(0.0, state.m2_daily_messages / state.n_days)))
+            if state.n_days > 1
+            else 0.0
+        )
+        hourly_profile = state.hourly_profile
+        off_hours_ratio = state.ewma_off_hours_ratio or 0.0
         volume_drift = (mean_daily_7d - mean_daily) / max(std_daily, 1.0)
-
-        # Pattern drift: cosine distance between short-term and long-term hourly profile
-        if short_rows:
-            short_hourly = np.zeros(24)
-            for h, _, _ in short_rows:
-                short_hourly[h] += 1
-            short_total = short_hourly.sum()
-            if short_total > 0 and total > 0:
-                short_profile = short_hourly / short_total
-                try:
-                    pattern_drift = float(
-                        cosine_distance(hourly_profile, short_profile)
-                    )
-                except Exception:
-                    pattern_drift = 0.0
-            else:
-                pattern_drift = 0.0
-        else:
+        try:
+            pattern_drift = (
+                float(cosine_distance(hourly_profile, short_profile))
+                if short_profile is not None
+                and np.linalg.norm(hourly_profile) > 0
+                else 0.0
+            )
+        except Exception:
             pattern_drift = 0.0
 
         is_drifting = abs(volume_drift) > 2.0 or pattern_drift > 0.3
 
-        # Confidence: grows logarithmically with total messages seen
-        total_msgs = len(long_rows)
+        total_msgs = state.lifetime_messages
         confidence = float(min(1.0, np.log1p(total_msgs) / np.log1p(1000)))
 
-        # Upsert
         existing = UserBehaviorBaseline.query.filter_by(
             discord_id=discord_id, guild_id=guild_id
         ).first()
@@ -590,8 +554,8 @@ def update_user_baselines(days_long=90, days_short=7, min_msgs=5):
             existing.hourly_profile_90d = hourly_profile
             existing.mean_daily_msgs_90d = mean_daily
             existing.std_daily_msgs_90d = std_daily
-            existing.mean_msg_length_90d = mean_length
-            existing.off_hours_ratio_90d = off_hours_ratio_90d
+            existing.mean_msg_length_90d = state.ewma_message_length or 0.0
+            existing.off_hours_ratio_90d = off_hours_ratio
             existing.mean_daily_msgs_7d = mean_daily_7d
             existing.off_hours_ratio_7d = off_hours_ratio_7d
             existing.volume_drift = round(volume_drift, 4)
@@ -608,8 +572,8 @@ def update_user_baselines(days_long=90, days_short=7, min_msgs=5):
                     hourly_profile_90d=hourly_profile,
                     mean_daily_msgs_90d=mean_daily,
                     std_daily_msgs_90d=std_daily,
-                    mean_msg_length_90d=mean_length,
-                    off_hours_ratio_90d=off_hours_ratio_90d,
+                    mean_msg_length_90d=state.ewma_message_length or 0.0,
+                    off_hours_ratio_90d=off_hours_ratio,
                     mean_daily_msgs_7d=mean_daily_7d,
                     off_hours_ratio_7d=off_hours_ratio_7d,
                     volume_drift=round(volume_drift, 4),

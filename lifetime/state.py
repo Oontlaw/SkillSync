@@ -98,18 +98,16 @@ def update_user_state(day, half_life_days=EWMA_HALF_LIFE_DAYS):
 
     ping_counts = defaultdict(int)
     ping_first = {}
-    for guild_id, pinger_id, pingee_id, created_at in PingEvent.query.filter(
+    for guild_id, pinger_id, created_at in PingEvent.query.filter(
         PingEvent.created_at >= start, PingEvent.created_at < end
     ).with_entities(
         PingEvent.guild_id,
         PingEvent.pinger_id,
-        PingEvent.pingee_id,
         PingEvent.created_at,
     ):
-        for user_id in {pinger_id, pingee_id}:
-            key = (guild_id, user_id)
-            ping_counts[key] += 1
-            ping_first[key] = min(ping_first.get(key, created_at), created_at)
+        key = (guild_id, pinger_id)
+        ping_counts[key] += 1
+        ping_first[key] = min(ping_first.get(key, created_at), created_at)
 
     voice_totals = {}
     for guild_id, user_id, seconds, first_voice in (
@@ -144,18 +142,17 @@ def update_user_state(day, half_life_days=EWMA_HALF_LIFE_DAYS):
 
         metric = daily.get((guild_id, user_id))
         raw_message = message_totals.get((guild_id, user_id), {})
-        messages = (
-            int(metric.messages)
-            if metric is not None
-            else int(raw_message.get("count", 0))
+        messages = max(
+            int(metric.messages) if metric is not None else 0,
+            int(raw_message.get("count", 0)),
         )
-        pings = ping_counts.get(
-            (guild_id, user_id), int(metric.pings_sent) if metric is not None else 0
+        pings = max(
+            int(metric.pings_sent) if metric is not None else 0,
+            ping_counts.get((guild_id, user_id), 0),
         )
-        voice_hours = (
-            float(metric.voice_hours)
-            if metric is not None
-            else voice_totals.get((guild_id, user_id), (0.0, None))[0]
+        voice_hours = max(
+            float(metric.voice_hours) if metric is not None else 0.0,
+            voice_totals.get((guild_id, user_id), (0.0, None))[0],
         )
         if state is None:
             state = UserBehaviorState(
@@ -300,11 +297,10 @@ def compute_guild_metrics_daily(day):
         .all()
     }
     ping_counts = defaultdict(int)
-    for guild_id, pinger_id, pingee_id in PingEvent.query.filter(
+    for guild_id, pinger_id in PingEvent.query.filter(
         PingEvent.created_at >= start, PingEvent.created_at < end
-    ).with_entities(PingEvent.guild_id, PingEvent.pinger_id, PingEvent.pingee_id):
+    ).with_entities(PingEvent.guild_id, PingEvent.pinger_id):
         ping_counts[(guild_id, pinger_id)] += 1
-        ping_counts[(guild_id, pingee_id)] += 1
     voice_hours = {
         (guild_id, user_id): float(seconds or 0.0) / 3600.0
         for guild_id, user_id, seconds in db.session.query(
@@ -345,20 +341,17 @@ def compute_guild_metrics_daily(day):
         if (guild_id, user_id) in opted_out:
             continue
         metric = metrics.get((guild_id, user_id))
-        messages = (
-            int(metric.messages)
-            if metric is not None
-            else message_counts.get((guild_id, user_id), 0)
+        messages = max(
+            int(metric.messages) if metric is not None else 0,
+            message_counts.get((guild_id, user_id), 0),
         )
-        pings = (
-            int(metric.pings_sent)
-            if metric is not None
-            else ping_counts.get((guild_id, user_id), 0)
+        pings = max(
+            int(metric.pings_sent) if metric is not None else 0,
+            ping_counts.get((guild_id, user_id), 0),
         )
-        voice = (
-            float(metric.voice_hours)
-            if metric is not None
-            else voice_hours.get((guild_id, user_id), 0.0)
+        voice = max(
+            float(metric.voice_hours) if metric is not None else 0.0,
+            voice_hours.get((guild_id, user_id), 0.0),
         )
         joins, leaves = joins_leaves.get((guild_id, user_id), (0, 0))
         contributions.append(
@@ -385,26 +378,6 @@ def compute_guild_metrics_daily(day):
         _rebuild_guild_daily(guild_id, day)
     db.session.commit()
     return {"guilds": len(guild_ids), "contributions": len(contributions)}
-
-
-def backfill_guild_metrics_daily():
-    """Build per-member sources for every date still represented by raw/daily data."""
-    dates = set()
-    dates.update(
-        _dates(db.session.query(BehaviorMetricDaily.date).distinct().all())
-    )
-    for model, timestamp in (
-        (MessageRecord, MessageRecord.created_at),
-        (PingEvent, PingEvent.created_at),
-        (VoiceActivity, VoiceActivity.created_at),
-        (MemberJoinLeave, MemberJoinLeave.created_at),
-    ):
-        dates.update(
-            _dates(db.session.query(func.date(timestamp)).distinct().all())
-        )
-    return sum(
-        compute_guild_metrics_daily(day)["contributions"] for day in sorted(dates)
-    )
 
 
 def rebuild_guild_metrics_daily(guild_id, day):
