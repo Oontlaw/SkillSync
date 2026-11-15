@@ -20,7 +20,11 @@ from database import (
     UserBehaviorState,
     db,
 )
-from lifetime.pairs import EDGE_HALF_LIFE_MONTHS, snapshot_pair_month
+from lifetime.pairs import (
+    EDGE_HALF_LIFE_MONTHS,
+    backfill_pair_history,
+    snapshot_pair_month,
+)
 from lifetime.state import (
     backfill_user_state,
     catch_up_guild_metrics_daily,
@@ -489,3 +493,79 @@ def test_pruning_keeps_best_version_by_primary_metric(app, monkeypatch, tmp_path
         }
         assert kept == {2, 4, 5}  # best (v2) + newest 2 (v4, v5)
         assert all(row.pruned_at is not None for row in rows if row.version in {1, 3})
+
+
+def _october_pings():
+    return [
+        PingEvent(
+            guild_id="g1", pinger_id="A", pingee_id="B", channel_id="c1",
+            message_id=f"fp{index}", ping_type="mention", addressed=True,
+            first_response_at=datetime(2026, 10, 5) + timedelta(days=index, minutes=5),
+            created_at=datetime(2026, 10, 5) + timedelta(days=index),
+        )
+        for index in range(6)
+    ]
+
+
+def test_closed_month_is_finalized_once_and_frozen(app):
+    with app.app_context():
+        db.session.add_all(_october_pings())
+        db.session.commit()
+        backfill_pair_history(now=datetime(2026, 11, 5, 12))
+        month = date(2026, 10, 1)
+        rows = PairScoresHistory.query.filter_by(month=month).all()
+        assert rows and all(row.finalized for row in rows)
+        snapshot = sorted(
+            (row.pinger_id, row.pingee_id, row.sample_size) for row in rows
+        )
+
+        # a later run neither rewrites nor unfreezes the finalized month
+        db.session.add(
+            PingEvent(
+                guild_id="g1", pinger_id="A", pingee_id="B", channel_id="c1",
+                message_id="late", ping_type="mention", addressed=True,
+                created_at=datetime(2026, 10, 30),
+                first_response_at=datetime(2026, 10, 30, 0, 5),
+            )
+        )
+        db.session.commit()
+        backfill_pair_history(now=datetime(2026, 11, 20, 12))
+        rows = PairScoresHistory.query.filter_by(month=month).all()
+        assert all(row.finalized for row in rows)
+        assert sorted(
+            (row.pinger_id, row.pingee_id, row.sample_size) for row in rows
+        ) == snapshot
+
+
+def test_snapshot_pair_month_refuses_to_replace_without_raw_pings(app):
+    with app.app_context():
+        month = date(2026, 10, 1)
+        db.session.add(
+            PairScoresHistory(
+                guild_id="g1", pinger_id="A", pingee_id="B", month=month,
+                sample_size=5,
+            )
+        )
+        db.session.commit()
+        result = snapshot_pair_month(month=month, now=datetime(2026, 11, 5, 12))
+        assert result["skipped"] == "no_raw_pings"
+        assert PairScoresHistory.query.filter_by(month=month).count() == 1
+
+
+def test_snapshot_pair_month_refuses_to_replace_finalized_month(app):
+    with app.app_context():
+        month = date(2026, 10, 1)
+        db.session.add_all(_october_pings())
+        db.session.add(
+            PairScoresHistory(
+                guild_id="g1", pinger_id="A", pingee_id="B", month=month,
+                sample_size=1, finalized=True,
+            )
+        )
+        db.session.commit()
+        result = snapshot_pair_month(month=month, now=datetime(2026, 11, 5, 12))
+        assert result["skipped"] == "finalized"
+        row = PairScoresHistory.query.filter_by(
+            month=month, pinger_id="A", pingee_id="B"
+        ).one()
+        assert row.sample_size == 1

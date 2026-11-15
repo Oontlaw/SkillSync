@@ -70,11 +70,33 @@ def _active_days(guild_id, start, end, pings, opted_out):
     return active
 
 
-def _snapshot_month(month, now=None, replace_existing=True):
+def _month_has_raw_pings(start, end):
+    return (
+        db.session.query(PingEvent.id)
+        .filter(PingEvent.created_at >= start, PingEvent.created_at < end)
+        .first()
+        is not None
+    )
+
+
+def _finalize_month(month):
+    rows = PairScoresHistory.query.filter_by(month=month).all()
+    for row in rows:
+        row.finalized = True
+    return len(rows)
+
+
+def _snapshot_month(month, now=None, replace_existing=True, finalize=False):
     month, start, end = _month_window(month, now)
+    existing = PairScoresHistory.query.filter_by(month=month).all()
+    if replace_existing and any(row.finalized for row in existing):
+        return {"month": month.isoformat(), "pairs": 0, "skipped": "finalized"}
     pings = PingEvent.query.filter(
         PingEvent.created_at >= start, PingEvent.created_at < end
     ).all()
+    if replace_existing and existing and not pings:
+        # raw pings were purged; refuse so a direct call cannot delete history
+        return {"month": month.isoformat(), "pairs": 0, "skipped": "no_raw_pings"}
     guild_ids = {ping.guild_id for ping in pings}
     opted_out = opted_out_members(guild_ids)
     pings = [
@@ -134,22 +156,23 @@ def _snapshot_month(month, now=None, replace_existing=True):
                 ].extend(directional)
 
     if replace_existing:
-        existing = {
-            (row.guild_id, row.pinger_id, row.pingee_id): row
-            for row in PairScoresHistory.query.filter_by(month=month).all()
+        existing_by_key = {
+            (row.guild_id, row.pinger_id, row.pingee_id): row for row in existing
         }
         present = set()
         for values in rows:
             key = (values["guild_id"], values["pinger_id"], values["pingee_id"])
             present.add(key)
-            row = existing.get(key)
+            row = existing_by_key.get(key)
             if row is None:
-                db.session.add(PairScoresHistory(**values))
+                row = PairScoresHistory(**values)
+                db.session.add(row)
             else:
                 for name, value in values.items():
                     if name != "month":
                         setattr(row, name, value)
-        for key, row in existing.items():
+            row.finalized = finalize
+        for key, row in existing_by_key.items():
             if key not in present:
                 db.session.delete(row)
 
@@ -167,7 +190,7 @@ def snapshot_pair_month(month=None, now=None):
 
 
 def backfill_pair_history(now=None):
-    """Backfill months still represented by raw pings, preserving closed snapshots."""
+    """Backfill months still represented by raw pings; finalize closed ones."""
     now = now or datetime.utcnow()
     months = set()
     for (value,) in db.session.query(func.date(PingEvent.created_at)).distinct():
@@ -176,10 +199,19 @@ def backfill_pair_history(now=None):
     months.add(_month_start(now.date()))
     updated = 0
     for month in sorted(months):
-        if (month.year, month.month) != (now.year, now.month):
-            if PairScoresHistory.query.filter_by(month=month).first():
-                continue
-        updated += _snapshot_month(month, now=now)["pairs"]
+        if (month.year, month.month) == (now.year, now.month):
+            updated += _snapshot_month(month, now=now)["pairs"]
+            continue
+        rows = PairScoresHistory.query.filter_by(month=month).all()
+        if rows and all(row.finalized for row in rows):
+            continue
+        start, end = _month_window(month, now)[1:]
+        if _month_has_raw_pings(start, end):
+            # one last snapshot of the just-closed month, then freeze it
+            updated += _snapshot_month(month, now=now, finalize=True)["pairs"]
+        elif rows:
+            _finalize_month(month)
+    db.session.commit()
     return updated
 
 
