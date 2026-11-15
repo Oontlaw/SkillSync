@@ -47,7 +47,7 @@ from ml import unaddressed as ml_unaddressed
 from interactions import recompute_pair_scores, recompute_user_metrics, resolve_pending_pings
 from behavior_metrics import compute_behavior_metrics
 from lifetime.pairs import backfill_pair_history
-from lifetime.privacy import erase_member_derived_state
+from lifetime.privacy import erase_departed_members, erase_member_derived_state
 from lifetime.state import (
     backfill_behavior_metrics_rollups,
     backfill_user_state,
@@ -1853,6 +1853,7 @@ def compute_behavior_metrics_route():
         result["rollups_backfilled"] = backfill_behavior_metrics_rollups()
     else:
         result["rollups"] = catch_up_rollups(through_day=day)
+    result["leave_erasure"] = erase_departed_members()
     return jsonify(result), 200
 
 

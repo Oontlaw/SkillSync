@@ -160,8 +160,11 @@ patterns) is profiling — it is governed by an explicit consent model:
   interaction graph, user behavior metrics, and voice-only bonds. Their
   lifetime state, pair history, and per-member rollups are erased; guild-day
   totals are rebuilt without their retained numeric contributions.
-- **Member leave**: leaving is recorded under the existing event-retention
-  policy and does not itself erase consented lifetime state.
+- **Member leave**: leaving schedules derived-state erasure after
+  `LEAVE_ERASURE_GRACE_DAYS` (default 30; 0 = erase immediately; -1 = never).
+  A `join` before the grace expires cancels it. Once the grace passes, the
+  member's lifetime state, pair history, and per-member rollups are erased by
+  the daily behavior-metrics job; guild-day totals are rebuilt without them.
 - **What is captured (metadata only, never text)**: directed 1:1 pings,
   content-free message pointers, voice session durations, presence
   transitions, moderation actions.

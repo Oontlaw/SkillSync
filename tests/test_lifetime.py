@@ -10,6 +10,7 @@ from database import (
     GuildMember,
     GuildMetricsContributionDaily,
     GuildMetricsDaily,
+    MemberJoinLeave,
     MessageRecord,
     PairLifetime,
     PairScore,
@@ -25,6 +26,7 @@ from lifetime.pairs import (
     backfill_pair_history,
     snapshot_pair_month,
 )
+from lifetime.privacy import erase_departed_members
 from lifetime.state import (
     backfill_user_state,
     catch_up_guild_metrics_daily,
@@ -569,3 +571,68 @@ def test_snapshot_pair_month_refuses_to_replace_finalized_month(app):
             month=month, pinger_id="A", pingee_id="B"
         ).one()
         assert row.sample_size == 1
+
+
+def _leave_event(member_id, event_type, days_ago):
+    return MemberJoinLeave(
+        guild_id="g1",
+        member_id=member_id,
+        member_name=member_id,
+        event_type=event_type,
+        created_at=datetime.utcnow() - timedelta(days=days_ago),
+    )
+
+
+def _state_row(member_id):
+    return UserBehaviorState(
+        guild_id="g1", discord_id=member_id, n_days=1, mean_daily_messages=1,
+        m2_daily_messages=0, lifetime_messages=1, lifetime_pings=0,
+        lifetime_voice_hours=0, schema_version=1,
+    )
+
+
+def test_leave_grace_expiry_erases_derived_state(app):
+    with app.app_context():
+        day = date.today() - timedelta(days=1)
+        db.session.add_all(
+            [
+                _leave_event("u1", "leave", 40),
+                _state_row("u1"),
+                BehaviorMetricDaily(guild_id="g1", user_id="u1", date=day, messages=1),
+            ]
+        )
+        db.session.commit()
+        result = erase_departed_members(grace_days=30)
+        assert result["erased"] == 1
+        assert UserBehaviorState.query.count() == 0
+        assert BehaviorMetricDaily.query.count() == 0
+
+
+def test_rejoin_within_grace_cancels_erasure(app):
+    with app.app_context():
+        db.session.add_all(
+            [
+                _leave_event("u1", "leave", 40),
+                _leave_event("u1", "join", 2),
+                _state_row("u1"),
+            ]
+        )
+        db.session.commit()
+        assert erase_departed_members(grace_days=30)["erased"] == 0
+        assert UserBehaviorState.query.count() == 1
+
+
+def test_recent_leave_inside_grace_is_kept(app):
+    with app.app_context():
+        db.session.add_all([_leave_event("u1", "leave", 5), _state_row("u1")])
+        db.session.commit()
+        assert erase_departed_members(grace_days=30)["erased"] == 0
+        assert UserBehaviorState.query.count() == 1
+
+
+def test_grace_minus_one_never_erases(app):
+    with app.app_context():
+        db.session.add_all([_leave_event("u1", "leave", 400), _state_row("u1")])
+        db.session.commit()
+        assert erase_departed_members(grace_days=-1)["erased"] == 0
+        assert UserBehaviorState.query.count() == 1

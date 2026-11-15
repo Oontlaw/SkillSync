@@ -1,12 +1,16 @@
-"""Erasure helpers for consent withdrawal."""
+"""Erasure helpers for consent withdrawal and member departure."""
 
-from sqlalchemy import or_
+import os
+from datetime import datetime, timedelta
+
+from sqlalchemy import func, or_
 
 from database import (
     BehavioralAnomaly,
     BehaviorMetricDaily,
     BehaviorMetricsRollup,
     GuildMetricsContributionDaily,
+    MemberJoinLeave,
     PairLifetime,
     PairScore,
     PairScoresHistory,
@@ -16,6 +20,8 @@ from database import (
     db,
 )
 from lifetime.state import _rebuild_guild_daily
+
+LEAVE_ERASURE_GRACE_DAYS = int(os.getenv("LEAVE_ERASURE_GRACE_DAYS", "30"))
 
 
 def erase_member_derived_state(guild_id, discord_id):
@@ -71,3 +77,45 @@ def erase_member_derived_state(guild_id, discord_id):
     erased["guild_metrics_daily_rebuilt"] = rebuilt
     db.session.commit()
     return erased
+
+
+def erase_departed_members(now=None, grace_days=None):
+    """Erase derived state for members whose leave grace period has expired.
+
+    Reads each member's latest join/leave event, so a rejoin inside the grace
+    window cancels the pending erasure. `grace_days` < 0 disables the policy.
+    """
+    if grace_days is None:
+        grace_days = LEAVE_ERASURE_GRACE_DAYS
+    if grace_days < 0:
+        return {"erased": 0, "members": [], "policy": "disabled"}
+    now = now or datetime.utcnow()
+    cutoff = now - timedelta(days=grace_days)
+    ranked = (
+        db.session.query(
+            MemberJoinLeave.guild_id,
+            MemberJoinLeave.member_id,
+            MemberJoinLeave.event_type,
+            MemberJoinLeave.created_at,
+            func.row_number()
+            .over(
+                partition_by=(MemberJoinLeave.guild_id, MemberJoinLeave.member_id),
+                order_by=(
+                    MemberJoinLeave.created_at.desc(),
+                    MemberJoinLeave.id.desc(),
+                ),
+            )
+            .label("rn"),
+        )
+        .filter(MemberJoinLeave.is_bot.is_(False))
+        .subquery()
+    )
+    erased = []
+    for guild_id, member_id, event_type, created_at in db.session.query(
+        ranked.c.guild_id, ranked.c.member_id, ranked.c.event_type, ranked.c.created_at
+    ).filter(ranked.c.rn == 1):
+        if event_type != "leave" or created_at is None or created_at > cutoff:
+            continue
+        erase_member_derived_state(guild_id, member_id)
+        erased.append({"guild_id": guild_id, "discord_id": member_id})
+    return {"erased": len(erased), "members": erased}
