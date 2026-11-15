@@ -424,3 +424,68 @@ def test_catch_up_guild_metrics_and_rollups(app):
             )
             == 10
         )
+
+
+def test_prunes_old_model_versions_but_keeps_registry_rows(app, monkeypatch, tmp_path):
+    import ml.engine as engine
+
+    with app.app_context():
+        models_dir = tmp_path / "models"
+        models_dir.mkdir()
+        artifact = models_dir / "anomaly.joblib"
+        monkeypatch.setattr(engine, "MODELS_DIR", str(models_dir))
+        monkeypatch.setattr(engine, "MODEL_VERSIONS_KEEP", 3)
+
+        def register():
+            artifact.write_bytes(b"model")
+            return engine._register_model_artifact(
+                "anomaly", str(artifact), {"status": "trained", "users": 1},
+                train_days=1,
+            )
+
+        for _ in range(8):
+            register()
+
+        rows = ModelRegistry.query.filter_by(model_name="anomaly").order_by(
+            ModelRegistry.version
+        ).all()
+        assert [row.version for row in rows] == list(range(1, 9))
+        assert [row.version for row in rows if row.is_active] == [8]
+        for row in rows:
+            exists = os.path.isdir(os.path.dirname(row.artifact_path))
+            if row.version >= 6:  # active + the 2 newest
+                assert exists, row.version
+                assert row.pruned_at is None
+            else:
+                assert not exists, row.version
+                assert row.pruned_at is not None
+
+
+def test_pruning_keeps_best_version_by_primary_metric(app, monkeypatch, tmp_path):
+    import ml.engine as engine
+
+    with app.app_context():
+        models_dir = tmp_path / "models"
+        models_dir.mkdir()
+        artifact = models_dir / "forecast.joblib"
+        monkeypatch.setattr(engine, "MODELS_DIR", str(models_dir))
+        monkeypatch.setattr(engine, "MODEL_VERSIONS_KEEP", 2)
+
+        for score in (0.1, 0.9, 0.2, 0.3, 0.4):
+            artifact.write_bytes(b"model")
+            engine._register_model_artifact(
+                "forecast", str(artifact),
+                {"status": "trained", "samples": 5, "r2_score": score},
+                train_days=1, guild_id="g1",
+            )
+
+        rows = ModelRegistry.query.filter_by(
+            model_name="forecast", guild_id="g1"
+        ).order_by(ModelRegistry.version).all()
+        kept = {
+            row.version
+            for row in rows
+            if os.path.isdir(os.path.dirname(row.artifact_path))
+        }
+        assert kept == {2, 4, 5}  # best (v2) + newest 2 (v4, v5)
+        assert all(row.pruned_at is not None for row in rows if row.version in {1, 3})

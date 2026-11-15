@@ -19,6 +19,18 @@ from ml import anomaly, burnout, corrector, federated, forecast, growth
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 TRAINING_HISTORY_PATH = os.path.join(MODELS_DIR, "training_history.json")
+MODEL_VERSIONS_KEEP = int(os.getenv("MODEL_VERSIONS_KEEP", "5"))
+
+# Higher-is-better metric used to keep the best version of each model. Models
+# without a quality metric (anomaly counts, not scores) keep none.
+PRIMARY_METRIC = {
+    "corrector": "r2_score",
+    "forecast": "r2_score",
+    "growth_join": "r2_score",
+    "growth_leave": "r2_score",
+    "federated": "mean_global_accuracy",
+    "federated_client": "global_accuracy",
+}
 
 
 def _load_training_history():
@@ -75,6 +87,62 @@ def get_all_accuracy_metrics(days=7):
     except Exception as e:
         metrics["burnout"] = {"error": str(e)}
     return metrics
+
+
+def _primary_metric_value(row):
+    name = PRIMARY_METRIC.get(row.model_name)
+    if not name or not isinstance(row.metrics, dict):
+        return None
+    value = row.metrics.get(name)
+    return value if isinstance(value, (int, float)) else None
+
+
+def _prune_model_versions(model_name, guild_id, keep=None):
+    """Delete old artifact dirs for one (model, scope); registry rows survive.
+
+    Keeps the active version, the `keep` newest, and the best by primary metric.
+    Never removes the active version's directory.
+    """
+    if keep is None:
+        keep = MODEL_VERSIONS_KEEP
+    keep = max(1, int(keep))
+    query = ModelRegistry.query.filter_by(model_name=model_name)
+    query = query.filter(
+        ModelRegistry.guild_id.is_(None)
+        if guild_id is None
+        else ModelRegistry.guild_id == guild_id
+    )
+    rows = query.order_by(ModelRegistry.version.desc()).all()
+    active = next((row for row in rows if row.is_active), None)
+    keep_ids = {row.id for row in rows[:keep]}
+    if active is not None:
+        keep_ids.add(active.id)
+    best = None
+    for row in rows:
+        value = _primary_metric_value(row)
+        if value is not None and (best is None or value > best[0]):
+            best = (value, row.id)
+    if best is not None:
+        keep_ids.add(best[1])
+
+    versions_root = os.path.abspath(os.path.join(MODELS_DIR, "versions"))
+    pruned = 0
+    for row in rows:
+        if row.id in keep_ids:
+            continue
+        if row.pruned_at is None:
+            row.pruned_at = datetime.utcnow()
+        version_dir = os.path.dirname(row.artifact_path or "")
+        if (
+            version_dir
+            and os.path.abspath(version_dir).startswith(versions_root + os.sep)
+            and os.path.isdir(version_dir)
+        ):
+            shutil.rmtree(version_dir, ignore_errors=True)
+        pruned += 1
+    if pruned:
+        db.session.commit()
+    return pruned
 
 
 def _register_model_artifact(
@@ -141,6 +209,7 @@ def _register_model_artifact(
         )
     )
     db.session.commit()
+    _prune_model_versions(model_name, guild_id)
     return versioned_path
 
 
