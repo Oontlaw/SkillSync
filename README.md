@@ -157,15 +157,20 @@ patterns) is profiling — it is governed by an explicit consent model:
   and self-service.
 - **What opt-out means**: their pings are dropped at ingest (never stored in
   `ping_events`/`message_refs`), they are excluded from pair scores, the
-  interaction graph, user behavior metrics, and voice-only bonds. Existing
-  profiling rows for that server are deleted at the moment of opt-out.
+  interaction graph, user behavior metrics, and voice-only bonds. Their
+  lifetime state, pair history, and per-member rollups are erased; guild-day
+  totals are rebuilt without their retained numeric contributions.
+- **Member leave**: leaving is recorded under the existing event-retention
+  policy and does not itself erase consented lifetime state.
 - **What is captured (metadata only, never text)**: directed 1:1 pings,
   content-free message pointers, voice session durations, presence
   transitions, moderation actions.
-- **Retention horizons** (purged every 6h and on bot start): messages 90d
+- **Retention horizons** (purged every 6h and on bot start): messages 180d
   (env `MESSAGE_RETENTION_DAYS`), pings 90d (`PING_RETENTION_DAYS`),
   message refs 14d, voice sessions and join events 180d
   (`VOICE_RETENTION_DAYS` / `JOIN_EVENT_RETENTION_DAYS`).
+- **Lifetime behavior state** is updated from daily metadata before cleanup;
+  EWMA fields use `LIFETIME_EWMA_HALF_LIFE_DAYS` (default 30).
 - **Corrector v2**: the score-corrector model was rebuilt without target-
   leaking features (version 2). Delete `ml/models/score_corrector.joblib`
   to force an immediate retrain; otherwise the next training cycle replaces

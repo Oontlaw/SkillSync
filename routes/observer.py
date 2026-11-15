@@ -20,9 +20,9 @@ from database import (
     GuildInfo,
     GuildMember,
     GuildRole,
-    BehaviorMetricDaily,
+    BehaviorMetricsRollup,
     PredictionLog,
-    UserBehaviorMetric,
+    UserBehaviorState,
     MemberJoinLeave,
     MentionRecord,
     MessageRef,
@@ -46,6 +46,15 @@ from ml import growth as ml_growth
 from ml import unaddressed as ml_unaddressed
 from interactions import recompute_pair_scores, recompute_user_metrics, resolve_pending_pings
 from behavior_metrics import compute_behavior_metrics
+from lifetime.pairs import backfill_pair_history
+from lifetime.privacy import erase_member_derived_state
+from lifetime.state import (
+    backfill_behavior_metrics_rollups,
+    backfill_user_state,
+    compute_guild_metrics_daily,
+    rebuild_behavior_metrics_rollups,
+    update_user_state,
+)
 
 observer_bp = Blueprint("observer", __name__)
 
@@ -1723,8 +1732,11 @@ def update_consent():
     member.consent_updated_at = datetime.utcnow()
     member.consent_source = sanitize_str(data.get("source"), 50) or "bot-command"
     purged = {}
-    if not optin and data.get("purge", True):
+    if not optin:
         # opting out erases the member's profiling rows in this guild
+        purged.update(erase_member_derived_state(guild_id, discord_id))
+        purged["user_metrics"] = purged.pop("user_behavior_metrics")
+        purged["daily_metrics"] = purged.pop("behavior_metrics_daily")
         purged["pings"] = PingEvent.query.filter(
             PingEvent.guild_id == guild_id,
             (PingEvent.pinger_id == discord_id) | (PingEvent.pingee_id == discord_id),
@@ -1736,14 +1748,6 @@ def update_consent():
         purged["voice"] = VoiceActivity.query.filter(
             VoiceActivity.guild_id == guild_id,
             VoiceActivity.discord_id == discord_id,
-        ).delete(synchronize_session=False)
-        purged["user_metrics"] = UserBehaviorMetric.query.filter(
-            UserBehaviorMetric.guild_id == guild_id,
-            UserBehaviorMetric.discord_id == discord_id,
-        ).delete(synchronize_session=False)
-        purged["daily_metrics"] = BehaviorMetricDaily.query.filter(
-            BehaviorMetricDaily.guild_id == guild_id,
-            BehaviorMetricDaily.user_id == discord_id,
         ).delete(synchronize_session=False)
         purged["broadcasts"] = PingJoinEvent.query.filter(
             PingJoinEvent.guild_id == guild_id,
@@ -1836,6 +1840,15 @@ def compute_behavior_metrics_route():
         except ValueError:
             return jsonify({"error": "Invalid date, expected YYYY-MM-DD"}), 400
     result = compute_behavior_metrics(day=day)
+    day = date.fromisoformat(result["date"])
+    if not UserBehaviorState.query.first():
+        result["state_backfilled"] = backfill_user_state()
+    result["state_updated"] = update_user_state(day)
+    result["guild_metrics"] = compute_guild_metrics_daily(day)
+    if not BehaviorMetricsRollup.query.first():
+        result["rollups_backfilled"] = backfill_behavior_metrics_rollups()
+    else:
+        result["rollups"] = rebuild_behavior_metrics_rollups(day)
     return jsonify(result), 200
 
 
@@ -1846,6 +1859,7 @@ def recompute_pair_scores_route():
     unaddressed_rate) and user_behavior_metrics from the trailing window."""
     result = recompute_pair_scores()
     result["users"] = recompute_user_metrics()["users"]
+    result["lifetime_pairs"] = backfill_pair_history()
     return jsonify(result), 200
 
 
@@ -2344,7 +2358,7 @@ def ml_growth_train_all():
     """Train growth models for all guilds."""
     data = request.json or {}
     days = int(data.get("days", 90))
-    results = ml_growth.train_all_guilds(days=days)
+    results = ml_engine.train_growth_all(days=days)
     return jsonify({"results": results})
 
 
