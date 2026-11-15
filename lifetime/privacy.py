@@ -116,6 +116,8 @@ def erase_departed_members(now=None, grace_days=None):
     ).filter(ranked.c.rn == 1):
         if event_type != "leave" or created_at is None or created_at > cutoff:
             continue
+        # shortcut: erased members are re-scanned each run (deletes are no-ops);
+        # add a marker if the departed set grows large
         erase_member_derived_state(guild_id, member_id)
         erased.append({"guild_id": guild_id, "discord_id": member_id})
     return {"erased": len(erased), "members": erased}
